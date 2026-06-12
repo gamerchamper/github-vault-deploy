@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><!-- PAGE_TITLE --> — GitHub Vault</title>
+  <link rel="stylesheet" href="/css/explorer.css">
+  <link rel="stylesheet" href="/css/playlists.css">
+  <link rel="stylesheet" href="/css/share.css">
+</head>
+<body class="share-body vault-scroll">
+  <div id="playlist-share-app" class="playlist-share-app">
+    <div id="share-loading" class="share-loading">Loading playlist...</div>
+    <div id="share-content" class="hidden">
+      <div class="curated-hero playlist-share-hero">
+        <div class="curated-hero-art" id="share-cover"></div>
+        <div class="curated-hero-body">
+          <span class="curated-hero-eyebrow">Playlist</span>
+          <h1 class="curated-hero-title" id="share-title"></h1>
+          <p class="curated-hero-desc" id="share-desc"></p>
+          <div class="curated-hero-stats" id="share-stats"></div>
+          <div class="share-owner-row" id="share-owner"></div>
+          <div class="curated-hero-actions">
+            <button type="button" class="btn-primary" id="btn-play-all">▶ Play all</button>
+          </div>
+        </div>
+      </div>
+      <div id="share-items" class="playlist-share-items vault-scroll"></div>
+    </div>
+    <p id="share-error" class="share-error hidden"></p>
+  </div>
+  <script src="/js/hls.min.js"></script>
+  <script src="/js/plyr.polyfilled.min.js"></script>
+  <script src="/js/media-player.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/playback-memory.js"></script>
+  <script src="/js/chunk-blocks.js"></script>
+  <script src="/js/playlist-queue.js"></script>
+  <script src="/js/playlist-player.js"></script>
+  <script src="/js/share-viewer.js"></script>
+  <script>
+    const token = location.pathname.split('/').pop();
+    const params = new URLSearchParams(location.search);
+    let playlist = null;
+
+    function thumbUrl(id) {
+      return `/api/public/share/${token}/thumbnail?file=${id}`;
+    }
+
+    async function load() {
+      try {
+        playlist = await API.playlists.publicPlaylist(token);
+        document.getElementById('share-loading').classList.add('hidden');
+        document.getElementById('share-content').classList.remove('hidden');
+        document.title = playlist.title + ' — GitHub Vault';
+        document.getElementById('share-title').textContent = playlist.title;
+        document.getElementById('share-desc').textContent = playlist.description || '';
+        document.getElementById('share-stats').textContent =
+          `${playlist.item_count || 0} items`;
+        const cover = document.getElementById('share-cover');
+        if (playlist.cover_thumbnail_id) {
+          cover.innerHTML = `<img src="/api/public/playlist/${token}/thumbnail?file=${playlist.cover_thumbnail_id}" alt="">`;
+        }
+        document.getElementById('share-owner').innerHTML = playlist.owner_name
+          ? `<span>Shared by <strong>${playlist.owner_name}</strong></span>` : '';
+        renderItems();
+        document.getElementById('btn-play-all').onclick = () => playItem(playlist.items[0]?.id);
+        const startFile = params.get('file');
+        if (startFile) playItem(startFile);
+      } catch (err) {
+        document.getElementById('share-loading').classList.add('hidden');
+        const el = document.getElementById('share-error');
+        el.textContent = err.message || 'Playlist not found';
+        el.classList.remove('hidden');
+      }
+    }
+
+    function renderItems() {
+      const list = document.getElementById('share-items');
+      list.innerHTML = '';
+      (playlist.items || []).forEach((file, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'playlist-queue-item';
+        btn.innerHTML = `
+          <div class="playlist-queue-thumb">${file.has_thumbnail ? `<img src="/api/public/playlist/${token}/thumbnail?file=${file.id}" alt="">` : (i + 1)}</div>
+          <div class="playlist-queue-body">
+            <span class="playlist-queue-name">${file.name}</span>
+            <span class="playlist-queue-meta">${formatSize(file.size)}</span>
+          </div>`;
+        btn.onclick = () => playItem(file.id);
+        list.appendChild(btn);
+      });
+    }
+
+    function playItem(fileId) {
+      const file = playlist.items.find((f) => f.id === fileId);
+      if (!file) return;
+      PlaylistQueue.setFromPlaylist(playlist, fileId, { isPublic: true, publicToken: token });
+      const url = new URL(location.href);
+      url.searchParams.set('file', fileId);
+      history.replaceState({}, '', url);
+      window.open(`/api/public/playlist/${token}/stream?file=${file.id}`, '_blank');
+    }
+
+    function formatSize(n) {
+      if (!n) return '0 B';
+      const u = ['B','KB','MB','GB'];
+      let i = 0; let v = n;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return v.toFixed(i ? 1 : 0) + ' ' + u[i];
+    }
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,378 @@
+const express = require('express');
+const { requireAuth } = require('../middleware/auth');
+const { ensureSetup } = require('../middleware/setup');
+const storage = require('../services/storage');
+const github = require('../services/github');
+const capacity = require('../services/capacity');
+const vaultOrg = require('../services/vault-org');
+const accounts = require('../services/accounts');
+const db = require('../db/database');
+
+const router = express.Router();
+const REPO_CAPACITY_GB = parseInt(process.env.REPO_CAPACITY_GB || '1', 10);
+
+router.use(requireAuth, ensureSetup);
+
+async function createStorageRepoForUser(userId, { linkedAccountId = null } = {}) {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+
+  let token = user.access_token;
+  let ownerOrg = user.vault_org || null;
+  let linkId = null;
+
+  if (linkedAccountId) {
+    const account = accounts.getLinkedAccount(userId, linkedAccountId);
+    if (!account) throw new Error('Linked account not found');
+    if (account.role !== 'storage') {
+      throw new Error('Only storage-linked accounts can create repositories');
+    }
+    token = account.access_token;
+    ownerOrg = null;
+    linkId = account.id;
+  }
+
+  const octokit = github.createClient(token);
+
+  const count = db.prepare(
+    'SELECT COUNT(*) as c FROM storage_repos WHERE user_id = ? AND is_metadata = 0 AND repo_role != ?'
+      + (ownerOrg ? ' AND owner = ?' : linkId ? ' AND linked_account_id = ?' : ' AND linked_account_id IS NULL')
+  ).get(
+    ownerOrg
+      ? [userId, 'backup', ownerOrg]
+      : linkId
+        ? [userId, 'backup', linkId]
+        : [userId, 'backup']
+  );
+  const repoName = `vault-storage-${count.c + 1}`;
+
+  let created;
+  if (ownerOrg) {
+    await vaultOrg.assertOrgAdmin(octokit, ownerOrg);
+    try {
+      created = await github.getRepoInfo(octokit, ownerOrg, repoName);
+    } catch {
+      created = await github.createStorageRepo(octokit, repoName, ownerOrg);
+    }
+  } else {
+    created = await github.createStorageRepo(octokit, repoName);
+  }
+
+  return storage.addRepo(userId, created.full_name, created.default_branch, {
+    linkedAccountId: linkId,
+    isPublic: !created.private,
+  });
+}
+
+router.get('/available', async (req, res) => {
+  try {
+    const configured = db.prepare('SELECT full_name FROM storage_repos WHERE user_id = ?')
+      .all(req.user.id).map((r) => r.full_name);
+
+    const available = [];
+    for (const account of accounts.listAccountsWithTokens(req.user.id)) {
+      if (!account.is_primary && account.role !== 'storage') continue;
+
+      const octokit = github.createClient(account.access_token);
+      const repos = await github.getUserRepos(octokit);
+
+      for (const repo of repos.filter((r) => !r.fork)) {
+        available.push({
+          full_name: repo.full_name,
+          name: repo.name,
+          owner: repo.owner.login,
+          private: repo.private,
+          default_branch: repo.default_branch,
+          configured: configured.includes(repo.full_name),
+          linked_account_id: account.is_primary ? null : account.id,
+          account_username: account.username,
+          is_primary_account: !!account.is_primary,
+        });
+      }
+    }
+
+    res.json({ repos: available });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/configured', async (req, res) => {
+  try {
+    const stats = await storage.getStorageStats(req.user.id);
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const withCapacity = await capacity.getReposCapacityForUser(req.user.id, stats.repos);
+
+    const linked = accounts.listLinkedAccounts(req.user.id);
+    const accountMap = Object.fromEntries(linked.map((a) => [a.id, a]));
+
+    res.json({
+      repos: withCapacity.map(({ repo, capacity: cap }) => ({
+        ...repo,
+        ...cap,
+        is_metadata: !!repo.is_metadata,
+        is_backup: repo.repo_role === 'backup',
+        is_public: !!repo.is_public,
+        private: repo.private != null ? !!repo.private : !repo.is_public,
+        account_username: repo.linked_account_id
+          ? accountMap[repo.linked_account_id]?.username
+          : user.username,
+      })),
+      total: capacity.aggregateCapacity(withCapacity),
+      repo_capacity_bytes: capacity.REPO_CAPACITY_BYTES,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/capacity', async (req, res) => {
+  try {
+    const stats = await storage.getStorageStats(req.user.id);
+    const withCapacity = await capacity.getReposCapacity(null, stats.repos);
+
+    res.json({
+      repos: withCapacity.map(({ repo, capacity: cap }) => ({
+        id: repo.id,
+        full_name: repo.full_name,
+        name: repo.name,
+        is_active: !!repo.is_active,
+        is_metadata: !!repo.is_metadata,
+        ...cap,
+      })),
+      total: capacity.aggregateCapacity(withCapacity),
+      repo_capacity_bytes: capacity.REPO_CAPACITY_BYTES,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/add', async (req, res) => {
+  try {
+    const { full_name, linked_account_id: linkedAccountId } = req.body;
+    if (!full_name) return res.status(400).json({ error: 'full_name required' });
+
+    let token;
+    if (linkedAccountId) {
+      const account = accounts.getLinkedAccount(req.user.id, linkedAccountId);
+      if (!account) return res.status(404).json({ error: 'Linked account not found' });
+      if (account.role !== 'storage') {
+        return res.status(400).json({ error: 'Only storage-linked accounts can add repositories' });
+      }
+      token = account.access_token;
+    } else {
+      const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+      token = user.access_token;
+    }
+
+    const octokit = github.createClient(token);
+    const [owner, name] = full_name.split('/');
+    const info = await github.getRepoInfo(octokit, owner, name);
+
+    const repo = storage.addRepo(req.user.id, full_name, info.default_branch, {
+      linkedAccountId: linkedAccountId || null,
+      isPublic: !info.private,
+    });
+    res.json({ success: true, repo });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/org', (req, res) => {
+  try {
+    const org = vaultOrg.getVaultOrg(req.user.id);
+    const configured = org ? vaultOrg.listConfiguredOrgRepos(req.user.id, org) : [];
+    res.json({ org, configured });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/orgs', async (req, res) => {
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const octokit = github.createClient(user.access_token);
+    const scopes = await github.getTokenScopes(octokit);
+    const needsReauth = !scopes.includes('read:org');
+
+    const vault = vaultOrg.getVaultOrg(req.user.id);
+    let orgs = [];
+
+    if (!needsReauth) {
+      const listed = await github.listUserOrgs(octokit);
+      orgs = await Promise.all(listed.map(async (org) => ({
+        login: org.login,
+        name: org.name || org.login,
+        avatar_url: org.avatar_url,
+        role: await github.getOrgRole(octokit, org.login),
+        is_vault_org: vault === org.login,
+        source: 'github',
+      })));
+    }
+
+    const knownOwners = db.prepare(`
+      SELECT DISTINCT owner FROM storage_repos
+      WHERE user_id = ? AND owner != ? AND is_metadata = 0
+    `).all(req.user.id, user.username).map((r) => r.owner);
+
+    for (const owner of knownOwners) {
+      if (orgs.some((o) => o.login === owner)) continue;
+      let role = null;
+      if (!needsReauth) role = await github.getOrgRole(octokit, owner);
+      orgs.push({
+        login: owner,
+        name: owner,
+        role: role || 'unknown',
+        is_vault_org: vault === owner,
+        source: 'configured',
+      });
+    }
+
+    res.json({
+      orgs,
+      vault_org: vault,
+      needs_reauth: needsReauth,
+      scopes,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/org/setup', async (req, res) => {
+  try {
+    const { org, repoCount } = req.body;
+    if (!org) return res.status(400).json({ error: 'org required' });
+
+    const result = await vaultOrg.setupVaultOrg(req.user.id, org, { repoCount });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/org', (req, res) => {
+  try {
+    vaultOrg.setVaultOrg(req.user.id, null);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/make-public', async (req, res) => {
+  try {
+    const repos = db.prepare(`
+      SELECT * FROM storage_repos
+      WHERE user_id = ? AND is_metadata = 0 AND is_active = 1
+        AND (repo_role IS NULL OR repo_role = 'primary')
+    `).all(req.user.id);
+
+    if (!repos.length) {
+      return res.json({ success: true, results: [], made_public: 0, total: 0 });
+    }
+
+    const results = [];
+    for (const repo of repos) {
+      const [owner, name] = repo.full_name.split('/');
+      try {
+        const octokit = accounts.createClientForRepo(req.user.id, repo);
+        const info = await github.setRepoPublic(octokit, owner, name);
+        db.prepare('UPDATE storage_repos SET is_public = ? WHERE id = ?').run(info.private ? 0 : 1, repo.id);
+        results.push({
+          full_name: repo.full_name,
+          ok: true,
+          private: !!info.private,
+        });
+      } catch (err) {
+        results.push({
+          full_name: repo.full_name,
+          ok: false,
+          error: err.response?.data?.message || err.message,
+        });
+      }
+    }
+
+    res.json({
+      success: results.every((r) => r.ok),
+      results,
+      made_public: results.filter((r) => r.ok && !r.private).length,
+      total: results.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/create', async (req, res) => {
+  try {
+    const repo = await createStorageRepoForUser(req.user.id, {
+      linkedAccountId: req.body.linked_account_id || null,
+    });
+    res.json({ success: true, repo });
+  } catch (err) {
+    const status = /not found/i.test(err.message) ? 404 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+router.post('/create-batch', async (req, res) => {
+  try {
+    const linkedAccountId = req.body.linked_account_id || null;
+    let count = parseInt(req.body.count, 10);
+    const gb = parseFloat(req.body.gb);
+
+    if (Number.isFinite(gb) && gb > 0) {
+      count = Math.ceil(gb / REPO_CAPACITY_GB);
+    }
+    if (!Number.isFinite(count) || count < 1) {
+      return res.status(400).json({ error: 'Provide a positive gb or count value' });
+    }
+    count = Math.min(50, Math.max(1, count));
+
+    const repos = [];
+    const errors = [];
+    for (let i = 0; i < count; i++) {
+      try {
+        const repo = await createStorageRepoForUser(req.user.id, { linkedAccountId });
+        repos.push(repo);
+      } catch (err) {
+        errors.push({ index: i + 1, error: err.message });
+        break;
+      }
+    }
+
+    res.json({
+      success: errors.length === 0,
+      requested: count,
+      created: repos.length,
+      repos,
+      errors,
+      capacity_gb_added: repos.length * REPO_CAPACITY_GB,
+      repo_capacity_gb: REPO_CAPACITY_GB,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id', (req, res) => {
+  try {
+    storage.removeRepo(req.user.id, parseInt(req.params.id, 10));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.patch('/:id/toggle', (req, res) => {
+  try {
+    storage.toggleRepo(req.user.id, parseInt(req.params.id, 10), req.body.active);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;

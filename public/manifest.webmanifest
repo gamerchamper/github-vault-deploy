@@ -1,0 +1,10 @@
+{
+  "name": "GitHub Vault",
+  "short_name": "Vault",
+  "description": "Distributed storage across GitHub repositories",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0d14",
+  "theme_color": "#5b8cf7",
+  "icons": []
+}

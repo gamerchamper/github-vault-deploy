@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><!-- SHARE_PAGE_TITLE --> — GitHub Vault</title>
+  <!-- SHARE_EMBED_META -->
+  <link rel="stylesheet" href="/css/explorer.css">
+  <link rel="stylesheet" href="/css/share.css">
+  <link rel="stylesheet" href="/css/playlists.css">
+  <link rel="stylesheet" href="/css/plyr.css">
+  <!-- SHARE_EMBED_BOOT -->
+</head>
+<body class="share-body vault-scroll">
+  <div class="share-app-frame" id="share-app-frame">
+  <div class="share-shell">
+    <header id="share-top-dock" class="share-top-dock hidden" aria-label="Share details">
+      <div class="share-top-dock-inner">
+        <button id="share-back" class="btn-secondary share-back-btn share-top-back hidden" type="button">← Back</button>
+        <div class="share-top-dock-owner">
+          <img id="share-owner-avatar" class="share-owner-avatar hidden" alt="" width="40" height="40" loading="lazy">
+          <div id="share-owner-fallback" class="share-owner-fallback" aria-hidden="true">V</div>
+          <div class="share-top-dock-owner-text">
+            <span class="share-top-dock-eyebrow">Shared by</span>
+            <span id="share-owner-name" class="share-top-dock-owner-name">—</span>
+          </div>
+        </div>
+        <div class="share-top-dock-file">
+          <span class="share-top-dock-eyebrow">File</span>
+          <span id="share-top-filename" class="share-top-dock-filename">—</span>
+        </div>
+        <div id="share-top-dock-meta" class="share-top-dock-meta hidden"></div>
+        <div id="share-top-dock-extra" class="share-top-dock-extra"></div>
+        <div id="share-top-dock-actions" class="share-top-dock-actions hidden">
+          <span id="share-client-badge" class="share-client-badge hidden">Decrypted in your browser</span>
+          <button id="share-dl-hls" class="btn-secondary hidden" type="button">HLS .m3u8</button>
+          <button id="share-dl-hls-github" class="btn-secondary hidden" type="button" title="Open the raw m3u8 playlist from GitHub">M3U8 (GitHub)</button>
+          <button id="share-download" class="btn-primary" type="button">Download</button>
+        </div>
+        <div id="share-presence" class="share-presence hidden" aria-live="polite"></div>
+      </div>
+    </header>
+    <header class="share-hero" id="share-hero">
+      <div class="share-brand"><span class="share-brand-icon">📦</span> GitHub Vault Share</div>
+      <p class="share-hero-tagline">Secure shared content · Stream or download</p>
+    </header>
+  <div id="share-page" class="share-page">
+    <div id="share-loading" class="share-loading">Loading shared content...</div>
+
+    <div id="share-folder-view" class="hidden">
+      <div class="share-topbar">
+        <div class="share-topbar-spacer"></div>
+        <div id="share-presence-folder" class="share-presence hidden" aria-live="polite"></div>
+      </div>
+      <h1 id="share-folder-name"></h1>
+      <p class="share-meta" id="share-folder-meta"></p>
+      <nav id="share-breadcrumb" class="share-breadcrumb hidden"></nav>
+      <div id="share-folder-grid" class="file-grid share-folder-grid vault-scroll"></div>
+    </div>
+
+    <div id="share-file-view" class="share-cinema-layout hidden">
+      <div class="share-cinema-stage" id="share-cinema-stage">
+        <div id="share-viewer" class="share-viewer-stage"></div>
+      </div>
+      <div class="share-cinema-dock" id="share-cinema-dock">
+        <h1 id="share-name" class="share-stream-title visually-hidden"></h1>
+        <div class="share-dock-row share-dock-head">
+          <div class="share-dock-title-wrap">
+            <span id="share-dock-title" class="share-dock-title"></span>
+          </div>
+        </div>
+        <p class="share-meta share-dock-meta hidden" id="share-meta"></p>
+        <div id="share-dock-stats" class="share-dock-stats"></div>
+        <div id="download-panel" class="download-panel hidden">
+          <div class="download-panel-header">
+            <span class="download-panel-title">Downloads</span>
+            <span class="download-panel-hint">Works offline from cached chunks · large files split into ~1 GB zips</span>
+          </div>
+          <div id="download-list" class="download-list vault-scroll"></div>
+        </div>
+      </div>
+    </div>
+
+    <p id="share-error" class="share-error hidden"></p>
+  </div>
+  </div>
+
+  <div id="share-right-rail" class="share-right-rail">
+    <aside id="share-playlist-panel" class="share-playlist-panel hidden" aria-label="Playlist">
+      <div class="share-playlist-header">
+        <div class="share-playlist-hero">
+          <div id="share-playlist-cover-wrap" class="share-playlist-cover-wrap hidden">
+            <img id="share-playlist-cover" class="share-playlist-cover" alt="">
+          </div>
+          <div class="share-playlist-hero-text">
+            <span class="playlist-panel-title" id="share-playlist-title">Playlist</span>
+            <p class="playlist-panel-meta" id="share-playlist-meta"></p>
+            <p id="share-playlist-desc" class="share-playlist-desc hidden"></p>
+            <p id="share-playlist-owner" class="share-playlist-owner hidden"></p>
+          </div>
+        </div>
+      </div>
+      <input type="search" id="share-playlist-search" class="playlist-panel-search" placeholder="Filter queue…" autocomplete="off">
+      <div class="playlist-panel-controls">
+        <button type="button" id="share-playlist-prev" class="playlist-ctrl-btn" title="Previous">⏮</button>
+        <button type="button" id="share-playlist-next" class="playlist-ctrl-btn" title="Next">⏭</button>
+        <button type="button" id="share-playlist-shuffle" class="playlist-ctrl-btn" title="Shuffle">🔀</button>
+        <button type="button" id="share-playlist-repeat" class="playlist-ctrl-btn" title="Repeat" data-mode="off">🔁</button>
+      </div>
+      <div id="share-playlist-list" class="playlist-panel-list vault-scroll"></div>
+    </aside>
+    <aside id="share-shoutbox" class="share-shoutbox shoutbox-closed hidden" aria-hidden="true">
+      <div class="shoutbox-header">
+        <span class="shoutbox-title">Shoutbox</span>
+        <button id="shoutbox-close" class="shoutbox-close" type="button" title="Close">×</button>
+      </div>
+      <div id="shoutbox-messages" class="shoutbox-messages vault-scroll" role="log" aria-live="polite" aria-relevant="additions"></div>
+      <div class="shoutbox-input-row">
+        <span id="shoutbox-at" class="shoutbox-at hidden" aria-live="polite"></span>
+        <input id="shoutbox-input" class="shoutbox-input" type="text" placeholder="Chat with viewers..." maxlength="500" autocomplete="off">
+        <button id="shoutbox-send" class="shoutbox-send" type="button" title="Send message">Send</button>
+      </div>
+    </aside>
+  </div>
+  </div>
+
+  <button id="shoutbox-open-btn" class="shoutbox-open-btn hidden" type="button" title="Open chat" aria-label="Open chat">💬</button>
+
+  <script src="/js/hls.min.js"></script>
+  <script src="/js/pdf-viewer.js"></script>
+  <script src="/js/plyr.polyfilled.min.js"></script>
+  <script src="/js/adaptive-concurrency.js"></script>
+  <script src="/js/share-crypto.js"></script>
+  <script src="/js/share-media-cache.js"></script>
+  <script src="/js/share-client-stream.js?v=4"></script>
+  <script src="/js/share-download.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/media-player.js"></script>
+  <script src="/js/chunk-blocks.js"></script>
+  <script src="/js/download-manager.js"></script>
+  <script src="/js/share-viewer.js"></script>
+  <script src="/js/share-presence.js"></script>
+  <script src="/js/playlist-queue.js"></script>
+  <script src="/js/share-shoutbox.js"></script>
+  <script src="/js/share-playlist.js"></script>
+  <script>
+    function parseShareRoute() {
+      const pathParts = location.pathname.split('/').filter(Boolean);
+      const shareIdx = pathParts.indexOf('share');
+      let token = null;
+      let isPlaylistShare = false;
+      if (shareIdx >= 0) {
+        const seg = pathParts[shareIdx + 1];
+        if (seg === 'p') {
+          isPlaylistShare = true;
+          token = pathParts[shareIdx + 2];
+        } else if (seg === 'c') {
+          token = pathParts[shareIdx + 2];
+        } else {
+          token = seg;
+        }
+      } else {
+        token = pathParts[0];
+      }
+      if (token === 'embed') {
+        token = isPlaylistShare ? pathParts[shareIdx + 2] : pathParts[shareIdx + 1];
+      }
+      return { token, isPlaylistShare };
+    }
+
+    const route = parseShareRoute();
+    const token = route.token;
+    const isPlaylistShare = route.isPlaylistShare || !!window.SHARE_PLAYLIST_MODE;
+    const isEmbedPath = location.pathname.split('/').filter(Boolean).pop() === 'embed';
+    const embedMode = isEmbedPath || window.SHARE_EMBED_MODE || new URLSearchParams(location.search).get('embed') === '1';
+    const initialFileId = new URLSearchParams(location.search).get('file');
+    const state = { isFolderShare: false, isPlaylistShare, currentPath: null, rootPath: null, folderName: null, clientStream: false };
+
+    function shareApiBase(tok = token) {
+      return state.isPlaylistShare ? `/api/public/playlist/${tok}` : `/api/public/share/${tok}`;
+    }
+
+    function setPlaylistShareMode() {
+      ShareViewer.playlistMode = true;
+      ShareClientStream.playlistMode = true;
+      ShareShoutbox.playlistMode = true;
+      DownloadManager.playlistMode = true;
+    }
+
+    let shareCurrentFile = null;
+
+    function isShareMedia(info) {
+      if (!info?.name) return false;
+      const ext = info.name.split('.').pop().toLowerCase();
+      const mime = info.mime_type || '';
+      if (mime.startsWith('video/') || mime.startsWith('audio/')) return true;
+      return ['mp4', 'webm', 'mkv', 'mov', 'm4v', 'avi', 'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'].includes(ext);
+    }
+
+    function shareStreamModeLabel(info) {
+      if (info?.offline) return 'offline copy in your browser';
+      return state.clientStream ? 'decrypted in your browser' : 'streamed via server';
+    }
+
+    function hideShareTopDock() {
+      document.getElementById('share-top-dock')?.classList.add('hidden');
+      document.body.classList.remove('share-has-top-dock', 'share-media-header-mode');
+    }
+
+    function renderShareTopDock(info) {
+      const dock = document.getElementById('share-top-dock');
+      if (!dock || !info || info.is_folder) {
+        hideShareTopDock();
+        return;
+      }
+      const isMedia = isShareMedia(info);
+      dock.classList.remove('hidden');
+      document.body.classList.add('share-has-top-dock');
+      document.body.classList.toggle('share-media-header-mode', isMedia);
+
+      document.getElementById('share-owner-name').textContent = info.shared_by || 'Vault user';
+      document.getElementById('share-top-filename').textContent = info.name || 'Shared file';
+      const avatar = document.getElementById('share-owner-avatar');
+      const fallback = document.getElementById('share-owner-fallback');
+      if (info.shared_by_avatar) {
+        avatar.src = info.shared_by_avatar;
+        avatar.alt = info.shared_by || 'Uploader';
+        avatar.classList.remove('hidden');
+        fallback.classList.add('hidden');
+      } else {
+        avatar.classList.add('hidden');
+        avatar.removeAttribute('src');
+        fallback.classList.remove('hidden');
+        fallback.textContent = (info.shared_by || 'V').charAt(0).toUpperCase();
+      }
+
+      const topMeta = document.getElementById('share-top-dock-meta');
+      const topActions = document.getElementById('share-top-dock-actions');
+      const extra = document.getElementById('share-top-dock-extra');
+      const dockMeta = document.getElementById('share-meta');
+      const dockHead = document.querySelector('.share-dock-head');
+
+      topActions?.classList.remove('hidden');
+
+      if (isMedia) {
+        topMeta?.classList.remove('hidden');
+        dockMeta?.classList.add('hidden');
+        dockHead?.classList.add('hidden');
+
+        const pills = [];
+        if (info.size) pills.push(formatSize(info.size));
+        if (info.chunk_count != null) pills.push(`${info.chunk_count} chunks`);
+        pills.push(shareStreamModeLabel(info));
+        if (topMeta) {
+          topMeta.innerHTML = pills.map((p) => `<span class="share-top-dock-pill">${escapeHtml(p)}</span>`).join('');
+        }
+        if (extra) {
+          const parts = [];
+          if (info.shared_at) {
+            const date = new Date(info.shared_at);
+            if (!Number.isNaN(date.getTime())) parts.push(date.toLocaleDateString());
+          }
+          extra.innerHTML = parts.map((p) => `<span class="share-top-dock-pill">${escapeHtml(p)}</span>`).join('');
+        }
+      } else {
+        topMeta?.classList.add('hidden');
+        dockMeta?.classList.remove('hidden');
+        dockHead?.classList.remove('hidden');
+
+        if (extra) {
+          const parts = [];
+          if (info.size) parts.push(formatSize(info.size));
+          if (info.shared_at) {
+            const date = new Date(info.shared_at);
+            if (!Number.isNaN(date.getTime())) parts.push(date.toLocaleDateString());
+          }
+          extra.innerHTML = parts.map((p) => `<span class="share-top-dock-pill">${escapeHtml(p)}</span>`).join('');
+        }
+      }
+    }
+
+    async function fetchShareFileInfo(fileId) {
+      const res = await fetch(`/api/public/share/${token}/info?file=${encodeURIComponent(fileId)}`);
+      if (!res.ok) return null;
+      return res.json();
+    }
+
+    function updateShareMeta(fileOrInfo) {
+      const isMedia = isShareMedia(fileOrInfo);
+      const meta = document.getElementById('share-meta');
+      const dockTitle = document.getElementById('share-dock-title');
+
+      if (isMedia) {
+        renderShareTopDock(fileOrInfo);
+        if (meta) {
+          meta.innerHTML = '';
+          meta.classList.add('hidden');
+        }
+        if (dockTitle) dockTitle.textContent = '';
+      } else {
+        const mode = shareStreamModeLabel(fileOrInfo);
+        if (meta) {
+          meta.classList.remove('hidden');
+          meta.innerHTML = `
+            <span class="share-meta-pill">${formatSize(fileOrInfo.size)}</span>
+            <span class="share-meta-pill">${fileOrInfo.chunk_count || 0} chunks</span>
+            <span class="share-meta-pill">${mode}</span>
+          `;
+        }
+        if (dockTitle) dockTitle.textContent = fileOrInfo.name || '';
+      }
+
+      const badge = document.getElementById('share-client-badge');
+      if (badge) badge.classList.toggle('hidden', !state.clientStream);
+    }
+
+    function showError(message) {
+      hideShareTopDock();
+      document.getElementById('share-loading').classList.add('hidden');
+      document.getElementById('share-folder-view').classList.add('hidden');
+      document.getElementById('share-file-view').classList.add('hidden');
+      document.getElementById('share-error').textContent = message;
+      document.getElementById('share-error').classList.remove('hidden');
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function fileItemHtml(file) {
+      const thumbSrc = file.has_thumbnail
+        ? `/api/public/share/${token}/thumbnail?file=${encodeURIComponent(file.id)}`
+        : '';
+      const iconHtml = file.has_thumbnail
+        ? `<img class="file-thumb" src="${thumbSrc}" alt="" loading="lazy">`
+        : `<div class="file-icon">${getFileIcon(file.name, file.is_folder)}</div>`;
+      const sizeHtml = !file.is_folder ? `<div class="file-size">${formatSize(file.size)}</div>` : '';
+      return `${iconHtml}<div class="file-name">${escapeHtml(file.name)}</div>${sizeHtml}`;
+    }
+
+    function renderBreadcrumb() {
+      const nav = document.getElementById('share-breadcrumb');
+      if (!state.rootPath || state.currentPath === state.rootPath) {
+        nav.classList.add('hidden');
+        return;
+      }
+
+      const parts = state.currentPath.slice(state.rootPath.length).split('/').filter(Boolean);
+      let path = state.rootPath;
+      const crumbs = [`<button type="button" data-path="${escapeHtml(state.rootPath)}">${escapeHtml(state.folderName)}</button>`];
+
+      for (const part of parts) {
+        path = `${path}/${part}`;
+        crumbs.push('<span>/</span>');
+        if (path === state.currentPath) {
+          crumbs.push(`<span class="current">${escapeHtml(part)}</span>`);
+        } else {
+          crumbs.push(`<button type="button" data-path="${escapeHtml(path)}">${escapeHtml(part)}</button>`);
+        }
+      }
+
+      nav.innerHTML = crumbs.join('');
+      nav.classList.remove('hidden');
+      nav.querySelectorAll('button[data-path]').forEach((btn) => {
+        btn.onclick = () => loadFolder(btn.dataset.path);
+      });
+    }
+
+    async function loadFolder(path = null) {
+      const query = path ? `?path=${encodeURIComponent(path)}` : '';
+      const res = await fetch(`/api/public/share/${token}/list${query}`);
+      if (!res.ok) throw new Error('Share link not found or expired');
+      const data = await res.json();
+
+      state.currentPath = data.path;
+      state.rootPath = data.root_path;
+
+      document.getElementById('share-loading').classList.add('hidden');
+      document.getElementById('share-file-view').classList.add('hidden');
+      document.getElementById('share-folder-view').classList.remove('hidden');
+      document.getElementById('share-page').classList.add('is-folder');
+      hideShareTopDock();
+      ShareShoutbox.destroy();
+
+      const folderLabel = path === state.rootPath || !path ? state.folderName : data.path.split('/').pop();
+      document.getElementById('share-folder-name').textContent = folderLabel;
+      document.getElementById('share-folder-meta').textContent = `${data.files.length} item${data.files.length === 1 ? '' : 's'}`;
+
+      renderBreadcrumb();
+
+      const grid = document.getElementById('share-folder-grid');
+      if (!data.files.length) {
+        grid.innerHTML = '<p class="share-no-preview" style="grid-column:1/-1;text-align:center;padding:32px;">This folder is empty.</p>';
+        return;
+      }
+
+      grid.innerHTML = data.files.map((file) => `
+        <div class="file-item file-item-settled" data-id="${escapeHtml(file.id)}" data-folder="${file.is_folder ? '1' : '0'}">
+          ${fileItemHtml(file)}
+        </div>
+      `).join('');
+
+      grid.querySelectorAll('.file-item').forEach((el) => {
+        const file = data.files.find((f) => f.id === el.dataset.id);
+        el.onclick = () => openSharedItem(file);
+      });
+    }
+
+    async function openSharedItem(file) {
+      if (file.is_folder) {
+        loadFolder(file.path).catch((err) => showError(err.message));
+        return;
+      }
+
+      document.getElementById('share-folder-view').classList.add('hidden');
+      document.getElementById('share-file-view').classList.remove('hidden');
+      document.getElementById('share-page').classList.remove('is-folder');
+      document.getElementById('share-back').classList.remove('hidden');
+      document.getElementById('share-name').textContent = file.name;
+      updateShareMeta(file);
+
+      const fileInfo = await fetchShareFileInfo(file.id);
+      if (fileInfo) renderShareTopDock(fileInfo);
+
+      const info = {
+        ...(fileInfo || file),
+        client_stream: state.clientStream,
+        hls_available: !!(fileInfo?.hls_available ?? file.has_hls),
+      };
+
+      if (info.hls_available) {
+        fetch(`/api/public/share/${token}/manifest?file=${encodeURIComponent(file.id)}`)
+          .then((r) => r.ok ? r.json() : null)
+          .then((manifest) => {
+            if (manifest?.hls_playlist_url) info.hls_playlist_url = manifest.hls_playlist_url;
+            if (manifest?.hls_segment_count != null) info.hls_segment_count = manifest.hls_segment_count;
+            shareCurrentFile = info;
+            ShareViewer.mount(info, token);
+            ShareShoutbox.init(token, info.id);
+            document.getElementById('share-dl-hls').classList.remove('hidden');
+            document.getElementById('share-dl-hls-github').classList.remove('hidden');
+          })
+          .catch(() => {
+            shareCurrentFile = info;
+            ShareViewer.mount(info, token);
+            ShareShoutbox.init(token, info.id);
+            document.getElementById('share-dl-hls').classList.remove('hidden');
+            document.getElementById('share-dl-hls-github').classList.remove('hidden');
+          });
+      } else {
+        shareCurrentFile = info;
+        ShareViewer.mount(info, token);
+        ShareShoutbox.init(token, info.id);
+      }
+    }
+
+    function showFileShare(info) {
+      document.getElementById('share-loading').classList.add('hidden');
+      document.getElementById('share-folder-view').classList.add('hidden');
+      document.getElementById('share-file-view').classList.remove('hidden');
+      document.getElementById('share-name').textContent = info.name;
+      renderShareTopDock(info);
+      updateShareMeta(info);
+      shareCurrentFile = info;
+      ShareViewer.mount(info, token);
+      if (state.isPlaylistShare && ShareShoutbox.token === token) {
+        ShareShoutbox.updateFile(info.id);
+      } else {
+        ShareShoutbox.init(token, info.id);
+      }
+
+      if (info.hls_available) {
+        fetch(`${shareApiBase()}/manifest?file=${encodeURIComponent(info.id)}`)
+          .then((r) => r.ok ? r.json() : null)
+          .then((manifest) => {
+            if (manifest?.hls_playlist_url) info.hls_playlist_url = manifest.hls_playlist_url;
+            if (manifest?.hls_segment_count != null) info.hls_segment_count = manifest.hls_segment_count;
+            document.getElementById('share-dl-hls').classList.remove('hidden');
+            document.getElementById('share-dl-hls-github').classList.remove('hidden');
+          })
+          .catch(() => {
+            document.getElementById('share-dl-hls').classList.remove('hidden');
+            document.getElementById('share-dl-hls-github').classList.remove('hidden');
+          });
+      }
+    }
+
+    function applyEmbedMode() {
+      if (!embedMode) return;
+      document.body.classList.add('share-embed-mode');
+    }
+
+    function updateShareFileUrl(fileId) {
+      const url = new URL(location.href);
+      if (fileId) url.searchParams.set('file', fileId);
+      else url.searchParams.delete('file');
+      history.replaceState(null, '', url.pathname + url.search);
+    }
+
+    async function fetchPlaylistFileInfo(fileId) {
+      const res = await fetch(`${shareApiBase()}/info?file=${encodeURIComponent(fileId)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Not found' }));
+        throw new Error(err.error || 'File not found');
+      }
+      const info = await res.json();
+      try {
+        const manifestRes = await fetch(`${shareApiBase()}/manifest?file=${encodeURIComponent(fileId)}`);
+        if (manifestRes.ok) {
+          const manifest = await manifestRes.json();
+          if (manifest.hls_playlist_url) info.hls_playlist_url = manifest.hls_playlist_url;
+          if (manifest.hls_segment_count != null) info.hls_segment_count = manifest.hls_segment_count;
+        }
+      } catch { /* optional */ }
+      return info;
+    }
+
+    async function fetchShareInfo() {
+      const infoQs = initialFileId ? `?file=${encodeURIComponent(initialFileId)}` : '';
+      const cacheKey = ShareMediaCache.cacheKey(token, initialFileId);
+
+      try {
+        if (state.isPlaylistShare && !initialFileId) {
+          return null;
+        }
+        const res = await fetch(`${shareApiBase()}/info${infoQs}`);
+        if (res.ok) {
+          const info = await res.json();
+          try {
+            const manifestRes = await fetch(`${shareApiBase()}/manifest${infoQs}`);
+            if (manifestRes.ok) {
+              const manifest = await manifestRes.json();
+              if (manifest.hls_playlist_url) info.hls_playlist_url = manifest.hls_playlist_url;
+              if (manifest.hls_segment_count != null) info.hls_segment_count = manifest.hls_segment_count;
+              await ShareMediaCache.putManifest(cacheKey, {
+                manifest,
+                info,
+                token,
+                fileId: initialFileId,
+              });
+            }
+          } catch { /* manifest prefetch optional */ }
+          return info;
+        }
+      } catch { /* server unreachable */ }
+
+      const entry = await ShareMediaCache.getManifest(cacheKey);
+      if (entry?.info) return { ...entry.info, offline: true, client_stream: true };
+      if (entry?.manifest) {
+        return ShareMediaCache.infoFromManifest(entry.manifest, {
+          has_thumbnail: entry.info?.has_thumbnail,
+        });
+      }
+
+      throw new Error('Share unavailable offline — open this link once while the server is online');
+    }
+
+    async function initPlaylistShare() {
+      setPlaylistShareMode();
+      document.getElementById('share-hero')?.classList.add('hidden');
+      SharePlaylist.init(token, async (fileId) => {
+        updateShareFileUrl(fileId);
+        const info = await fetchPlaylistFileInfo(fileId);
+        state.clientStream = !!info.client_stream;
+        showFileShare(info);
+        SharePlaylist.render();
+      });
+      await SharePlaylist.load();
+    }
+
+    async function init() {
+      applyEmbedMode();
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/share/sw.js', { scope: '/share/' })
+          .then((reg) => reg.update())
+          .catch(() => {});
+      }
+      try {
+        if (state.isPlaylistShare) {
+          await initPlaylistShare();
+          return;
+        }
+
+        const info = await fetchShareInfo();
+
+        if (!embedMode && !info.offline) {
+          SharePresence.join(token).catch(() => {});
+        }
+
+        state.clientStream = info.offline ? true : !!info.client_stream;
+
+        if (info.is_folder && !initialFileId) {
+          state.isFolderShare = true;
+          state.folderName = info.name;
+          await loadFolder();
+          return;
+        }
+
+        if (info.is_folder && initialFileId) {
+          state.isFolderShare = true;
+          state.folderName = info.parent_folder || info.name;
+        }
+
+        showFileShare(info);
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    document.getElementById('share-back').addEventListener('click', () => {
+      hideShareTopDock();
+      ShareViewer.destroy();
+      ShareShoutbox.destroy();
+      shareCurrentFile = null;
+      document.getElementById('share-file-view').classList.add('hidden');
+      document.getElementById('share-back').classList.add('hidden');
+      document.getElementById('share-error').classList.add('hidden');
+      loadFolder(state.currentPath).catch((err) => showError(err.message));
+    });
+
+    document.getElementById('share-download').addEventListener('click', () => {
+      if (!shareCurrentFile) return;
+      DownloadManager.downloadFile(shareCurrentFile, { token });
+    });
+
+    document.getElementById('share-dl-hls').addEventListener('click', () => {
+      if (!shareCurrentFile) return;
+      const baseName = (shareCurrentFile.name || 'media').replace(/\.[^.]+$/, '');
+      const hlsUrl = shareCurrentFile.hls_playlist_url
+        ? `${shareApiBase()}/hls?file=${shareCurrentFile.id}`
+        : `${shareApiBase()}/hls/playlist.m3u8?file=${shareCurrentFile.id}`;
+      const a = document.createElement('a');
+      a.href = hlsUrl;
+      a.download = baseName + '.m3u8';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+    document.getElementById('share-dl-hls-github').addEventListener('click', () => {
+      if (!shareCurrentFile?.hls_playlist_url) return;
+      window.open(shareCurrentFile.hls_playlist_url, '_blank');
+    });
+
+    DownloadManager.bindEvents();
+
+    window.addEventListener('pagehide', () => {
+      ShareViewer.destroy({ useBeacon: true });
+    });
+
+    init();
+  </script>
+</body>
+</html>

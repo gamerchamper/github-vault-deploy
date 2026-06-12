@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><!-- PAGE_TITLE --> — GitHub Vault</title>
+  <link rel="stylesheet" href="/css/explorer.css">
+  <link rel="stylesheet" href="/css/playlists.css">
+  <link rel="stylesheet" href="/css/share.css">
+</head>
+<body class="share-body vault-scroll">
+  <div id="collection-share-app">
+    <div id="share-loading" class="share-loading">Loading collection...</div>
+    <div id="share-content" class="hidden">
+      <div class="curated-hero">
+        <div class="curated-hero-art" id="share-cover"><span class="curated-hero-fallback">📚</span></div>
+        <div class="curated-hero-body">
+          <span class="curated-hero-eyebrow">Collection</span>
+          <h1 class="curated-hero-title" id="share-title"></h1>
+          <p class="curated-hero-desc" id="share-desc"></p>
+          <div class="curated-hero-stats" id="share-stats"></div>
+          <div class="share-owner-row" id="share-owner"></div>
+        </div>
+      </div>
+      <div id="share-playlists" class="media-card-grid"></div>
+    </div>
+    <p id="share-error" class="share-error hidden"></p>
+  </div>
+  <script src="/js/api.js"></script>
+  <script>
+    const token = location.pathname.split('/').pop();
+
+    async function load() {
+      try {
+        const col = await API.playlists.publicCollection(token);
+        document.getElementById('share-loading').classList.add('hidden');
+        document.getElementById('share-content').classList.remove('hidden');
+        document.title = col.title + ' — GitHub Vault';
+        document.getElementById('share-title').textContent = col.title;
+        document.getElementById('share-desc').textContent = col.description || '';
+        document.getElementById('share-stats').textContent = `${col.playlist_count || 0} playlists`;
+        document.getElementById('share-owner').innerHTML = col.owner_name
+          ? `<span>By <strong>${col.owner_name}</strong></span>` : '';
+        const grid = document.getElementById('share-playlists');
+        for (const pl of col.playlists || []) {
+          const card = document.createElement('a');
+          card.className = 'media-card';
+          card.href = pl.share_url || `/share/p/${pl.share_token}`;
+          card.innerHTML = `
+            <div class="media-card-art">📋</div>
+            <div class="media-card-body">
+              <span class="media-card-title">${pl.title}</span>
+              <span class="media-card-meta">${pl.item_count || 0} items</span>
+            </div>`;
+          grid.appendChild(card);
+        }
+      } catch (err) {
+        document.getElementById('share-loading').classList.add('hidden');
+        const el = document.getElementById('share-error');
+        el.textContent = err.message || 'Collection not found';
+        el.classList.remove('hidden');
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

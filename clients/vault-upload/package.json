@@ -1,0 +1,51 @@
+{
+  "name": "vault-upload",
+  "version": "1.0.0",
+  "description": "Resilient CLI upload client for GitHub Vault",
+  "main": "src/desktop-main.js",
+  "bin": {
+    "vault-upload": "src/index.js"
+  },
+  "scripts": {
+    "test": "mocha test/**/*.test.js --timeout 30000 --exit",
+    "start": "node src/index.js",
+    "dist": "electron-builder",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.vault-upload.desktop",
+    "productName": "Vault Upload",
+    "files": [
+      "src/**/*",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "mac": {
+      "target": "dmg"
+    }
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "cli-progress": "^3.12.0",
+    "cli-table3": "^0.6.3",
+    "commander": "^11.1.0",
+    "electron": "^33.4.11",
+    "form-data": "^4.0.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "chai": "^4.3.10",
+    "electron-builder": "^25.1.8",
+    "mocha": "^10.2.0",
+    "nock": "^13.4.0",
+    "sinon": "^17.0.1"
+  }
+}

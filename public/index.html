@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Vault</title>
+  <link rel="stylesheet" href="/css/explorer.css">
+  <link rel="stylesheet" href="/css/playlists.css">
+  <link rel="stylesheet" href="/css/plyr.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#5b8cf7">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+</head>
+<body>
+  <!-- Login Screen -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <h1>GitHub Vault</h1>
+      <p class="login-subtitle">Distributed storage across your GitHub repositories.<br>Upload files, split across repos, download anywhere.</p>
+      <a href="/auth/github" class="btn-github">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+        </svg>
+        Sign in with GitHub
+      </a>
+      <div class="login-features">
+        <div class="feature"><span class="feature-icon">🔀</span> Split files across repos</div>
+        <div class="feature"><span class="feature-icon">📊</span> Metadata tracking</div>
+        <div class="feature"><span class="feature-icon">⬇️</span> Torrent-like downloads</div>
+        <div class="feature"><span class="feature-icon">♾️</span> Unlimited storage*</div>
+      </div>
+      <p class="login-footnote">*Limited by your GitHub repos. Private repos recommended.</p>
+      <details class="login-setup">
+        <summary>First-time setup: GitHub OAuth app</summary>
+        <ol class="login-setup-steps">
+          <li>
+            <a href="https://github.com/settings/applications/new" target="_blank" rel="noopener">Create a new OAuth app</a>
+            on GitHub (or open <a href="https://github.com/settings/developers" target="_blank" rel="noopener">Developer Settings</a>)
+          </li>
+          <li>Homepage URL: <code id="setup-homepage-url">(your app URL)</code></li>
+          <li>
+            Authorization callback URL:
+            <code id="setup-callback-url">(your app URL)/auth/github/callback</code>
+            <button type="button" class="btn-setup-copy" data-copy-target="setup-callback-url" title="Copy callback URL">Copy</button>
+          </li>
+          <li>Add <code>GITHUB_CLIENT_ID</code> and <code>GITHUB_CLIENT_SECRET</code> to your <code>.env</code> file</li>
+          <li>Restart the server, then sign in above</li>
+        </ol>
+      </details>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app" class="app hidden">
+    <!-- Title Bar -->
+    <div class="title-bar">
+      <div class="title-bar-left">
+        <svg class="app-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+        </svg>
+        <span>GitHub Vault</span>
+      </div>
+      <div class="title-bar-right">
+        <button id="btn-theme" class="btn-icon" title="Toggle theme">☀️</button>
+        <img id="user-avatar" class="user-avatar" src="" alt="">
+        <span id="user-name" class="user-name"></span>
+        <button id="btn-logout" class="btn-icon" title="Sign out">⏻</button>
+      </div>
+    </div>
+
+    <!-- Ribbon / Toolbar -->
+    <div class="ribbon">
+      <div class="ribbon-group">
+        <button id="btn-upload" class="ribbon-btn" title="Upload files">
+          <span class="ribbon-icon">📤</span>
+          <span>Upload</span>
+        </button>
+        <select id="upload-mode" class="upload-mode-select" title="Upload method">
+          <option value="api">API (resumable)</option>
+          <option value="git">Git push (faster)</option>
+        </select>
+        <button id="btn-new-folder" class="ribbon-btn" title="New folder">
+          <span class="ribbon-icon">📁</span>
+          <span>New folder</span>
+        </button>
+        <button id="btn-download" class="ribbon-btn" title="Download selected" disabled>
+          <span class="ribbon-icon">📥</span>
+          <span>Download</span>
+        </button>
+        <button id="btn-move" class="ribbon-btn" title="Move selected" disabled>
+          <span class="ribbon-icon">📂</span>
+          <span>Move</span>
+        </button>
+        <button id="btn-delete" class="ribbon-btn" title="Delete selected" disabled>
+          <span class="ribbon-icon">🗑️</span>
+          <span>Delete</span>
+        </button>
+        <button id="btn-new-playlist" class="ribbon-btn hidden" title="New playlist" type="button">
+          <span class="ribbon-icon">📋</span>
+          <span>New playlist</span>
+        </button>
+        <button id="btn-new-collection" class="ribbon-btn hidden" title="New collection" type="button">
+          <span class="ribbon-icon">📚</span>
+          <span>New collection</span>
+        </button>
+        <button id="btn-restore" class="ribbon-btn hidden" title="Restore selected from trash" disabled>
+          <span class="ribbon-icon">↩️</span>
+          <span>Restore</span>
+        </button>
+        <button id="btn-permanent-delete" class="ribbon-btn ribbon-btn-danger hidden" title="Permanently delete selected" disabled>
+          <span class="ribbon-icon">⚠️</span>
+          <span>Delete forever</span>
+        </button>
+      </div>
+      <div class="ribbon-separator"></div>
+      <div class="ribbon-group ribbon-view-group">
+        <label class="ribbon-view-label" for="account-view">View</label>
+        <select id="account-view" class="account-view-select" title="Switch between primary, backup, and storage accounts">
+          <option value="primary">Primary</option>
+        </select>
+        <div id="backup-sync-widget" class="backup-sync-widget hidden" title="Backup sync status">
+          <div class="backup-sync-header">
+            <span class="backup-sync-icon" aria-hidden="true">⎘</span>
+            <span id="backup-sync-label" class="backup-sync-label">Backup</span>
+            <span id="backup-sync-pct" class="backup-sync-pct"></span>
+            <button type="button" id="backup-sync-force" class="backup-sync-force" title="Force resume backup sync">↻</button>
+          </div>
+          <div class="backup-sync-bar"><div id="backup-sync-fill" class="backup-sync-fill"></div></div>
+          <div id="backup-sync-stats" class="backup-sync-stats hidden"></div>
+        </div>
+      </div>
+      <div class="ribbon-separator"></div>
+      <div class="ribbon-group">
+        <button id="btn-viewers" class="ribbon-btn" title="Live share viewers">
+          <span class="ribbon-icon">👁️</span>
+          <span>Viewers</span>
+        </button>
+        <button id="btn-repos" class="ribbon-btn" title="Manage storage repos">
+          <span class="ribbon-icon">⚙️</span>
+          <span>Repos</span>
+        </button>
+        <button id="btn-upload-center" class="ribbon-btn" title="Upload center">
+          <span class="ribbon-icon">📋</span>
+          <span>Transfers</span>
+        </button>
+        <button id="btn-refresh" class="ribbon-btn" title="Refresh">
+          <span class="ribbon-icon">🔄</span>
+          <span>Refresh</span>
+        </button>
+      </div>
+      <input type="file" id="file-input" multiple hidden>
+    </div>
+
+    <!-- Address Bar -->
+    <div class="address-bar">
+      <div class="address-bar-nav">
+        <button id="btn-back" class="nav-btn" title="Back" disabled aria-label="Go back">◀</button>
+        <button id="btn-up" class="nav-btn" title="Up" aria-label="Go up">▲</button>
+      </div>
+      <div class="breadcrumb" id="breadcrumb" role="navigation" aria-label="Current location"></div>
+      <div class="address-bar-actions">
+        <input type="text" class="search-input hidden" id="search-input" placeholder="Search this folder..." autocomplete="off" aria-label="Search files">
+        <button id="btn-search" class="nav-btn" title="Search folder" aria-label="Search folder">🔍</button>
+        <button id="btn-global-search" class="nav-btn" title="Search entire vault (Ctrl+Shift+F)" aria-label="Global search">🌐</button>
+        <select id="sort-select" class="sort-select" title="Sort files" aria-label="Sort files">
+          <option value="name:asc">Name A→Z</option>
+          <option value="name:desc">Name Z→A</option>
+          <option value="size:desc">Size largest</option>
+          <option value="size:asc">Size smallest</option>
+          <option value="date:desc">Newest first</option>
+          <option value="date:asc">Oldest first</option>
+          <option value="modified:desc">Recently modified</option>
+          <option value="modified:asc">Oldest modified</option>
+          <option value="type:asc">Type</option>
+          <option value="accessed:desc">Recently accessed</option>
+        </select>
+        <button id="btn-view-toggle" class="nav-btn" title="Toggle grid/list view" aria-label="Toggle view">⊞</button>
+      </div>
+    </div>
+
+    <!-- Filter Chips -->
+    <div class="filter-chips vault-scroll" id="filter-chips" role="toolbar" aria-label="File filters">
+      <button type="button" class="filter-chip active" data-all="1" aria-pressed="true">All</button>
+      <button type="button" class="filter-chip" data-type="image" aria-pressed="false">Images</button>
+      <button type="button" class="filter-chip" data-type="video" aria-pressed="false">Videos</button>
+      <button type="button" class="filter-chip" data-type="audio" aria-pressed="false">Audio</button>
+      <button type="button" class="filter-chip" data-type="document" aria-pressed="false">Documents</button>
+      <button type="button" class="filter-chip" data-type="archive" aria-pressed="false">Archives</button>
+      <button type="button" class="filter-chip" data-type="code" aria-pressed="false">Code</button>
+      <span class="filter-chip-sep" aria-hidden="true"></span>
+      <button type="button" class="filter-chip" data-view="favorites" aria-pressed="false">Favorites</button>
+      <button type="button" class="filter-chip" data-view="shared" aria-pressed="false">Shared</button>
+      <button type="button" class="filter-chip" data-view="recent" aria-pressed="false">Recent</button>
+      <button type="button" class="filter-chip" data-view="discover" aria-pressed="false">Discover</button>
+      <button type="button" class="filter-chip" data-view="playlists" aria-pressed="false">Playlists</button>
+      <button type="button" class="filter-chip" data-view="collections" aria-pressed="false">Collections</button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Sidebar -->
+      <div class="sidebar vault-scroll">
+        <div class="sidebar-section">
+          <div class="sidebar-header">Quick access</div>
+          <div class="sidebar-item active" data-path="/" data-view="files">
+            <span class="sidebar-icon">🏠</span> Home
+          </div>
+          <div class="sidebar-item" data-view="favorites">
+            <span class="sidebar-icon">⭐</span> Favorites
+            <span id="favorites-badge" class="sidebar-badge hidden">0</span>
+          </div>
+          <div class="sidebar-item" data-view="recent">
+            <span class="sidebar-icon">🕐</span> Recent
+          </div>
+          <div class="sidebar-item" data-view="discover">
+            <span class="sidebar-icon">✨</span> Discover
+          </div>
+          <div class="sidebar-item" data-view="playlists">
+            <span class="sidebar-icon">📋</span> Playlists
+          </div>
+          <div class="sidebar-item" data-view="collections">
+            <span class="sidebar-icon">📚</span> Collections
+          </div>
+          <div class="sidebar-item" data-view="trash">
+            <span class="sidebar-icon">🗑️</span> Trash
+            <span id="trash-badge" class="sidebar-badge hidden">0</span>
+          </div>
+          <div class="sidebar-item" data-view="viewers">
+            <span class="sidebar-icon">👁️</span> Live viewers
+            <span id="viewers-badge" class="sidebar-badge hidden">0</span>
+          </div>
+          <div class="sidebar-item" data-view="bandwidth">
+            <span class="sidebar-icon">📊</span> Bandwidth
+          </div>
+          <div class="sidebar-item" data-view="api-keys">
+            <span class="sidebar-icon">🔑</span> API keys
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-header">Folders</div>
+          <div id="folder-tree" class="folder-tree"></div>
+        </div>
+        <div class="sidebar-section sidebar-stats">
+          <div class="sidebar-header">This PC</div>
+          <div id="total-drive" class="drive-item drive-total"></div>
+          <div id="cache-drive" class="drive-item drive-cache"></div>
+        </div>
+        <div class="sidebar-section sidebar-stats">
+          <div class="sidebar-header">GitHub API</div>
+          <div id="rate-limit-panel" class="rate-limit-panel">
+            <div class="rate-limit-loading">Loading quotas…</div>
+          </div>
+        </div>
+        <div class="sidebar-section sidebar-drives">
+          <button type="button" class="sidebar-collapse-header" id="storage-repos-toggle" aria-expanded="false">
+            <span class="sidebar-collapse-icon" aria-hidden="true">▸</span>
+            <span class="sidebar-collapse-label">Storage Repos</span>
+            <span class="sidebar-collapse-count" id="storage-repos-count"></span>
+          </button>
+          <div id="repo-drives-storage" class="repo-drives collapsible-body hidden" hidden></div>
+          <button type="button" class="sidebar-collapse-header" id="metadata-repos-toggle" aria-expanded="false">
+            <span class="sidebar-collapse-icon" aria-hidden="true">▸</span>
+            <span class="sidebar-collapse-label">Metadata</span>
+            <span class="sidebar-collapse-count" id="metadata-repos-count"></span>
+          </button>
+          <div id="repo-drives-metadata" class="repo-drives collapsible-body hidden" hidden></div>
+        </div>
+        <div class="sidebar-section sidebar-stats">
+          <div class="sidebar-header">Vault</div>
+          <div id="storage-info" class="storage-info"></div>
+        </div>
+      </div>
+
+      <!-- Live Viewers -->
+      <div class="viewers-panel hidden" id="viewers-panel">
+        <div class="viewers-header">
+          <div>
+            <h2 class="viewers-title">Live viewers</h2>
+            <p class="viewers-subtitle">People currently watching your shared links</p>
+          </div>
+          <div class="viewers-summary">
+            <div class="viewers-stat-card">
+              <span class="viewers-stat-value" id="viewers-total">0</span>
+              <span class="viewers-stat-label">Active viewers</span>
+            </div>
+            <div class="viewers-stat-card">
+              <span class="viewers-stat-value" id="viewers-shares">0</span>
+              <span class="viewers-stat-label">Active shares</span>
+            </div>
+          </div>
+        </div>
+        <div id="viewers-empty" class="viewers-empty hidden">
+          <div class="viewers-empty-icon">👁️</div>
+          <p>No one is watching your shares right now</p>
+          <p class="viewers-empty-hint">Share a file or folder — live viewers will appear here with IP, location, and watch time.</p>
+        </div>
+        <div id="viewers-list" class="viewers-list"></div>
+      </div>
+
+      <!-- Bandwidth -->
+      <div class="viewers-panel hidden" id="bandwidth-tab">
+        <div class="viewers-header">
+          <div>
+            <h2 class="viewers-title">Bandwidth</h2>
+            <p class="viewers-subtitle">Data transfer usage across streaming, downloads, and views</p>
+          </div>
+        </div>
+        <div id="bandwidth-summary" class="bw-summary">
+          <div class="bw-row"><span class="bw-label">Last hour</span><span class="bw-value">—</span></div>
+          <div class="bw-row"><span class="bw-label">Last 24 hours</span><span class="bw-value">—</span></div>
+          <div class="bw-row"><span class="bw-label">Last 30 days</span><span class="bw-value">—</span></div>
+          <div class="bw-row bw-total"><span class="bw-label">Lifetime</span><span class="bw-value">—</span></div>
+        </div>
+        <div class="bw-section">
+          <h3 class="bw-section-title">Top files (30 days)</h3>
+          <div id="bandwidth-top-files"></div>
+        </div>
+      </div>
+
+      <!-- API Keys -->
+      <div class="viewers-panel api-keys-panel hidden" id="api-keys-tab">
+        <div class="viewers-header">
+          <div>
+            <h2 class="viewers-title">API keys</h2>
+            <p class="viewers-subtitle">Create client credentials for the desktop uploader without copying browser session cookies.</p>
+          </div>
+          <div class="api-key-actions">
+            <input id="api-key-name" class="api-key-name" type="text" maxlength="80" placeholder="Vault Upload Client">
+            <button id="btn-create-api-key" class="btn-primary" type="button">Create key</button>
+          </div>
+        </div>
+        <div id="api-key-new" class="api-key-new hidden">
+          <div class="api-key-new-header">New API key created. Copy it now; it will not be shown again.</div>
+          <div class="api-key-copy-row">
+            <input id="api-key-new-value" class="api-key-value" type="text" readonly spellcheck="false">
+            <button type="button" class="btn-primary" data-copy-target="api-key-new-value">Copy key</button>
+          </div>
+          <div class="api-key-command-grid">
+            <div>
+              <div class="api-key-command-label">Configure desktop client</div>
+              <code id="api-key-client-command"></code>
+              <button type="button" class="btn-secondary" data-copy-target="api-key-client-command">Copy command</button>
+            </div>
+            <div>
+              <div class="api-key-command-label">Launch client</div>
+              <code>npm run client:desktop</code>
+            </div>
+          </div>
+        </div>
+        <div class="api-key-help">
+          <strong>Client setup:</strong> create a key, copy the configure command, run it in the project folder, then launch the desktop uploader.
+        </div>
+        <div id="api-keys-list" class="api-keys-list"></div>
+      </div>
+
+      <!-- File View -->
+      <div class="file-view vault-scroll" id="file-view">
+        <div class="view-loading hidden" id="view-loading">
+          <div class="skeleton-grid" id="skeleton-grid">
+            <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+            <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+            <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+          </div>
+        </div>
+        <div class="file-grid" id="file-grid" role="listbox" aria-label="Files" aria-multiselectable="true"></div>
+        <div class="empty-state hidden" id="empty-state">
+          <svg class="empty-illustration" viewBox="0 0 160 120" fill="none" stroke="currentColor" stroke-width="1.2">
+            <path d="M20 100 V20 H60 L72 36 H140 V100 Z" stroke-linejoin="round" fill="none" opacity="0.7"/>
+            <path d="M52 60 L88 60" stroke-linecap="round" opacity="0.4"/>
+            <path d="M52 72 L80 72" stroke-linecap="round" opacity="0.25"/>
+          </svg>
+          <p>This folder is empty</p>
+          <p class="empty-hint">Upload files or create a new folder to get started</p>
+        </div>
+        <div class="drop-overlay hidden" id="drop-overlay">
+          <div class="drop-message">Drop files here to upload</div>
+        </div>
+      </div>
+
+      <!-- Resizable divider -->
+      <div class="panel-divider hidden" id="panel-divider" data-resize="horizontal"></div>
+
+      <!-- Details Panel -->
+      <div class="details-panel vault-scroll hidden" id="details-panel">
+        <div class="details-empty" id="details-empty">
+          <svg class="empty-illustration" viewBox="0 0 160 120" fill="none" stroke="currentColor" stroke-width="0.9">
+            <rect x="20" y="16" width="120" height="88" rx="8" opacity="0.35"/>
+            <circle cx="80" cy="50" r="16" opacity="0.5"/>
+            <line x1="55" y1="76" x2="105" y2="76" opacity="0.3"/>
+            <line x1="65" y1="88" x2="95" y2="88" opacity="0.2"/>
+          </svg>
+          <p>Select a file to view details</p>
+        </div>
+        <div class="details-content hidden" id="details-content">
+          <div class="details-header">
+            <div class="details-icon" id="details-icon">📄</div>
+            <div class="details-title-wrap">
+              <p class="details-name" id="details-name"></p>
+              <p class="details-type" id="details-type"></p>
+            </div>
+          </div>
+          <div id="details-preview-mount" class="details-preview hidden"></div>
+          <div class="details-stats">
+            <div class="detail-row"><span>Size</span><b id="detail-size">—</b></div>
+            <div class="detail-row"><span>Modified</span><b id="detail-date">—</b></div>
+            <div class="detail-row"><span>Chunks</span><b id="detail-chunks">—</b></div>
+            <div class="detail-row"><span>MIME</span><b id="detail-mime">—</b></div>
+            <div class="detail-row"><span>Hash</span><b class="detail-hash" id="detail-hash">—</b></div>
+            <div class="detail-row"><span>Encrypted</span><b id="detail-enc">—</b></div>
+          </div>
+          <div class="details-actions" id="details-actions">
+            <button class="btn-secondary detail-btn" id="detail-download">Download</button>
+            <button class="btn-secondary detail-btn" id="detail-share">Share</button>
+            <button class="btn-secondary detail-btn" id="detail-preview">Preview</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <span id="status-items">0 items</span>
+      <span id="status-selected"></span>
+      <span id="status-size" class="status-right"></span>
+    </div>
+
+    <!-- Downloads -->
+    <div id="download-panel" class="download-panel hidden">
+      <div class="download-panel-header">
+        <span class="download-panel-title">Downloads</span>
+        <span class="download-panel-hint">Fetching and decrypting chunks from GitHub</span>
+      </div>
+      <div id="download-list" class="download-list"></div>
+    </div>
+
+    <!-- Task Panel Mini Badge -->
+    <button type="button" id="task-panel-mini" class="task-panel-mini hidden" aria-label="Open background tasks" title="Background tasks">
+      <span class="task-mini-icon" aria-hidden="true">⚡</span>
+      <span id="task-mini-label" class="task-mini-label">Tasks</span>
+      <span id="task-badge" class="task-badge" aria-live="polite">0</span>
+    </button>
+
+    <!-- Background Tasks -->
+    <div id="task-panel" class="task-panel collapsed hidden" aria-label="Background tasks panel">
+      <div class="task-panel-header">
+        <div class="task-panel-header-text">
+          <span class="task-panel-title">Background tasks</span>
+          <span id="task-panel-counter" class="task-panel-counter"></span>
+        </div>
+        <div class="task-panel-header-actions">
+          <button type="button" id="task-clear-failed" class="task-clear-failed hidden" title="Remove failed tasks">Clear failed</button>
+          <button type="button" id="task-panel-collapse" class="task-panel-toggle" title="Minimize panel" aria-label="Minimize task panel">▼</button>
+        </div>
+      </div>
+      <div id="task-list" class="task-list vault-scroll"></div>
+    </div>
+  </div>
+
+  <!-- Repo Manager Modal -->
+  <div id="repo-modal" class="modal hidden">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Storage Repositories</h2>
+        <button class="modal-close" data-close="repo-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Files are split into chunks and distributed across these repositories. Link extra GitHub accounts for more storage or automatic backup copies.</p>
+
+        <div class="linked-accounts-panel org-setup-panel">
+          <h3>Linked GitHub Accounts</h3>
+          <p class="org-setup-desc">Copy a <strong>one-time link</strong> and open it in a private/incognito window (no vault sign-in needed). Authorize with the GitHub account you want to link. Links are generated fresh each time you open this panel.</p>
+          <p class="org-setup-desc">Backup accounts <strong>fork</strong> your storage repos (fast full copy). Private repos must be <strong>public</strong> or add the backup user as a <strong>collaborator</strong> on each storage repo. Ongoing changes sync via GitHub fork upstream merge.</p>
+          <p id="link-url-expiry" class="org-setup-desc link-url-expiry"></p>
+          <p class="org-setup-desc oauth-setup-hint">
+            Uses the same <a href="https://github.com/settings/developers" target="_blank" rel="noopener">GitHub OAuth app</a> as sign-in.
+            Callback URL must be <code id="repo-setup-callback-url">(your app URL)/auth/github/callback</code>
+            (<a href="https://github.com/settings/applications/new" target="_blank" rel="noopener">create app</a>
+            · <button type="button" class="btn-setup-copy-inline" data-copy-target="repo-setup-callback-url">copy callback</button>)
+          </p>
+          <div class="link-url-row">
+            <label for="link-url-storage">Link for storage</label>
+            <div class="link-url-copy">
+              <input type="text" readonly id="link-url-storage" class="link-url-input" spellcheck="false">
+              <button type="button" class="btn-primary" data-copy-target="link-url-storage">Copy</button>
+            </div>
+          </div>
+          <div class="link-url-row">
+            <label for="link-url-backup">Link for backup</label>
+            <div class="link-url-copy">
+              <input type="text" readonly id="link-url-backup" class="link-url-input" spellcheck="false">
+              <button type="button" class="btn-secondary" data-copy-target="link-url-backup">Copy</button>
+            </div>
+          </div>
+          <div id="rate-limit-modal-panel" class="rate-limit-modal-panel"></div>
+          <div id="linked-accounts-list" class="linked-accounts-list"></div>
+        </div>
+
+        <div class="org-setup-panel">
+          <h3>Vault Organization</h3>
+          <p class="org-setup-desc">Create a free org on GitHub, then set it up here. New storage repos will be created under that org instead of your personal account.</p>
+          <div class="org-setup-row">
+            <label for="vault-org-select">Your organizations</label>
+            <select id="vault-org-select" class="org-setup-input">
+              <option value="">Select an organization…</option>
+            </select>
+          </div>
+          <div class="org-setup-row">
+            <label for="vault-org-name">Or enter org name</label>
+            <input id="vault-org-name" class="org-setup-input" type="text" placeholder="my-vault-org" autocomplete="off">
+          </div>
+          <div class="org-setup-row org-setup-inline">
+            <label for="vault-org-repo-count">Storage repos to create</label>
+            <input id="vault-org-repo-count" class="org-setup-input org-setup-count" type="number" min="1" max="20" value="3">
+          </div>
+          <div class="org-setup-actions">
+            <a class="btn-secondary org-create-link" href="https://github.com/account/organizations/new" target="_blank" rel="noopener">Create org on GitHub</a>
+            <button id="btn-setup-vault-org" class="btn-primary" type="button">Set up org storage</button>
+            <button id="btn-clear-vault-org" class="btn-secondary" type="button">Clear preference</button>
+          </div>
+          <div id="vault-org-status" class="org-setup-status"></div>
+        </div>
+
+        <div class="repo-actions">
+          <button id="btn-create-repo" class="btn-primary">+ Create new storage repo</button>
+          <button id="btn-make-repos-public" class="btn-secondary" type="button" title="Enable direct GitHub fetch for offline shares">Make existing storage repos public</button>
+        </div>
+        <div class="org-setup-panel mysql-panel">
+          <h3>MySQL Database</h3>
+          <p class="org-setup-desc">Migrate all local SQLite data to MySQL. Set <code>MYSQL_HOST</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code>, and <code>MYSQL_DATABASE</code> in <code>.env</code> before migrating.</p>
+          <p class="org-setup-desc">After migration, set <code>USE_MYSQL=true</code> in <code>.env</code> to use MySQL as the primary database.</p>
+          <div class="org-setup-actions">
+            <button id="btn-migrate-mysql" class="btn-primary" type="button">Migrate to MySQL</button>
+          </div>
+          <div id="mysql-migrate-status" class="org-setup-status"></div>
+        </div>
+        <p class="org-setup-desc">New storage repos are <strong>public</strong> by default so share links fetch encrypted chunks directly from GitHub (server optional). Data stays encrypted — only ciphertext is visible. Use the button above for repos created before this change.</p>
+        <h3>Configured Repos</h3>
+        <div id="configured-repos" class="repo-list"></div>
+        <h3>Available Repos</h3>
+        <div id="available-repos" class="repo-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move Modal -->
+  <div id="move-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Move to</h2>
+        <button class="modal-close" data-close="move-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" id="move-modal-desc">Choose a destination folder.</p>
+        <div id="move-folder-picker" class="folder-picker"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close="move-modal">Cancel</button>
+        <button id="btn-confirm-move" class="btn-primary" disabled>Move here</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Folder Modal -->
+  <div id="folder-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>New Folder</h2>
+        <button class="modal-close" data-close="folder-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label for="folder-name">Folder name</label>
+        <input type="text" id="folder-name" placeholder="New folder" autofocus>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close="folder-modal">Cancel</button>
+        <button id="btn-create-folder" class="btn-primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Media Viewer -->
+  <div id="media-viewer" class="media-viewer hidden">
+    <div class="viewer-backdrop"></div>
+    <div class="viewer-panel">
+      <div class="viewer-header">
+        <span id="viewer-title" class="viewer-title"></span>
+        <div class="viewer-actions">
+          <button id="viewer-download" class="btn-secondary">Download</button>
+          <button id="viewer-hls-url" class="btn-secondary hidden">HLS .m3u8</button>
+          <button id="viewer-hls-github" class="btn-secondary hidden" title="Open the raw m3u8 playlist from GitHub">M3U8 (GitHub)</button>
+          <button id="viewer-close" class="viewer-close">&times;</button>
+        </div>
+      </div>
+      <div class="viewer-body">
+        <div class="viewer-main-column">
+        <div class="viewer-media-area">
+          <div id="viewer-loading" class="viewer-loading">
+            <div class="spinner"></div>
+            <span id="viewer-status">Loading...</span>
+          </div>
+          <img id="viewer-image" class="viewer-media hidden" alt="">
+          <div id="viewer-video-wrap" class="viewer-player-wrap hidden">
+            <video id="viewer-video" playsinline preload="auto"></video>
+          </div>
+          <div id="viewer-audio-wrap" class="viewer-player-wrap viewer-audio-player hidden">
+            <div class="audio-visual-stage">
+              <div class="audio-art-wrap">
+                <img id="viewer-audio-thumb" class="viewer-audio-thumb hidden" alt="">
+                <div id="viewer-audio-thumb-fallback" class="viewer-audio-thumb-fallback hidden">
+                  <span class="audio-fallback-icon">🎵</span>
+                </div>
+              </div>
+              <canvas id="viewer-audio-viz" class="viewer-audio-viz" aria-hidden="true"></canvas>
+            </div>
+            <audio id="viewer-audio" preload="auto"></audio>
+          </div>
+          <iframe id="viewer-frame" class="viewer-frame hidden" title="Document preview"></iframe>
+          <pre id="viewer-text" class="viewer-text vault-scroll hidden"></pre>
+        </div>
+        <div id="viewer-stats" class="viewer-stats hidden">
+          <div class="viewer-stat-grid">
+            <div class="viewer-stat">
+              <span class="viewer-stat-label">Chunks</span>
+              <span id="stat-chunks" class="viewer-stat-value">—</span>
+            </div>
+            <div class="viewer-stat">
+              <span class="viewer-stat-label">Progress</span>
+              <span id="stat-progress" class="viewer-stat-value">—</span>
+            </div>
+            <div class="viewer-stat">
+              <span class="viewer-stat-label">Stage</span>
+              <span id="stat-stage" class="viewer-stat-value">—</span>
+            </div>
+            <div class="viewer-stat">
+              <span class="viewer-stat-label">Speed</span>
+              <span id="stat-speed" class="viewer-stat-value">—</span>
+            </div>
+            <div class="viewer-stat">
+              <span class="viewer-stat-label">Duration</span>
+              <span id="stat-duration" class="viewer-stat-value">—</span>
+            </div>
+            <div class="viewer-stat">
+              <span class="viewer-stat-label">Buffered</span>
+              <span id="stat-buffered" class="viewer-stat-value">—</span>
+            </div>
+            <div class="viewer-stat">
+              <span class="viewer-stat-label">File size</span>
+              <span id="stat-size" class="viewer-stat-value">—</span>
+            </div>
+          </div>
+          <div class="viewer-stat-bar" aria-hidden="true">
+            <div id="stat-bar-fill" class="viewer-stat-bar-fill"></div>
+          </div>
+          <div id="viewer-chunk-blocks" class="chunk-blocks-wrap"></div>
+          <div id="viewer-hls-toggle" class="viewer-hls-toggle hidden"></div>
+        </div>
+        </div>
+        <aside id="viewer-playlist-panel" class="viewer-playlist-panel hidden vault-scroll" aria-label="Playlist queue">
+          <div class="playlist-panel-header">
+            <button type="button" id="viewer-playlist-toggle" class="playlist-panel-toggle" title="Collapse playlist" aria-label="Collapse playlist">◂</button>
+            <span class="playlist-panel-label">Queue</span>
+          </div>
+          <div class="playlist-panel-cover-wrap">
+            <img id="viewer-playlist-cover" class="playlist-panel-cover hidden" alt="">
+          </div>
+          <div class="playlist-panel-meta">
+            <span id="viewer-playlist-title" class="playlist-panel-title">Playlist</span>
+            <span id="viewer-playlist-meta" class="playlist-panel-count"></span>
+          </div>
+          <input type="search" id="viewer-playlist-search" class="playlist-panel-search" placeholder="Search queue…" autocomplete="off">
+          <div class="playlist-panel-controls">
+            <button type="button" id="viewer-playlist-prev" class="playlist-ctrl-btn" title="Previous">⏮</button>
+            <button type="button" id="viewer-playlist-next" class="playlist-ctrl-btn" title="Next">⏭</button>
+            <button type="button" id="viewer-playlist-shuffle" class="playlist-ctrl-btn" title="Shuffle">🔀</button>
+            <button type="button" id="viewer-playlist-repeat" class="playlist-ctrl-btn" title="Repeat" data-mode="off" aria-pressed="false">🔁</button>
+          </div>
+          <div id="viewer-playlist-list" class="playlist-panel-list vault-scroll"></div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlist modal -->
+  <div id="playlist-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="playlist-modal-title">New playlist</h2>
+        <button class="modal-close" data-close="playlist-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Title<input type="text" id="playlist-form-title" class="form-input" placeholder="My playlist"></label>
+        <label class="form-label">Description<textarea id="playlist-form-desc" class="form-input" rows="3" placeholder="Optional description"></textarea></label>
+        <label class="form-label">Visibility
+          <select id="playlist-form-visibility" class="form-input">
+            <option value="private">Private</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="public">Public</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary" id="btn-save-playlist">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Collection modal -->
+  <div id="collection-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="collection-modal-title">New collection</h2>
+        <button class="modal-close" data-close="collection-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Title<input type="text" id="collection-form-title" class="form-input" placeholder="My collection"></label>
+        <label class="form-label">Description<textarea id="collection-form-desc" class="form-input" rows="3"></textarea></label>
+        <label class="form-label">Visibility
+          <select id="collection-form-visibility" class="form-input">
+            <option value="private">Private</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="public">Public</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary" id="btn-save-collection">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlist picker (add files to playlist) -->
+  <div id="playlist-picker-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Add to playlist</h2>
+        <button class="modal-close" data-close="playlist-picker-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="playlist-picker-list" class="playlist-picker-list vault-scroll"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="playlist-picker-new">Create new playlist</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Collection builder -->
+  <div id="collection-builder-modal" class="modal hidden">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2 id="collection-builder-title">Manage collection</h2>
+        <button class="modal-close" data-close="collection-builder-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="builder-search-row">
+          <input type="text" id="collection-builder-search" class="form-input" placeholder="Search playlists to add…">
+          <button type="button" class="btn-secondary" id="collection-builder-add">Search</button>
+        </div>
+        <div id="collection-builder-results" class="builder-search-results"></div>
+        <div id="collection-builder-list" class="builder-item-list vault-scroll"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary" id="btn-save-collection-builder">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlist builder -->
+  <div id="playlist-builder-modal" class="modal hidden">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2 id="builder-title">Edit playlist</h2>
+        <button class="modal-close" data-close="playlist-builder-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="builder-search-row">
+          <input type="text" id="builder-search" class="form-input" placeholder="Search vault to add files…">
+          <button type="button" class="btn-secondary" id="builder-add-files">Search</button>
+        </div>
+        <div id="builder-search-results" class="builder-search-results"></div>
+        <div id="builder-item-list" class="builder-item-list vault-scroll"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary" id="btn-save-builder">Save playlist</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload Plan Modal -->
+  <div id="upload-plan-modal" class="modal hidden">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>Large file upload</h2>
+        <button class="modal-close" data-close="upload-plan-modal">&times;</button>
+      </div>
+      <div class="modal-body" id="plan-body"></div>
+      <div class="modal-body plan-controls">
+        <label for="plan-upload-mode">Upload method</label>
+        <select id="plan-upload-mode">
+          <option value="api">API chunks — resumable, one request per chunk</option>
+          <option value="git">Git clone &amp; push — faster for large files (requires git on server)</option>
+        </select>
+        <label for="plan-chunk-size">Chunk size (MB)</label>
+        <input type="number" id="plan-chunk-size" value="0.9" min="0.064" max="95" step="0.1">
+        <p class="plan-hint">Larger chunks = fewer API calls. GitHub allows max 100 MB per file — encrypted chunks are capped at 95 MB.</p>
+        <label class="plan-checkbox" id="plan-hls-label">
+          <input type="checkbox" id="plan-hls-convert">
+          Convert to HLS segments for streaming (MP4 only)
+        </label>
+        <p class="plan-hint" id="plan-hls-hint" style="display:none">Segments are stored in your GitHub repos and playable via m3u8 playlist — skip server-side transcoding.</p>
+      </div>
+      <div class="modal-footer">
+        <button id="plan-cancel" class="btn-secondary">Cancel</button>
+        <button id="plan-confirm" class="btn-primary">Upload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Details Modal -->
+  <div id="details-modal" class="modal hidden">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2>File details</h2>
+        <button class="modal-close" data-close="details-modal">&times;</button>
+      </div>
+      <div class="modal-body" id="details-body"></div>
+    </div>
+  </div>
+
+  <!-- Share Modal -->
+  <div id="share-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Share file</h2>
+        <button class="modal-close" data-close="share-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Anyone with this link can view or download the file.</p>
+        <label class="form-check share-client-toggle" style="display:flex;align-items:flex-start;gap:8px;margin:12px 0;text-align:left;">
+          <input type="checkbox" id="share-client-stream" checked style="margin-top:3px;">
+          <span>Decrypt media in the viewer's browser (no server download)</span>
+        </label>
+        <p class="form-hint">When enabled, encrypted chunks are fetched through the server but decrypted locally. Video and audio never touch server disk.</p>
+        <div class="share-url-row">
+          <input type="text" id="share-url" readonly>
+          <button id="share-copy" class="btn-primary">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cache Disk Context Menu -->
+  <div id="cache-context-menu" class="context-menu hidden">
+    <div class="context-item" data-action="cache-settings">Cache settings…</div>
+    <div class="context-item" data-action="clear-cache">Clear disk</div>
+  </div>
+
+  <!-- GitHub Vault Pool Context Menu -->
+  <div id="pool-context-menu" class="context-menu hidden">
+    <div class="context-item" data-action="increase-storage">Increase storage…</div>
+  </div>
+
+  <!-- Increase Storage Modal -->
+  <div id="storage-increase-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Increase pool storage</h2>
+        <button class="modal-close" data-close="storage-increase-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Creates new GitHub storage repos on the selected account. Each repo adds about <span id="storage-repo-capacity-label">1</span> GB of vault capacity.</p>
+        <label class="form-label" for="storage-increase-account">Create repos on</label>
+        <select id="storage-increase-account" class="form-input"></select>
+        <label class="form-label" for="storage-increase-gb">Additional storage (GB)</label>
+        <input type="number" id="storage-increase-gb" class="form-input" min="1" max="500" step="1" value="5">
+        <p class="form-hint" id="storage-increase-hint">Will create 5 new repos (~5 GB total).</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" data-close="storage-increase-modal">Cancel</button>
+        <button type="button" id="btn-confirm-storage-increase" class="btn-primary">Create repos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cache Settings Modal -->
+  <div id="cache-settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Cache disk settings</h2>
+        <button class="modal-close" data-close="cache-settings-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Local disk cache stores decrypted files and streaming segments for faster playback and repeat downloads.</p>
+        <label class="form-label" for="cache-max-gb">Maximum cache size (GB)</label>
+        <input type="number" id="cache-max-gb" class="form-input" min="0.1" max="1024" step="0.5" value="10">
+        <p class="form-hint" id="cache-settings-usage"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" data-close="cache-settings-modal">Cancel</button>
+        <button type="button" id="btn-save-cache-settings" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context Menu -->
+  <div id="context-menu" class="context-menu hidden">
+    <div id="context-item-actions">
+      <div class="context-item" data-action="open">Open</div>
+      <div class="context-item" data-action="preview">Preview</div>
+      <div class="context-item" data-action="rename">Rename</div>
+      <div class="context-item" data-action="details">Details</div>
+      <div class="context-item" data-action="share">Share</div>
+      <div class="context-item" data-action="download">Download</div>
+      <div class="context-item" data-action="move">Move to...</div>
+      <div class="context-item" data-action="favorite">Add to favorites</div>
+      <div class="context-item" data-action="add-to-playlist">Add to playlist</div>
+      <div class="context-item" data-action="refresh-thumb">Refresh thumbnail</div>
+      <div class="context-item hls-convert-item hidden" data-action="hls-convert">Convert to HLS</div>
+      <div class="context-separator"></div>
+      <div class="context-item context-danger" data-action="delete">Move to trash</div>
+    </div>
+    <div id="context-trash-actions" class="hidden">
+      <div class="context-item" data-action="restore">Restore</div>
+      <div class="context-separator"></div>
+      <div class="context-item context-danger" data-action="permanent-delete">Delete permanently</div>
+    </div>
+    <div id="context-blank-actions" class="hidden">
+      <div class="context-item" data-action="new-playlist">New playlist</div>
+      <div class="context-item" data-action="new-collection">New collection</div>
+      <div class="context-item" data-action="new-folder">New folder</div>
+      <div class="context-item" data-action="upload">Upload files</div>
+      <div class="context-separator"></div>
+      <div class="context-item" data-action="refresh-view">Refresh</div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Upload Center -->
+  <div id="upload-center" class="upload-center hidden" role="dialog" aria-label="Upload center">
+    <div class="upload-center-panel">
+      <div class="upload-center-header">
+        <h2>Upload Center</h2>
+        <button type="button" id="upload-center-close" class="viewer-close" aria-label="Close">×</button>
+      </div>
+      <div class="upload-center-tabs" role="tablist">
+        <button type="button" class="upload-center-tab active" data-tab="active" role="tab" aria-selected="true">Active <span class="upload-center-tab-count" data-for="active"></span></button>
+        <button type="button" class="upload-center-tab" data-tab="paused" role="tab">Paused <span class="upload-center-tab-count" data-for="paused"></span></button>
+        <button type="button" class="upload-center-tab" data-tab="failed" role="tab">Failed <span class="upload-center-tab-count" data-for="failed"></span></button>
+        <button type="button" class="upload-center-tab" data-tab="completed" role="tab">Completed <span class="upload-center-tab-count" data-for="completed"></span></button>
+      </div>
+      <div id="upload-center-list" class="upload-center-list vault-scroll"></div>
+    </div>
+  </div>
+
+  <!-- Global Search -->
+  <div id="global-search" class="global-search-overlay hidden" role="dialog" aria-label="Global search">
+    <div class="global-search-panel">
+      <div class="global-search-header">
+        <input type="text" id="global-search-input" class="global-search-input" placeholder="Search entire vault…" autocomplete="off">
+        <button type="button" id="global-search-close" class="nav-btn" aria-label="Close">✕</button>
+      </div>
+      <div id="global-search-recent" class="global-search-recent"></div>
+      <div id="global-search-results" class="global-search-results vault-scroll"></div>
+    </div>
+  </div>
+
+  <!-- Command Palette -->
+  <div class="cmd-palette-overlay hidden" id="cmd-palette">
+    <div class="cmd-palette" role="dialog" aria-label="Command palette">
+      <div class="cmd-header">
+        <span>Command Palette</span>
+        <kbd>Esc</kbd>
+      </div>
+      <input type="text" class="cmd-input" id="cmd-input" placeholder="Search files, create folders, upload..." autocomplete="off" autofocus>
+      <div class="cmd-results" id="cmd-results"></div>
+    </div>
+  </div>
+  <script src="/js/hls.min.js"></script>
+
+  <script src="/js/plyr.polyfilled.min.js"></script>
+  <script src="/js/media-player.js"></script>
+  <script src="/js/api.js?v=5"></script>
+  <script src="/js/playback-memory.js"></script>
+  <script src="/js/pdf-viewer.js"></script>
+  <script src="/js/image-viewer.js"></script>
+  <script src="/js/details-preview.js"></script>
+  <script src="/js/thumb-cache.js"></script>
+  <script src="/js/virtual-scroll.js"></script>
+  <script src="/js/display-names.js"></script>
+  <script src="/js/upload-store.js"></script>
+  <script src="/js/adaptive-concurrency.js"></script>
+  <script src="/js/upload-manager.js"></script>
+  <script src="/js/chunk-blocks.js"></script>
+  <script src="/js/download-manager.js"></script>
+  <script src="/js/tasks.js"></script>
+  <script src="/js/audio-queue.js"></script>
+  <script src="/js/playlist-queue.js"></script>
+  <script src="/js/playlist-player.js"></script>
+  <script src="/js/playlists.js"></script>
+  <script src="/js/viewer.js"></script>
+  <script src="/js/viewers.js"></script>
+  <script src="/js/bandwidth.js"></script>
+  <script src="/js/explorer.js"></script>
+  <script src="/js/upload-center.js"></script>
+  <script src="/js/global-search.js"></script>
+  <script src="/js/explorer-keyboard.js"></script>
+  <script src="/js/app.js?v=5"></script>
+</body>
+</html>
