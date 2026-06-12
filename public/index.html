@@ -814,7 +814,7 @@
           <input type="checkbox" id="plan-hls-convert">
           Convert to HLS segments for streaming (MP4 only)
         </label>
-        <p class="plan-hint" id="plan-hls-hint" style="display:none">Segments are stored in your GitHub repos and playable via m3u8 playlist — skip server-side transcoding.</p>
+        <p class="plan-hint" id="plan-hls-hint" style="display:none">HLS uses stream copy (~same size as the original) in addition to encrypted chunks. Total storage reserved is roughly 2× the file size.</p>
       </div>
       <div class="modal-footer">
         <button id="plan-cancel" class="btn-secondary">Cancel</button>

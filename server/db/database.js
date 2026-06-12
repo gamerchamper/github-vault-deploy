@@ -299,6 +299,8 @@ try {
 } catch { /* exists */ }
 
 ensureColumn('playlist_items', 'display_name', 'TEXT');
+ensureColumn('storage_repos', 'reserved_bytes', 'INTEGER DEFAULT 0');
+ensureColumn('files', 'hls_reserved', 'TEXT');
 
 try {
   db.exec(`

@@ -34,15 +34,26 @@ const router = express.Router();
 const viewMode = require('../services/view-mode');
 const downloadSession = require('../services/download-session');
 
+function formatFeedbackBytes(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
 function getStorageFeedback(userId, plan = null, task = null) {
   const repos = db.prepare(`
-    SELECT id, full_name, is_active, is_metadata, COALESCE(total_bytes, 0) as total_bytes
+    SELECT id, full_name, is_active, is_metadata,
+      COALESCE(total_bytes, 0) as total_bytes,
+      COALESCE(reserved_bytes, 0) as reserved_bytes
     FROM storage_repos
     WHERE user_id = ? AND is_metadata = 0
   `).all(userId);
+  const capacitySvc = require('../services/capacity');
   const active = repos.filter(r => r.is_active);
-  const available = active.filter(r => r.total_bytes < REPO_CAPACITY_BYTES);
-  const usedBytes = active.reduce((sum, r) => sum + r.total_bytes, 0);
+  const available = active.filter(
+    (r) => capacitySvc.getRepoEffectiveBytes(r) < REPO_CAPACITY_BYTES
+  );
+  const usedBytes = active.reduce((sum, r) => sum + capacitySvc.getRepoEffectiveBytes(r), 0);
   const capacityBytes = active.length * REPO_CAPACITY_BYTES;
   const availableBytes = Math.max(0, capacityBytes - usedBytes);
   const warnings = [];
@@ -50,6 +61,15 @@ function getStorageFeedback(userId, plan = null, task = null) {
   if (active.length > 0 && available.length === 0) warnings.push('All active storage repositories are full.');
   if (plan?.needsConfig) warnings.push('Storage repositories must be configured before upload.');
   if (plan?.allFull) warnings.push('Storage pool is full. Add storage or delete files before upload.');
+  if (plan?.insufficientSpace) {
+    warnings.push(
+      plan.convertHls
+        ? `Not enough space for the encrypted file and HLS segments (need ${formatFeedbackBytes(plan.totalStorageBytes)}, `
+          + `${formatFeedbackBytes(plan.storageAvailableBytes)} free).`
+        : `Not enough space for this upload (need ${formatFeedbackBytes(plan.totalStorageBytes)}, `
+          + `${formatFeedbackBytes(plan.storageAvailableBytes)} free).`
+    );
+  }
   return {
     task: task ? {
       id: task.id,
@@ -290,12 +310,17 @@ router.get('/folders', (req, res) => {
 
 router.post('/plan', (req, res) => {
   try {
-    const { size, chunkSize, contentHash: hash } = req.body;
+    const { size, chunkSize, contentHash: hash, convertHls, mimeType, fileName } = req.body;
     if (!size) return res.status(400).json({ error: 'size required' });
     const plan = storage.planUpload(
       parseInt(size, 10),
       parseInt(chunkSize, 10) || storage.CHUNK_SIZE,
-      req.user.id
+      req.user.id,
+      {
+        convertHls: !!(convertHls && (mimeType?.startsWith('video/') || /\.mp4$/i.test(fileName || ''))),
+        mimeType: mimeType || null,
+        fileName: fileName || null,
+      }
     );
     const duplicate = hash ? contentHash.findDuplicate(req.user.id, hash) : null;
     res.json({
@@ -390,6 +415,12 @@ router.post('/upload/init', async (req, res) => {
       });
     }
 
+    const uploadMode = req.body.uploadMode === 'git' ? 'git' : 'api';
+    const convertHls = !!(
+      req.body.convertHls
+      && (mimeType?.startsWith('video/') || /\.mp4$/i.test(fileName || ''))
+    );
+
     const session = await storage.initUploadSession(req.user.id, {
       fileName,
       parentPath: parentPath || '/',
@@ -397,10 +428,8 @@ router.post('/upload/init', async (req, res) => {
       mimeType,
       chunkSize: parseInt(chunkSize, 10) || storage.CHUNK_SIZE,
       fileId,
+      convertHls,
     });
-
-    const uploadMode = req.body.uploadMode === 'git' ? 'git' : 'api';
-    const convertHls = !!(req.body.convertHls && mimeType?.startsWith('video/'));
     if (convertHls) {
       const ffmpegOk = await hlsConvert.isFfmpegAvailable();
       if (!ffmpegOk) {
@@ -574,6 +603,13 @@ router.post('/upload/complete', chunkUpload.single('preview'), async (req, res) 
       contentHash.storeHash(result.id, req.body.contentHash);
     }
 
+    const rawConvertHls = req.body.convertHls;
+    const convertHls = rawConvertHls === '1' || rawConvertHls === true || rawConvertHls === 'true';
+    const isMp4 = /^video\//.test(result.mime_type) || /\.mp4$/i.test(result.name || '');
+    let hlsTaskId = null;
+
+    console.log(`[upload/complete] convertHls=${convertHls} raw=${JSON.stringify(rawConvertHls)} isMp4=${isMp4} taskId=${!!taskId} name=${result.name}`);
+
     if (taskId) {
       tasks.update(taskId, req.user.id, {
         status: 'done',
@@ -584,46 +620,48 @@ router.post('/upload/complete', chunkUpload.single('preview'), async (req, res) 
       });
     }
 
-    const rawConvertHls = req.body.convertHls;
-    const convertHls = rawConvertHls === '1';
-    const isMp4 = /^video\//.test(result.mime_type) || /\.mp4$/i.test(result.name || '');
-    console.log(`[upload/complete] convertHls=${convertHls} raw=${JSON.stringify(rawConvertHls)} isMp4=${isMp4} taskId=${!!taskId} name=${result.name}`);
-    if (convertHls && isMp4 && taskId) {
-      console.log(`[upload/complete] Starting HLS conversion for ${fileId}`);
-      tasks.update(taskId, req.user.id, {
+    if (convertHls && isMp4) {
+      hlsTaskId = uuidv4();
+      console.log(`[upload/complete] Starting HLS conversion task ${hlsTaskId} for ${fileId}`);
+      tasks.create(req.user.id, {
+        id: hlsTaskId,
+        type: 'hls-convert',
+        title: `Converting ${result.name} to HLS...`,
+        payload: { fileId, fileName: result.name, uploadTaskId: taskId || null },
+      });
+      tasks.update(hlsTaskId, req.user.id, {
         status: 'processing',
-        phase: 'hls-convert',
+        phase: 'assembling',
         percent: 2,
-        title: `Converting ${result.name} to HLS segments...`,
+        lastLog: 'Queued HLS conversion after upload',
       });
       hlsConvert.convertFile(req.user.id, fileId, (p) => {
-        updateHlsTaskProgress(taskId, req.user.id, p);
-      }, taskId).then((hlsResult) => {
+        updateHlsTaskProgress(hlsTaskId, req.user.id, p);
+      }, hlsTaskId).then((hlsResult) => {
         console.log(`[upload/complete] HLS conversion succeeded for ${fileId}: ${hlsResult.segments} segments, playlist at ${hlsResult.playlist}`);
-        if (taskId) {
-          tasks.update(taskId, req.user.id, {
-            status: 'done',
-            percent: 100,
-            phase: 'done',
-            file: { ...result, hls: hlsResult },
-          });
-        }
+        if (isHlsTaskCancelled(hlsTaskId, req.user.id)) return;
+        tasks.update(hlsTaskId, req.user.id, {
+          status: 'done',
+          percent: 100,
+          phase: 'done',
+          file: { ...result, hls: hlsResult },
+        });
       }).catch((err) => {
         console.error(`[upload/complete] HLS conversion failed: ${err.message}`, err.stack?.split('\n').slice(0, 3).join('\n'));
-        if (taskId) {
-          tasks.appendLog(taskId, req.user.id, `HLS conversion failed: ${err.message}`);
-          tasks.update(taskId, req.user.id, {
-            status: 'done',
-            percent: 100,
-            phase: 'done',
-            file: result,
-          });
-        }
+        if (isHlsTaskCancelled(hlsTaskId, req.user.id)) return;
+        if (err.message === 'Cancelled') return;
+        tasks.appendLog(hlsTaskId, req.user.id, `HLS conversion failed: ${err.message}`);
+        tasks.update(hlsTaskId, req.user.id, {
+          status: 'error',
+          error: err.message,
+          resumable: false,
+        });
       });
     }
 
     res.json({
       ...result,
+      hlsTaskId,
       feedback: getStorageFeedback(req.user.id, null, taskId ? tasks.get(taskId, req.user.id) : null),
     });
   } catch (err) {

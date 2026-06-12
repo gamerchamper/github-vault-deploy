@@ -210,6 +210,13 @@ const UploadManager = {
       if (onProgress) onProgress(doneJob);
       TaskPanel.handleTask(doneJob);
 
+      if (result?.hlsTaskId) {
+        TaskPanel.track(result.hlsTaskId);
+        if (convertHls) {
+          App.toast(`Upload complete — converting ${session.fileName} to HLS`, 'success');
+        }
+      }
+
       return result;
     } catch (err) {
       if (err?.name !== 'AbortError' && !this.pauseRequested.has(taskId)) {

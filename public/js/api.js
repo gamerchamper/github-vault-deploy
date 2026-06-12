@@ -115,7 +115,8 @@ const API = {
         throw err;
       }
     },
-    plan: (size, chunkSize) => API.post('/api/files/plan', { size, chunkSize }),
+    plan: (size, chunkSize, { convertHls = false, mimeType = null, fileName = null } = {}) =>
+      API.post('/api/files/plan', { size, chunkSize, convertHls, mimeType, fileName }),
     details: (id) => API.get(`/api/files/details/${id}`),
     share: (id) => API.post(`/api/files/share/${id}`),
     unshare: (id) => API.delete(`/api/files/share/${id}`),

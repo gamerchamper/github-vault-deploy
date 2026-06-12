@@ -135,6 +135,16 @@ function cleanupStaleTasksAllUsers() {
   return cleaned;
 }
 
+const HLS_ACTIVE_PHASES = new Set(['hls-convert', 'assembling', 'converting', 'playlist']);
+
+function uploadTaskHasPendingHls(row, payload, fileRow) {
+  if (HLS_ACTIVE_PHASES.has(row.phase)) return true;
+  if (row.phase === 'uploading' && payload.segmentsTotal) return true;
+  if (!payload.convertHls || !payload.fileId) return false;
+  if (fileRow?.has_hls) return false;
+  return fileRow?.upload_status === 'ready';
+}
+
 function cleanupStaleUploadTasks(userId) {
   const rows = db.prepare(`
     SELECT id, title, phase, percent, payload, updated_at
@@ -148,17 +158,18 @@ function cleanupStaleUploadTasks(userId) {
     const fileName = payload.fileName || row.title;
     let file = null;
     if (payload.fileId) {
-      file = db.prepare('SELECT upload_status FROM files WHERE id = ? AND user_id = ?')
+      file = db.prepare('SELECT upload_status, has_hls FROM files WHERE id = ? AND user_id = ?')
         .get(payload.fileId, userId);
     } else if (fileName) {
       file = db.prepare(`
-        SELECT upload_status FROM files
+        SELECT upload_status, has_hls FROM files
         WHERE user_id = ? AND name = ? AND is_folder = 0
         ORDER BY updated_at DESC LIMIT 1
       `).get(userId, fileName);
     }
 
     if (file?.upload_status === 'ready') {
+      if (uploadTaskHasPendingHls(row, payload, file)) continue;
       update(row.id, userId, {
         status: 'done',
         phase: 'done',

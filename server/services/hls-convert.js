@@ -9,7 +9,8 @@ const cache = require('./cache');
 const storage = require('./storage');
 const crypto = require('./crypto');
 const { recordBytes } = require('./bandwidth');
-const { REPO_CAPACITY_BYTES } = require('./capacity');
+const capacity = require('./capacity');
+const { REPO_CAPACITY_BYTES } = capacity;
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -48,6 +49,7 @@ async function cancelConversion(userId, fileId) {
       job.ffmpegChild.kill('SIGTERM');
     }
   }
+  capacity.releaseHlsReserve(userId, fileId);
   db.prepare('DELETE FROM hls_segments WHERE file_id = ?').run(fileId);
   db.prepare(`
     UPDATE files SET has_hls = 0, hls_playlist_repo_id = NULL, hls_playlist_path = NULL
@@ -177,6 +179,7 @@ async function uploadSegment(userId, fileId, segment, repos, segmentIndex) {
   db.prepare(
     'UPDATE storage_repos SET total_bytes = total_bytes + ?, chunk_count = chunk_count + 1 WHERE id = ?'
   ).run(data.length, repo.id);
+  capacity.consumeHlsReserve(userId, fileId, repo.id, data.length);
 
   recordBytes(userId, fileId, data.length, 'hls_upload');
 
@@ -275,7 +278,7 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
     WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
       AND (r.repo_role IS NULL OR r.repo_role = 'primary')
       AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
-      AND (r.total_bytes IS NULL OR r.total_bytes < ?)
+      AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
     ORDER BY r.chunk_count ASC
   `).all(userId, REPO_CAPACITY_BYTES);
   if (repos.length === 0) { log('No repos found'); throw new Error('No storage repositories configured'); }
@@ -347,7 +350,11 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
 
     if (onProgress) onProgress({ phase: 'done', percent: 100, lastLog: 'HLS conversion complete' });
 
+    capacity.releaseHlsReserve(userId, fileId);
     return { fileId, hls: true, segments: total, playlist: playlist.repoPath };
+  } catch (err) {
+    if (err.message !== 'Cancelled') capacity.releaseHlsReserve(userId, fileId);
+    throw err;
   } finally {
     activeJobs.delete(jobKey(userId, fileId));
     try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}

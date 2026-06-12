@@ -8,7 +8,8 @@ const metadata = require('./metadata');
 const thumbnails = require('./thumbnails');
 const accounts = require('./accounts');
 const appUrl = require('./app-url');
-const { REPO_CAPACITY_BYTES } = require('./capacity');
+const capacity = require('./capacity');
+const { REPO_CAPACITY_BYTES } = capacity;
 
 function touchFile(fileId) {
   if (!fileId) return;
@@ -57,7 +58,7 @@ function getActiveRepos(userId) {
     WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
       AND (r.repo_role IS NULL OR r.repo_role = 'primary')
       AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
-      AND (r.total_bytes IS NULL OR r.total_bytes < ?)
+      AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
     ORDER BY r.chunk_count ASC
   `).all(userId, REPO_CAPACITY_BYTES);
 }
@@ -169,10 +170,26 @@ function findNextChunkIndex(fileId, totalChunks) {
   return totalChunks;
 }
 
-function planUpload(fileSize, chunkSize, userId) {
+function shouldReserveHls(convertHls, mimeType, fileName) {
+  if (!convertHls) return false;
+  return (mimeType || '').startsWith('video/') || /\.mp4$/i.test(fileName || '');
+}
+
+function assertUploadCapacity(repos, fileSize, chunkSize, convertHls, mimeType, fileName) {
+  const reserveHls = shouldReserveHls(convertHls, mimeType, fileName);
+  const projection = capacity.checkUploadFits(repos, fileSize, chunkSize, reserveHls);
+  if (!projection.fits) {
+    throw new Error(capacity.uploadFitsError(projection));
+  }
+  return projection;
+}
+
+function planUpload(fileSize, chunkSize, userId, options = {}) {
+  const { convertHls = false, mimeType = null, fileName = null } = options;
   const normalizedChunkSize = normalizeChunkSize(chunkSize);
   const repos = getActiveRepos(userId);
   const repoCount = Math.max(repos.length, 1);
+  const reserveHls = shouldReserveHls(convertHls, mimeType, fileName);
 
   let allFull = false;
   if (repos.length === 0) {
@@ -181,7 +198,11 @@ function planUpload(fileSize, chunkSize, userId) {
     ).get(userId);
     allFull = anyRepo.count > 0;
   }
-  const encryptedEstimate = Math.ceil(fileSize * 1.02);
+  const storageProjection = capacity.projectUploadStorage(
+    repos, fileSize, normalizedChunkSize, reserveHls
+  );
+  if (repos.length > 0 && !storageProjection.fits) allFull = true;
+  const encryptedEstimate = storageProjection.uploadBytes;
   const totalChunks = Math.ceil(encryptedEstimate / normalizedChunkSize) || 1;
   const perRepo = {};
   const distribution = [];
@@ -212,6 +233,13 @@ function planUpload(fileSize, chunkSize, userId) {
     estimatedTime: formatDuration(estimatedSeconds),
     needsConfig: repos.length === 0 && !allFull,
     allFull,
+    convertHls: reserveHls,
+    uploadBytesEstimate: storageProjection.uploadBytes,
+    hlsBytesEstimate: storageProjection.hlsBytes,
+    totalStorageBytes: storageProjection.totalBytes,
+    insufficientSpace: repos.length > 0 && !storageProjection.fits,
+    storageAvailableBytes: storageProjection.poolAvailableBytes,
+    storageShortfallBytes: storageProjection.insufficientBytes,
   };
 }
 
@@ -409,6 +437,7 @@ async function initUploadSession(userId, params) {
     mimeType,
     chunkSize: rawChunkSize = CHUNK_SIZE,
     fileId: resumeFileId,
+    convertHls = false,
   } = params;
 
   let chunkSize = normalizeChunkSize(rawChunkSize);
@@ -425,6 +454,8 @@ async function initUploadSession(userId, params) {
       ? 'All storage repositories are full (reached 1 GB limit). Add more repos or remove files.'
       : 'No storage repositories configured.');
   }
+
+  assertUploadCapacity(repos, size, chunkSize, convertHls, mimeType, fileName);
 
   const normalizedParent = normalizeParentPath(parentPath);
   let totalChunks = Math.ceil(size / chunkSize) || 1;
@@ -484,6 +515,10 @@ async function initUploadSession(userId, params) {
         JSON.stringify(encryptionMeta)
       );
     }
+  }
+
+  if (shouldReserveHls(convertHls, mimeType, fileName)) {
+    capacity.ensureHlsReserved(userId, fileId, size, repos);
   }
 
   const chunksDone = getUploadedChunkCount(fileId);
@@ -1362,6 +1397,8 @@ async function deleteFile(userId, fileId) {
 
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file) throw new Error('File not found');
+
+  capacity.releaseHlsReserve(userId, fileId);
 
   if (file.is_folder) {
     const children = db.prepare(

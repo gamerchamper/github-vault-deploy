@@ -373,7 +373,9 @@ const TaskPanel = {
     }, 6000));
 
     if (task.type === 'upload') {
-      App.toast(`Uploaded ${task.fileName || task.title}`, 'success');
+      if (!task.convertHls) {
+        App.toast(`Uploaded ${task.fileName || task.title}`, 'success');
+      }
       explorer.refresh({ filesOnly: true });
       App.loadStats();
     }

@@ -1435,15 +1435,32 @@ const App = {
       const render = async () => {
         const cs = this.chunkSizeFromMbInput(chunkInput);
         const selectedMode = modeSelect?.value || UploadPrefs.get();
+        const convertHls = !!(hlsCheck?.checked && isMp4);
         try {
-          const plan = await API.files.plan(file.size, cs);
+          const plan = await API.files.plan(file.size, cs, {
+            convertHls,
+            mimeType: file.type || null,
+            fileName: file.name,
+          });
           if (plan.maxChunkMb) {
             chunkInput.max = String(plan.maxChunkMb);
           }
+          const storageBlocked = plan.insufficientSpace || plan.allFull;
+          const confirmBtn = document.getElementById('plan-confirm');
+          if (confirmBtn) {
+            confirmBtn.disabled = storageBlocked;
+            confirmBtn.title = storageBlocked
+              ? 'Not enough storage for this upload'
+              : '';
+          }
           body.innerHTML = `
             <p><strong>${file.name}</strong> — ${formatSize(file.size)}</p>
-            ${plan.allFull
-              ? '<p class="plan-error">⚠️ All storage repositories are full (reached 1 GB limit). Add more repos or delete files before uploading.</p>'
+            ${storageBlocked
+              ? `<p class="plan-error">⚠️ ${plan.insufficientSpace && plan.convertHls
+                ? `Not enough storage for the encrypted file and HLS segments `
+                  + `(~${formatSize(plan.totalStorageBytes)} needed, `
+                  + `${formatSize(plan.storageAvailableBytes)} free).`
+                : 'All storage repositories are full (reached 1 GB limit). Add more repos or delete files before uploading.'}</p>`
               : ''}
             <div class="plan-grid">
               <div><span class="plan-label">Chunks</span><span>${plan.totalChunks}</span></div>
@@ -1451,6 +1468,12 @@ const App = {
               <div><span class="plan-label">Repos</span><span>${plan.repoCount}</span></div>
               <div><span class="plan-label">Est. time</span><span>${plan.estimatedTime}</span></div>
             </div>
+            ${plan.convertHls ? `<div class="plan-grid">
+              <div><span class="plan-label">Encrypted file</span><span>${formatSize(plan.uploadBytesEstimate)}</span></div>
+              <div><span class="plan-label">HLS segments</span><span>~${formatSize(plan.hlsBytesEstimate)}</span></div>
+              <div><span class="plan-label">Total storage</span><span>~${formatSize(plan.totalStorageBytes)}</span></div>
+              <div><span class="plan-label">Pool free</span><span>${formatSize(plan.storageAvailableBytes)}</span></div>
+            </div>` : ''}
             <p class="plan-note">GitHub Contents API limit: ${plan.githubMaxMb} MB per stored file.</p>
             <p class="plan-note">Upload method: <strong>${selectedMode === 'git' ? 'Git clone & push' : 'API chunks (resumable)'}</strong></p>
             ${plan.repoCount > 0 ? `<h4>Distribution</h4>
@@ -1467,6 +1490,7 @@ const App = {
       if (hlsCheck) {
         hlsCheck.onchange = () => {
           if (hlsHint) hlsHint.style.display = hlsCheck.checked ? '' : 'none';
+          render();
         };
       }
 
@@ -1491,7 +1515,7 @@ const App = {
       document.getElementById('plan-confirm').onclick = () => {
         const cs = this.chunkSizeFromMbInput(chunkInput);
         const uploadMode = modeSelect?.value || UploadPrefs.get();
-        const convertHls = hlsCheck ? hlsCheck.checked : false;
+        const convertHls = !!(hlsCheck?.checked && isMp4);
         console.log('[upload] plan confirmed', { cs, uploadMode, convertHls, checked: hlsCheck?.checked });
         UploadPrefs.set(uploadMode);
         cleanup();

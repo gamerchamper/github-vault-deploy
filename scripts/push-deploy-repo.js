@@ -240,18 +240,87 @@ async function getBaseCommit(octokit, owner, repo, branch) {
   }
 }
 
-async function createBlobs(octokit, owner, repo, files) {
-  let done = 0;
-  const total = files.length;
+function authHelpMessage(status, owner, repo) {
+  if (status === 401) {
+    return [
+      'GitHub rejected the token (Bad credentials).',
+      '- Create a new PAT at https://github.com/settings/tokens',
+      '- Classic token: enable the "repo" scope (required for private repos)',
+      '- Fine-grained token: grant this repository + Contents (Read and write) + Metadata (Read)',
+      '- If you revoked the old token after a chat paste, generate a fresh one',
+      '- Prefer: $env:GITHUB_DEPLOY_TOKEN = "ghp_..." (do not pass tokens on the command line)',
+    ].join('\n');
+  }
+  if (status === 403) {
+    return [
+      `Token is valid but cannot write to ${owner}/${repo}.`,
+      '- For private repos, ensure the PAT has repo / Contents write access',
+      '- For org-owned repos, authorize the token for SSO on the token settings page',
+    ].join('\n');
+  }
+  if (status === 404) {
+    return [
+      `Repository ${owner}/${repo} not found or not visible to this token.`,
+      '- If the repo is private, the PAT must include private repository access',
+      '- Confirm the owner/name and that your account can see the repo in the browser',
+    ].join('\n');
+  }
+  return null;
+}
 
-  return mapPool(files, BLOB_CONCURRENCY, async (file) => {
-    const content = fs.readFileSync(file.absPath);
+async function verifyDeployAccess(octokit, owner, repo) {
+  try {
+    const { data: user } = await octokit.users.getAuthenticated();
+    console.log(`Authenticated as ${user.login}`);
+  } catch (err) {
+    const help = authHelpMessage(err?.status, owner, repo);
+    throw new Error(help || err.message);
+  }
+
+  try {
+    const { data: repoInfo } = await octokit.repos.get({ owner, repo });
+    console.log(
+      `Repo ${repoInfo.full_name} (${repoInfo.private ? 'private' : 'public'})`
+      + ` — default branch: ${repoInfo.default_branch || 'main'}`
+    );
+    return repoInfo;
+  } catch (err) {
+    const help = authHelpMessage(err?.status, owner, repo);
+    throw new Error(help || err.message);
+  }
+}
+
+async function createBlobWithRetry(octokit, owner, repo, file, attempt = 1) {
+  const content = fs.readFileSync(file.absPath);
+  try {
     const { data } = await octokit.git.createBlob({
       owner,
       repo,
       content: content.toString('base64'),
       encoding: 'base64',
     });
+    return data.sha;
+  } catch (err) {
+    if (err?.status === 401 || err?.status === 403) {
+      const help = authHelpMessage(err.status, owner, repo);
+      throw new Error(`${help}\nFailed while uploading blob: ${file.relPath}`);
+    }
+    const retryable = [408, 429, 500, 502, 503].includes(err?.status);
+    if (retryable && attempt < 4) {
+      const delay = 1000 * (2 ** (attempt - 1));
+      await new Promise((r) => setTimeout(r, delay));
+      return createBlobWithRetry(octokit, owner, repo, file, attempt + 1);
+    }
+    throw err;
+  }
+}
+
+async function createBlobs(octokit, owner, repo, files) {
+  let done = 0;
+  const total = files.length;
+
+  return mapPool(files, BLOB_CONCURRENCY, async (file) => {
+    const sha = await createBlobWithRetry(octokit, owner, repo, file);
     done++;
     if (done % 25 === 0 || done === total) {
       process.stdout.write(`\rBlobs: ${done}/${total}`);
@@ -260,7 +329,7 @@ async function createBlobs(octokit, owner, repo, files) {
       path: file.relPath,
       mode: '100644',
       type: 'blob',
-      sha: data.sha,
+      sha,
     };
   });
 }
@@ -341,10 +410,10 @@ async function main() {
   const { owner, repo } = splitRepo(opts.repo);
   const octokit = new Octokit({ auth: opts.token });
 
-  const me = await octokit.users.getAuthenticated();
-  if (owner.toLowerCase() !== me.data.login.toLowerCase()) {
+  const repoInfo = await verifyDeployAccess(octokit, owner, repo);
+  if (owner.toLowerCase() !== repoInfo.owner.login.toLowerCase()) {
     console.warn(
-      `Warning: repo owner "${owner}" differs from authenticated user "${me.data.login}".`
+      `Warning: repo owner "${owner}" differs from authenticated user "${repoInfo.owner.login}".`
       + ' Ensure your token can write to this repo.'
     );
   }
@@ -367,6 +436,10 @@ async function main() {
 main().catch((err) => {
   const msg = err?.response?.data?.message || err.message || String(err);
   console.error(`\nDeploy failed: ${msg}`);
-  if (err?.status) console.error(`GitHub status: ${err.status}`);
+  if (err?.status && !String(msg).includes('GitHub rejected')) {
+    const help = authHelpMessage(err.status);
+    if (help) console.error(`\n${help}`);
+    console.error(`GitHub status: ${err.status}`);
+  }
   process.exit(1);
 });
