@@ -1130,11 +1130,13 @@ class Explorer {
     const detailsItem = menu.querySelector('[data-action="details"]');
     const shareItem = menu.querySelector('[data-action="share"]');
     const thumbItem = menu.querySelector('[data-action="refresh-thumb"]');
+    const verifyItem = menu.querySelector('[data-action="verify-file"]');
     const hlsItem = menu.querySelector('[data-action="hls-convert"]');
     dlItem.style.display = file.is_folder ? 'none' : '';
     detailsItem.style.display = file.is_folder ? 'none' : '';
     shareItem.style.display = '';
     if (thumbItem) thumbItem.style.display = file.is_folder ? 'none' : '';
+    if (verifyItem) verifyItem.style.display = file.is_folder ? 'none' : '';
     if (hlsItem) {
       const isVideo = !file.is_folder && (file.mime_type?.startsWith('video/') || /\.mp4$/i.test(file.name || ''));
       hlsItem.classList.toggle('hidden', !isVideo);
@@ -1154,6 +1156,7 @@ class Explorer {
       detailsItem.style.display = 'none';
       shareItem.style.display = 'none';
       if (thumbItem) thumbItem.style.display = 'none';
+      if (verifyItem) verifyItem.style.display = 'none';
       hlsItem?.classList.add('hidden');
       if (moveItem) moveItem.style.display = 'none';
       if (addPlaylistItem) addPlaylistItem.style.display = 'none';

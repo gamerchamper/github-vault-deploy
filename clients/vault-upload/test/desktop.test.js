@@ -126,13 +126,20 @@ describe('desktop launcher', function () {
     expect(captured.options.stdio).to.equal('pipe');
   });
 
-  it('should expose a native file picker through IPC', async function () {
+  it('should expose a native multi-file picker through IPC', async function () {
+    let dialogOpts = null;
     const electron = createFakeElectron();
+    electron.dialog.showOpenDialog = async (opts) => {
+      dialogOpts = opts;
+      return { canceled: false, filePaths: ['C:\\big.bin', 'C:\\other.bin'] };
+    };
     setupDesktopIpc(electron);
 
     expect(electron.ipcMain.handlers['vault:select-file']).to.be.a('function');
     const result = await electron.ipcMain.handlers['vault:select-file']();
+    expect(dialogOpts.properties).to.include('multiSelections');
     expect(result.canceled).to.equal(false);
+    expect(result.filePaths).to.deep.equal(['C:\\big.bin', 'C:\\other.bin']);
     expect(result.filePath).to.equal('C:\\big.bin');
   });
 

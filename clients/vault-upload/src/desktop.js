@@ -48,12 +48,14 @@ function setupDesktopIpc(electron, opts = {}) {
   ipcMain._vaultUploadBound = true;
   ipcMain.handle('vault:select-file', async () => {
     const result = await dialog.showOpenDialog({
-      title: 'Choose a file to upload',
-      properties: ['openFile'],
+      title: 'Choose files to upload',
+      properties: ['openFile', 'multiSelections'],
     });
+    const filePaths = result.canceled ? [] : (result.filePaths || []);
     return {
       canceled: !!result.canceled,
-      filePath: result.filePaths?.[0] || null,
+      filePaths,
+      filePath: filePaths[0] || null,
     };
   });
 }

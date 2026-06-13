@@ -236,4 +236,75 @@ describe('Storage service (upload session)', function () {
       expect(chunk.repo_id).to.equal(repoId);
     });
   });
+
+  describe('verifyFileChunksOnGitHub', function () {
+    let verifyStorage;
+    const presentPaths = new Set();
+
+    before(function () {
+      verifyStorage = proxyquire('../../server/services/storage', {
+        '../db/database': db,
+        './github': {
+          getFileSha: async (_octokit, _owner, _repo, path) => (
+            presentPaths.has(path) ? 'remote-sha-ok' : null
+          ),
+          uploadChunk: async () => 'repaired-sha',
+          getRepoInfo: async () => ({ default_branch: 'main' }),
+        },
+        './accounts': {
+          createClientForRepo: () => ({}),
+          createClientForUpload: () => ({}),
+          getTokenForRepo: () => 'token',
+          ensureBackupReposForAllAccounts: async () => {},
+        },
+        './metadata': {
+          getMetadataRepo: () => null,
+          saveFileManifest: async () => {},
+        },
+        './backup-sync': { startAllBackupSyncs: () => {} },
+      });
+    });
+
+    beforeEach(function () {
+      presentPaths.clear();
+    });
+
+    it('should report valid when every chunk exists on GitHub', async function () {
+      const fileId = 'verify-all-present';
+      seedTestFile(db, userId, {
+        id: fileId, name: 'ok.bin', path: '/ok.bin', size: 6000, chunk_count: 3,
+        upload_status: 'ready',
+      });
+      for (let i = 0; i < 3; i++) {
+        const repoPath = `.vault/chunks/${fileId}/${String(i).padStart(5, '0')}.bin`;
+        presentPaths.add(repoPath);
+        db.prepare(`INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size, plain_size) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(fileId, i, repoId, repoPath, `sha-${i}`, 2000, 2000);
+      }
+
+      const result = await verifyStorage.verifyFileChunksOnGitHub(userId, fileId);
+      expect(result.valid).to.equal(true);
+      expect(result.missing).to.deep.equal([]);
+      expect(result.verified).to.equal(3);
+    });
+
+    it('should detect missing DB rows and missing GitHub blobs', async function () {
+      const fileId = 'verify-missing';
+      seedTestFile(db, userId, {
+        id: fileId, name: 'bad.bin', path: '/bad.bin', size: 6000, chunk_count: 3,
+        upload_status: 'ready',
+      });
+      const repoPath = `.vault/chunks/${fileId}/${String(0).padStart(5, '0')}.bin`;
+      presentPaths.add(repoPath);
+      db.prepare(`INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size, plain_size) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(fileId, 0, repoId, repoPath, 'sha-0', 2000, 2000);
+      db.prepare(`INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size, plain_size) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(fileId, 1, repoId, `.vault/chunks/${fileId}/00001.bin`, 'sha-1', 2000, 2000);
+
+      const result = await verifyStorage.verifyFileChunksOnGitHub(userId, fileId);
+      expect(result.valid).to.equal(false);
+      expect(result.missing).to.deep.equal([1, 2]);
+      expect(result.verified).to.equal(1);
+    });
+  });
 });

@@ -134,6 +134,24 @@ const API = {
     hlsGithubPlaylist: (id) => `/api/files/hls/${id}/github-playlist`,
     status: (id) => API.get(`/api/files/status/${id}`),
     hlsConvert: (id) => API.post(`/api/files/hls-convert/${id}`),
+    verifyRepairInit: (id, body) => API.post(`/api/files/${id}/verify-repair/init`, body),
+    verifyRepairChunk: async (fileId, chunkIndex, blob, taskId) => {
+      const form = new FormData();
+      form.append('chunk', blob, `chunk-${chunkIndex}`);
+      form.append('chunkIndex', String(chunkIndex));
+      if (taskId) form.append('taskId', taskId);
+      const res = await fetch(`/api/files/${fileId}/verify-repair/chunk`, {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Chunk repair failed' }));
+        throw new Error(err.error || 'Chunk repair failed');
+      }
+      return res.json();
+    },
+    verifyRepairComplete: (id, taskId) => API.post(`/api/files/${id}/verify-repair/complete`, { taskId }),
     recent: (limit) => API.get(`/api/files/recent${limit ? '?limit=' + limit : ''}`),
     favorites: () => API.get('/api/files/favorites'),
     accessed: (id) => API.post(`/api/files/${id}/accessed`),

@@ -886,6 +886,152 @@ router.post('/refresh-thumbnail/:id', async (req, res) => {
   }
 });
 
+router.post('/:id/verify-repair/init', async (req, res) => {
+  try {
+    const fileId = req.params.id;
+    const { size, fileName } = req.body;
+    const file = db.prepare(`
+      SELECT * FROM files
+      WHERE id = ? AND user_id = ? AND is_folder = 0
+        AND (upload_status IS NULL OR upload_status = 'ready')
+    `).get(fileId, req.user.id);
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    if (!size) return res.status(400).json({ error: 'Local file size required' });
+    if (parseInt(size, 10) !== file.size) {
+      return res.status(400).json({
+        error: `Local file size (${size}) does not match vault file (${file.size})`,
+      });
+    }
+
+    const existing = db.prepare(`
+      SELECT id FROM tasks
+      WHERE user_id = ? AND type = 'verify-repair' AND status IN ('processing', 'pending')
+        AND payload LIKE ?
+    `).get(req.user.id, `%"fileId":"${fileId}"%`);
+    if (existing) {
+      return res.json({ success: true, taskId: existing.id, alreadyRunning: true });
+    }
+
+    const taskId = uuidv4();
+    tasks.create(req.user.id, {
+      id: taskId,
+      type: 'verify-repair',
+      title: `Verifying ${file.name}`,
+      payload: { fileId, fileName: file.name, localFileName: fileName || null },
+    });
+    tasks.update(taskId, req.user.id, { status: 'processing', phase: 'verify', percent: 0 });
+
+    const verify = await storage.verifyFileChunksOnGitHub(req.user.id, fileId, (p) => {
+      tasks.update(taskId, req.user.id, {
+        status: 'processing',
+        phase: 'verify',
+        percent: p.percent,
+        chunksDone: p.verified,
+        chunksTotal: p.total,
+        lastLog: `Checked ${p.checked}/${p.total} chunks on GitHub`,
+      });
+    });
+
+    const chunkSize = storage.getChunkSizeForFile(fileId, file);
+    const phase = verify.valid ? 'done' : 'repair';
+    tasks.update(taskId, req.user.id, {
+      status: verify.valid ? 'done' : 'processing',
+      phase,
+      percent: verify.valid ? 100 : 50,
+      chunksDone: verify.verified,
+      chunksTotal: verify.totalChunks,
+      missingChunks: verify.missing,
+      lastLog: verify.valid
+        ? `All ${verify.totalChunks} chunks verified on GitHub`
+        : `${verify.missing.length} chunk(s) missing — repair from local file`,
+      resumable: false,
+    });
+
+    res.json({
+      success: true,
+      taskId,
+      valid: verify.valid,
+      missing: verify.missing,
+      verified: verify.verified,
+      totalChunks: verify.totalChunks,
+      chunkSize,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/:id/verify-repair/chunk', chunkUpload.single('chunk'), async (req, res) => {
+  const fileId = req.params.id;
+  const taskId = req.body.taskId;
+  const chunkIndex = parseInt(req.body.chunkIndex, 10);
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No chunk provided' });
+    const buffer = fs.readFileSync(req.file.path);
+    fs.unlinkSync(req.file.path);
+
+    if (taskId) {
+      tasks.update(taskId, req.user.id, {
+        status: 'processing',
+        phase: 'repair',
+        lastLog: `Uploading missing chunk ${chunkIndex}...`,
+      });
+    }
+
+    const result = await storage.repairFileChunk(
+      req.user.id,
+      fileId,
+      chunkIndex,
+      buffer,
+      taskId ? { taskId, userId: req.user.id } : null
+    );
+
+    if (taskId) {
+      tasks.update(taskId, req.user.id, {
+        status: 'processing',
+        phase: 'repair',
+        chunksDone: result.chunksDone,
+        chunksTotal: result.totalChunks,
+        percent: Math.max(50, result.percent || 0),
+        currentRepo: result.currentRepo || null,
+        lastLog: result.skipped
+          ? `Chunk ${chunkIndex} already on GitHub`
+          : `Repaired chunk ${chunkIndex} on ${result.currentRepo || 'storage'}`,
+      });
+    }
+
+    res.json(result);
+  } catch (err) {
+    if (taskId) {
+      tasks.update(taskId, req.user.id, { status: 'error', error: err.message, phase: 'repair' });
+      tasks.appendLog(taskId, req.user.id, `Chunk ${chunkIndex} repair failed: ${err.message}`);
+    }
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/verify-repair/complete', async (req, res) => {
+  const { taskId } = req.body;
+  try {
+    const result = await storage.finalizeFileRepair(req.user.id, req.params.id);
+    if (taskId) {
+      tasks.update(taskId, req.user.id, {
+        status: 'done',
+        phase: 'done',
+        percent: 100,
+        lastLog: 'File verification and repair complete',
+      });
+    }
+    res.json({ success: true, ...result });
+  } catch (err) {
+    if (taskId) {
+      tasks.update(taskId, req.user.id, { status: 'error', error: err.message, phase: 'repair' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/thumbnail/:id/refresh', async (req, res) => {
   try {
     const result = await storage.refreshThumbnail(req.user.id, req.params.id);

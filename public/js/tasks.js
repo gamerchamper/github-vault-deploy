@@ -481,6 +481,14 @@ const TaskPanel = {
       if (task.phase === 'checking') return 'Recovering interrupted conversion...';
       return 'Converting to HLS...';
     }
+    if (task.type === 'verify-repair') {
+      if (task.status === 'error') return task.error || 'Verify/repair failed';
+      if (task.lastLog) return task.lastLog;
+      if (task.phase === 'verify') return `Checking chunks on GitHub (${task.chunksDone || 0}/${task.chunksTotal || 0})`;
+      if (task.phase === 'repair') return task.lastLog || 'Repairing missing chunks...';
+      if (task.phase === 'rate-limit') return task.currentRepo || 'Waiting for GitHub rate limit...';
+      return 'Verifying file...';
+    }
     if (task.type === 'delete') {
       if (task.total > 1) return `Removing from GitHub (${task.done || 0}/${task.total})`;
       return 'Removing chunks from GitHub repos...';
@@ -646,7 +654,7 @@ const TaskPanel = {
           <button class="task-btn task-btn-pause" data-task-id="${task.id}">Pause</button>
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
-      ` : processing && (task.type === 'hls-convert' || task.type === 'delete') ? `
+      ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair') ? `
         <div class="task-actions">
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
@@ -665,7 +673,7 @@ const TaskPanel = {
       return `
         <div class="task-item task-${task.status}${expanded ? ' task-expanded' : ''}" data-task-id="${task.id}">
           <div class="task-item-header">
-            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : '🗑️'}</span>
+            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : task.type === 'verify-repair' ? '🔍' : '🗑️'}</span>
             <span class="task-title" title="${this.escape(task.title)}">${this.escape(task.title)}</span>
             <span class="task-percent">${cancelled ? 'Cancelled' : failed && !resumable ? 'Failed' : done ? 'Done' : `${percent}%`}</span>
             <button type="button" class="task-expand-btn" title="${expanded ? 'Hide details' : 'Show debug log'}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>

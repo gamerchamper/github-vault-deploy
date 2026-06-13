@@ -809,6 +809,10 @@ const App = {
       e.target.value = '';
     });
 
+    document.getElementById('verify-file-input')?.addEventListener('change', (e) => {
+      VerifyRepair.onFileSelected(e.target);
+    });
+
     document.getElementById('btn-new-folder').addEventListener('click', () => this.openFolderModal());
 
     document.getElementById('upload-mode')?.addEventListener('change', (e) => {
@@ -1005,6 +1009,7 @@ const App = {
       if (action === 'download' && !file.is_folder) explorer.downloadFile(file);
       if (action === 'move') explorer.showMoveDialog([...explorer.selected]);
       if (action === 'refresh-thumb' && !file.is_folder) explorer.refreshThumbnail(file);
+      if (action === 'verify-file' && !file.is_folder) VerifyRepair.prompt(file);
       if (action === 'hls-convert' && !file.is_folder) {
         App.withButton(e.target, async () => {
           try {

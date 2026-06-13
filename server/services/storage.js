@@ -1832,6 +1832,284 @@ function toggleRepo(userId, repoId, active) {
   db.prepare('UPDATE storage_repos SET is_active = ? WHERE id = ? AND user_id = ?').run(active ? 1 : 0, repoId, userId);
 }
 
+function getReadyFile(userId, fileId) {
+  const file = db.prepare(`
+    SELECT * FROM files
+    WHERE id = ? AND user_id = ? AND is_folder = 0
+      AND (upload_status IS NULL OR upload_status = 'ready')
+  `).get(fileId, userId);
+  if (!file) throw new Error('File not found or upload still in progress');
+  if (!file.chunk_count) throw new Error('File has no chunks to verify');
+  return file;
+}
+
+function getChunkSizeForFile(fileId, file) {
+  const firstChunk = db.prepare(
+    'SELECT plain_size FROM chunks WHERE file_id = ? ORDER BY chunk_index LIMIT 1'
+  ).get(fileId);
+  if (firstChunk?.plain_size) return firstChunk.plain_size;
+  return Math.ceil(file.size / file.chunk_count) || file.size;
+}
+
+function getExpectedPlainChunkSize(file, chunkIndex, chunkSize) {
+  const idx = parseInt(chunkIndex, 10);
+  const start = idx * chunkSize;
+  if (!Number.isFinite(idx) || idx < 0 || start >= file.size) {
+    throw new Error('Invalid chunk index');
+  }
+  return Math.min(chunkSize, file.size - start);
+}
+
+async function checkChunkPresentOnGitHub(userId, chunkRow, repo) {
+  const [owner, repoName] = repo.full_name.split('/');
+  const octokit = accounts.createClientForRepo(userId, repo);
+  const branch = repo.default_branch || 'main';
+  const remoteSha = await github.getFileSha(
+    octokit, owner, repoName, chunkRow.repo_path, branch, { subsystem: 'verify-repair' }
+  );
+  if (!remoteSha) return { present: false };
+  if (!chunkRow.sha || chunkRow.sha === 'pending' || chunkRow.sha !== remoteSha) {
+    db.prepare('UPDATE chunks SET sha = ? WHERE id = ?').run(remoteSha, chunkRow.id);
+  }
+  return { present: true, sha: remoteSha };
+}
+
+async function verifyFileChunksOnGitHub(userId, fileId, onProgress = null) {
+  const file = getReadyFile(userId, fileId);
+  const total = file.chunk_count;
+  const dbChunks = db.prepare(`
+    SELECT c.*, r.full_name, r.default_branch, r.linked_account_id, r.is_active
+    FROM chunks c
+    JOIN storage_repos r ON c.repo_id = r.id
+    WHERE c.file_id = ?
+  `).all(fileId);
+  const byIndex = new Map(dbChunks.map((row) => [row.chunk_index, row]));
+
+  const { mapConcurrent } = require('./chunk-session');
+  const indices = Array.from({ length: total }, (_, i) => i);
+
+  const results = await mapConcurrent(indices, 4, async (chunkIndex) => {
+    const row = byIndex.get(chunkIndex);
+    if (!row) return { chunkIndex, present: false };
+    if (!row.is_active) return { chunkIndex, present: false };
+    try {
+      const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(row.repo_id);
+      const result = await checkChunkPresentOnGitHub(userId, row, repo);
+      return { chunkIndex, present: result.present };
+    } catch {
+      return { chunkIndex, present: false };
+    }
+  });
+
+  const missing = results.filter((r) => !r.present).map((r) => r.chunkIndex).sort((a, b) => a - b);
+  const verified = results.filter((r) => r.present).length;
+
+  if (onProgress) {
+    onProgress({
+      checked: total,
+      total,
+      verified,
+      missing: missing.length,
+      percent: 100,
+    });
+  }
+
+  return {
+    valid: missing.length === 0,
+    totalChunks: total,
+    verified,
+    missing,
+    dbChunks: dbChunks.length,
+  };
+}
+
+async function repairFileChunk(userId, fileId, chunkIndex, buffer, taskContext = null) {
+  const file = getReadyFile(userId, fileId);
+  const chunkIdx = parseInt(chunkIndex, 10);
+  const chunkSize = getChunkSizeForFile(fileId, file);
+  const expectedPlain = getExpectedPlainChunkSize(file, chunkIdx, chunkSize);
+  if (buffer.length !== expectedPlain) {
+    throw new Error(`Chunk ${chunkIdx} size mismatch: expected ${expectedPlain} bytes, got ${buffer.length}`);
+  }
+  if (buffer.length > MAX_CHUNK_BYTES + GCM_OVERHEAD_BYTES) {
+    throw new Error(`Chunk blob is too large (${(buffer.length / MB).toFixed(1)} MB)`);
+  }
+
+  const existing = db.prepare(
+    'SELECT * FROM chunks WHERE file_id = ? AND chunk_index = ?'
+  ).get(fileId, chunkIdx);
+
+  let repo = null;
+  let repoPath;
+  let octokit;
+  let owner;
+  let repoName;
+  let existingSha = null;
+
+  if (existing) {
+    const existingRepo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(existing.repo_id);
+    if (existingRepo?.is_active) {
+      repo = existingRepo;
+      repoPath = existing.repo_path;
+      [owner, repoName] = repo.full_name.split('/');
+      octokit = accounts.createClientForRepo(userId, repo);
+      const remoteSha = await github.getFileSha(
+        octokit, owner, repoName, repoPath, repo.default_branch,
+        { subsystem: 'verify-repair', bypassMissing: true }
+      );
+      if (remoteSha) {
+        if (existing.sha !== remoteSha) {
+          db.prepare('UPDATE chunks SET sha = ? WHERE id = ?').run(remoteSha, existing.id);
+        }
+        const chunksDone = getUploadedChunkCount(fileId);
+        return {
+          skipped: true,
+          chunkIndex: chunkIdx,
+          chunksDone,
+          totalChunks: file.chunk_count,
+          percent: uploadPercent(chunksDone, file.chunk_count),
+        };
+      }
+      existingSha = existing.sha && existing.sha !== 'pending' ? existing.sha : null;
+    }
+  }
+
+  const repos = getActiveRepos(userId);
+  if (!repos.length) throw new Error('No storage repositories configured');
+
+  if (!repo) {
+    ({ repo, octokit, owner, repoName } = await resolveRepoForChunkUpload(userId, repos, chunkIdx));
+    repoPath = `.vault/chunks/${fileId}/${String(chunkIdx).padStart(5, '0')}.bin`;
+  }
+
+  const fileKey = await getFileKeyFromMeta(userId, file);
+  const { encrypted, iv, authTag } = crypto.encryptChunk(buffer, fileKey);
+
+  const rateLimit = require('./github-rate-limit');
+  const token = accounts.getTokenForRepo(userId, repo);
+  const tokenKey = rateLimit.keyForToken(token);
+  let clearRateCb = () => {};
+  if (taskContext?.taskId) {
+    const tasks = require('./tasks');
+    clearRateCb = rateLimit.setWaitCallback(tokenKey, (info) => {
+      const secs = Math.ceil(info.waitMs / 1000);
+      tasks.update(taskContext.taskId, taskContext.userId, {
+        phase: 'rate-limit',
+        currentRepo: `GitHub rate limit — resuming in ${secs}s`,
+        lastLog: `Waiting for GitHub rate limit (${secs}s)`,
+      });
+    });
+  }
+
+  let sha = 'pending';
+  try {
+    try {
+      sha = await github.uploadChunk(
+        octokit, owner, repoName, repoPath, encrypted, repo.default_branch, existingSha
+      );
+    } catch (uploadErr) {
+      if (isGitHubNotFound(uploadErr)) {
+        const info = await github.getRepoInfo(octokit, owner, repoName);
+        const branch = info.default_branch || 'main';
+        if (branch !== repo.default_branch) {
+          db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
+          repo.default_branch = branch;
+        }
+        sha = await github.uploadChunk(
+          octokit, owner, repoName, repoPath, encrypted, branch, existingSha
+        );
+      } else {
+        throw uploadErr;
+      }
+    }
+  } finally {
+    clearRateCb();
+  }
+
+  const updateRepo = db.prepare(
+    'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
+  );
+
+  if (existing) {
+    const repoChanged = existing.repo_id !== repo.id;
+    db.prepare(`
+      UPDATE chunks
+      SET repo_id = ?, repo_path = ?, sha = ?, size = ?, chunk_iv = ?, chunk_tag = ?, plain_size = ?
+      WHERE id = ?
+    `).run(
+      repo.id, repoPath, sha, encrypted.length,
+      iv.toString('base64'), authTag.toString('base64'), buffer.length,
+      existing.id
+    );
+    if (repoChanged) updateRepo.run(encrypted.length, repo.id);
+  } else {
+    db.prepare(`
+      INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size, chunk_iv, chunk_tag, plain_size)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      fileId, chunkIdx, repo.id, repoPath, sha, encrypted.length,
+      iv.toString('base64'), authTag.toString('base64'), buffer.length
+    );
+    updateRepo.run(encrypted.length, repo.id);
+  }
+
+  const chunksDone = getUploadedChunkCount(fileId);
+  return {
+    skipped: false,
+    repaired: true,
+    chunkIndex: chunkIdx,
+    chunksDone,
+    totalChunks: file.chunk_count,
+    percent: uploadPercent(chunksDone, file.chunk_count),
+    currentRepo: repo.full_name,
+  };
+}
+
+async function finalizeFileRepair(userId, fileId) {
+  const file = getReadyFile(userId, fileId);
+  const verify = await verifyFileChunksOnGitHub(userId, fileId);
+  if (!verify.valid) {
+    throw new Error(`Repair incomplete: ${verify.missing.length} chunk(s) still missing on GitHub`);
+  }
+
+  const chunks = db.prepare(`
+    SELECT c.*, r.full_name FROM chunks c
+    JOIN storage_repos r ON c.repo_id = r.id
+    WHERE c.file_id = ? ORDER BY c.chunk_index
+  `).all(fileId);
+
+  const encryptionMeta = await resolveEncryptionMeta(userId, file);
+  const fileRecord = {
+    id: file.id,
+    name: file.name,
+    path: file.path,
+    parent_path: file.parent_path,
+    size: file.size,
+    mime_type: file.mime_type,
+    chunk_count: file.chunk_count,
+    is_folder: 0,
+    created_at: file.created_at,
+  };
+  const chunkRecords = chunks.map((chunk) => ({
+    chunk_index: chunk.chunk_index,
+    full_name: chunk.full_name,
+    repo_path: chunk.repo_path,
+    sha: chunk.sha,
+    size: chunk.size,
+    plain_size: chunk.plain_size,
+  }));
+
+  if (metadata.getMetadataRepo(userId)) {
+    await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, !!file.has_thumbnail);
+  }
+
+  const backupSync = require('./backup-sync');
+  backupSync.startAllBackupSyncs(userId);
+  touchFile(fileId);
+
+  return { fileId, totalChunks: file.chunk_count, repaired: true };
+}
+
 module.exports = {
   isChunkMode,
   uploadFile,
@@ -1882,4 +2160,8 @@ module.exports = {
   GB,
   MB,
   getUploadedChunkIndices,
+  getChunkSizeForFile,
+  verifyFileChunksOnGitHub,
+  repairFileChunk,
+  finalizeFileRepair,
 };

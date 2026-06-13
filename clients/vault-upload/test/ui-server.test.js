@@ -65,7 +65,7 @@ describe('UI server', function () {
     expect(res.text).to.include('Start Upload');
     expect(res.text).to.include('Browse');
     expect(res.text).to.include('operationState');
-    expect(res.text).to.include('vaultDesktop.selectFile');
+    expect(res.text).to.include('vaultDesktop.selectFiles');
     expect(res.text).to.include('Content-Security-Policy');
     expect(res.text).to.not.include('unsafe-eval');
     expect(res.text).to.include('Remote Tasks');
