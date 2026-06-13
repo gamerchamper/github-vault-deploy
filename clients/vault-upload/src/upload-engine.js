@@ -4,8 +4,8 @@ const path = require('path');
 const { VaultApiError } = require('./api');
 const { SessionStore } = require('./session-store');
 
-const MAX_CONCURRENCY = 20;
-const DEFAULT_CONCURRENCY = 5;
+const MAX_CONCURRENCY = 32;
+const DEFAULT_CONCURRENCY = 12;
 const MAX_RETRIES_PER_CHUNK = Infinity;
 const INIT_RETRY_DELAY_MS = 2000;
 const MAX_INIT_RETRY_DELAY_MS = 60000;

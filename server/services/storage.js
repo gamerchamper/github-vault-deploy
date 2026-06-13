@@ -982,11 +982,11 @@ async function fetchAndDecrypt(userId, file, chunks, onProgress, view = null) {
     const rateLimit = require('./github-rate-limit');
     const user = getUser(userId);
     const tokenKey = user?.access_token ? rateLimit.keyForToken(user.access_token) : null;
-    const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 8) : 8;
+    const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 16) : 16;
     const pool = createAdaptivePool(chunks.length, {
-      max: 12,
+      max: 32,
       initial: recommended,
-      getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 8) : null,
+      getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 16) : null,
     });
     let fetched = 0;
 
@@ -1009,11 +1009,11 @@ async function fetchAndDecrypt(userId, file, chunks, onProgress, view = null) {
   const rateLimit = require('./github-rate-limit');
   const user = getUser(userId);
   const tokenKey = user?.access_token ? rateLimit.keyForToken(user.access_token) : null;
-  const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 8) : 8;
+  const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 16) : 16;
   const pool = createAdaptivePool(chunks.length, {
-    max: 12,
+    max: 32,
     initial: recommended,
-    getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 8) : null,
+    getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 16) : null,
   });
   let fetched = 0;
 

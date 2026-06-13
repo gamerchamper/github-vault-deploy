@@ -1,10 +1,10 @@
 const AdaptiveConcurrency = {
-  MAX: 16,
+  MAX: 32,
   MIN: 1,
-  EVAL_INTERVAL_MS: 3000,
+  EVAL_INTERVAL_MS: 2000,
   DROP_RATIO: 0.82,
   STABLE_RATIO: 0.94,
-  STABLE_WINDOWS_TO_RAMP: 4,
+  STABLE_WINDOWS_TO_RAMP: 2,
 
   shrinkLimit(limit) {
     if (limit <= this.MIN) return this.MIN;
@@ -93,6 +93,7 @@ const AdaptiveConcurrency = {
 
     return {
       get limit() { return limit; },
+      get maxWorkers() { return maxCap; },
       acquire,
       release,
       recordBytes,
@@ -111,7 +112,7 @@ const AdaptiveConcurrency = {
     pool.start();
     try {
       let index = 0;
-      const workers = Array.from({ length: Math.min(pool.limit, items.length) }, async () => {
+      const workers = Array.from({ length: Math.min(pool.maxWorkers, items.length) }, async () => {
         while (index < items.length) {
           const i = index++;
           await pool.acquire();

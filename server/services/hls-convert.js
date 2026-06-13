@@ -226,31 +226,51 @@ async function uploadSegmentsParallel(userId, fileId, segments, repos, job, onPr
   const { createAdaptivePool, mapAdaptive } = require('./adaptive-concurrency');
   const rateLimit = require('./github-rate-limit');
 
-  let tokenKey = null;
-  let clearRateCb = () => {};
-  try {
-    const token = accounts.getTokenForRepo(userId, repos[0]);
-    tokenKey = rateLimit.keyForToken(token);
-    if (taskId) {
-      const tasks = require('./tasks');
-      clearRateCb = rateLimit.setWaitCallback(tokenKey, (info) => {
-        const secs = Math.ceil(info.waitMs / 1000);
-        const mins = Math.ceil(secs / 60);
-        const waitLabel = mins >= 2 ? `${mins} min` : `${secs}s`;
-        tasks.update(taskId, userId, {
-          phase: 'rate-limit',
-          currentRepo: `GitHub rate limit — resuming in ${waitLabel}`,
-          lastLog: `Waiting for GitHub rate limit (${waitLabel})`,
-        });
-      });
-    }
-  } catch {}
+  const tokenKeys = [];
+  const seenTokens = new Set();
+  for (const repo of repos) {
+    try {
+      const token = accounts.getTokenForRepo(userId, repo);
+      const key = rateLimit.keyForToken(token);
+      if (seenTokens.has(key)) continue;
+      seenTokens.add(key);
+      tokenKeys.push(key);
+    } catch {}
+  }
 
-  const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 8) : 8;
+  let clearRateCb = () => {};
+  for (const tokenKey of tokenKeys) {
+    if (!taskId) break;
+    const tasks = require('./tasks');
+    const clear = rateLimit.setWaitCallback(tokenKey, (info) => {
+      const secs = Math.ceil(info.waitMs / 1000);
+      const mins = Math.ceil(secs / 60);
+      const waitLabel = mins >= 2 ? `${mins} min` : `${secs}s`;
+      tasks.update(taskId, userId, {
+        phase: 'rate-limit',
+        currentRepo: `GitHub rate limit — resuming in ${waitLabel}`,
+        lastLog: `Waiting for GitHub rate limit (${waitLabel})`,
+      });
+    });
+    const prev = clearRateCb;
+    clearRateCb = () => {
+      prev();
+      clear();
+    };
+  }
+
+  const perToken = tokenKeys.map((k) => rateLimit.getRecommendedConcurrency(k, 16));
+  const recommended = perToken.length ? Math.max(...perToken) : 16;
+  const poolMax = Math.min(32, perToken.reduce((sum, n) => sum + n, 0) || 32);
   const pool = createAdaptivePool(pending.length, {
-    max: 12,
+    max: poolMax,
     initial: recommended,
-    getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 8) : null,
+    getMax: tokenKeys.length
+      ? () => Math.min(32, tokenKeys.reduce(
+        (sum, k) => sum + rateLimit.getRecommendedConcurrency(k, 16),
+        0
+      ))
+      : null,
   });
 
   try {
@@ -431,7 +451,7 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
         segmentsDone: total - pendingCount,
         segmentsTotal: total,
         lastLog: pendingCount
-          ? `Uploading ${pendingCount} HLS segments (${Math.min(12, pendingCount)} at a time)...`
+          ? `Uploading ${pendingCount} HLS segments (up to 32 at a time)...`
           : `All ${total} HLS segments already uploaded`,
       });
     }

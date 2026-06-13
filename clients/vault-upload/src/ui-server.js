@@ -314,7 +314,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </label>
 <div class="row">
 <label><span class="label">Mode</span><select id="mode"><option value="api">API</option><option value="git">Git</option></select></label>
-<label><span class="label">Concurrency</span><input id="concurrency" type="number" min="1" max="20" value="5"></label>
+<label><span class="label">Concurrency</span><input id="concurrency" type="number" min="1" max="32" value="12"></label>
 </div>
 <details class="details-block">
 <summary>Advanced</summary>

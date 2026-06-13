@@ -168,15 +168,16 @@ function isPaused(tokenKey) {
   return !!getPauseInfo(tokenKey);
 }
 
-function getRecommendedConcurrency(tokenKey, defaultConcurrency = 6) {
+function getRecommendedConcurrency(tokenKey, defaultConcurrency = 16) {
   const pause = getPauseInfo(tokenKey);
   if (pause) return 1;
   const quota = quotas.get(tokenKey);
   if (!quota) return defaultConcurrency;
   if (quota.remaining <= 0) return 1;
   if (quota.remaining < 50) return 2;
-  if (quota.remaining < 150) return 3;
-  if (quota.remaining < 400) return 4;
+  if (quota.remaining < 150) return 4;
+  if (quota.remaining < 400) return 8;
+  if (quota.remaining < 1000) return 12;
   return defaultConcurrency;
 }
 

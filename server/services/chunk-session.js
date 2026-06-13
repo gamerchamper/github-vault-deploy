@@ -60,11 +60,11 @@ function chunksInRange(chunkMap, rangeStart, rangeEnd) {
 
 function downloadPoolOptions(user) {
   const tokenKey = user?.access_token ? rateLimit.keyForToken(user.access_token) : null;
-  const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 8) : 8;
+  const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 16) : 16;
   return {
-    max: 12,
+    max: 32,
     initial: recommended,
-    getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 8) : null,
+    getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 16) : null,
   };
 }
 

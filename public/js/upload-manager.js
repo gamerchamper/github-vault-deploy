@@ -176,7 +176,7 @@ const UploadManager = {
         }
       };
 
-      const pool = AdaptiveConcurrency.createPool(chunkIndices.length, { max: 50, initial: 12 });
+      const pool = AdaptiveConcurrency.createPool(chunkIndices.length, { max: 32, initial: 20 });
       await AdaptiveConcurrency.map(chunkIndices, pool, async (chunkIndex) => {
         await checkPaused();
 

@@ -1,10 +1,10 @@
 const ADAPTIVE_CONCURRENCY = {
-  MAX: 12,
+  MAX: 32,
   MIN: 1,
-  EVAL_INTERVAL_MS: 3000,
+  EVAL_INTERVAL_MS: 2000,
   DROP_RATIO: 0.82,
   STABLE_RATIO: 0.94,
-  STABLE_WINDOWS_TO_RAMP: 4,
+  STABLE_WINDOWS_TO_RAMP: 2,
 };
 
 function shrinkLimit(limit, min) {
@@ -108,6 +108,7 @@ function createAdaptivePool(itemCount, options = {}) {
 
   return {
     get limit() { return limit; },
+    get maxWorkers() { return maxCap; },
     acquire,
     release,
     recordBytes,
@@ -128,7 +129,7 @@ async function mapAdaptive(items, pool, fn) {
   pool.start();
   try {
     let index = 0;
-    const workerCount = Math.min(pool.limit, items.length);
+    const workerCount = Math.min(pool.maxWorkers, items.length);
     const workers = Array.from({ length: workerCount }, async () => {
       while (index < items.length) {
         const i = index++;

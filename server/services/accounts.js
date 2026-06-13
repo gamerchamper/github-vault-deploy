@@ -730,9 +730,10 @@ async function getAccountRateLimits(userId) {
       is_primary: !!account.is_primary,
       ...quota,
       thresholds: {
-        concurrency_full: 6,
-        concurrency_at_400: 4,
-        concurrency_at_150: 3,
+        concurrency_full: 16,
+        concurrency_at_1000: 12,
+        concurrency_at_400: 8,
+        concurrency_at_150: 4,
         concurrency_at_50: 2,
         concurrency_exhausted: 1,
         current: quota.recommended_concurrency,
