@@ -68,7 +68,11 @@ describe('UI server', function () {
     expect(res.text).to.include('vaultDesktop.selectFiles');
     expect(res.text).to.include('Content-Security-Policy');
     expect(res.text).to.not.include('unsafe-eval');
-    expect(res.text).to.include('Remote Tasks');
+    expect(res.text).to.include('Remote tasks');
+    expect(res.text).to.include('MAX_PARALLEL_FILES');
+    expect(res.text).to.include('runPool');
+    expect(res.text).to.include('serverHistory');
+    expect(res.text).to.include('Saved servers');
   });
 
   it('should serve parseable dashboard JavaScript', async function () {
@@ -121,6 +125,41 @@ describe('UI server', function () {
     expect(res.body.serverUrl).to.equal('https://vault.test');
     expect(res.body.hasApiKey).to.equal(true);
     expect(res.body.authenticated).to.equal(true);
+    expect(res.body.serverHistory).to.be.an('array').that.is.not.empty;
+    expect(res.body.serverHistory[0].serverUrl).to.equal('https://vault.test');
+  });
+
+  it('should list, select, and remove saved servers', async function () {
+    nock('https://vault.test').get('/api/tasks/').query({ active: '1', resumable: '1' }).reply(200, { tasks: [] });
+    nock('https://vault.other').get('/api/tasks/').query({ active: '1', resumable: '1' }).reply(200, { tasks: [] });
+
+    await request(baseUrl, 'POST', '/api/config', {
+      serverUrl: 'https://vault.test/',
+      apiKey: 'gv_first',
+    });
+    await request(baseUrl, 'POST', '/api/config', {
+      serverUrl: 'https://vault.other/',
+      apiKey: 'gv_second',
+    });
+
+    const list = await request(baseUrl, 'GET', '/api/servers');
+    expect(list.status).to.equal(200);
+    expect(list.body.servers).to.have.length(2);
+
+    const target = list.body.servers.find((s) => s.serverUrl === 'https://vault.test');
+    nock('https://vault.test', {
+      reqheaders: { authorization: 'Bearer gv_first' },
+    }).get('/api/tasks/').query({ active: '1', resumable: '1' }).reply(200, { tasks: [] });
+    const selected = await request(baseUrl, 'POST', '/api/servers/select', { id: target.id });
+    expect(selected.status).to.equal(200);
+    expect(selected.body.serverUrl).to.equal('https://vault.test');
+    expect(selected.body.apiKey).to.equal('gv_first');
+    expect(selected.body.authenticated).to.equal(true);
+
+    const removed = await request(baseUrl, 'DELETE', `/api/servers/${encodeURIComponent(target.id)}`);
+    expect(removed.status).to.equal(200);
+    expect(removed.body.servers).to.have.length(1);
+    expect(removed.body.servers[0].serverUrl).to.equal('https://vault.other');
   });
 
   it('should handle concurrent dashboard API requests under pressure', async function () {

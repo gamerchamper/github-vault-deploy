@@ -202,24 +202,24 @@ const UploadManager = {
       const preview = session.file.size > 0 ? session.file.slice(0, previewSize) : null;
       const result = await API.files.uploadComplete(init.fileId, taskId, preview, uploadMode, convertHls);
 
-      try {
-        await VerifyRepair.run(init.fileId, session.file, {
-          expectedSize: session.fileSize,
-          displayName: session.fileName,
-          quietOnSuccess: true,
-          source: 'upload',
-        });
-      } catch (verifyErr) {
+      const verifyFile = session.file;
+      session.status = 'done';
+      await UploadStore.remove(taskId);
+
+      VerifyRepair.run(init.fileId, verifyFile, {
+        expectedSize: session.fileSize,
+        displayName: session.fileName,
+        quietOnSuccess: true,
+        source: 'upload',
+      }).catch((verifyErr) => {
         console.warn('Post-upload verify failed:', verifyErr);
         App.toast(
           `Upload finished but verification failed: ${verifyErr.message || verifyErr}`,
           'error'
         );
-      }
-
-      session.status = 'done';
-      await UploadStore.remove(taskId);
-      this.clearFile(taskId);
+      }).finally(() => {
+        this.clearFile(taskId);
+      });
 
       const doneJob = await API.tasks.get(taskId);
       if (onProgress) onProgress(doneJob);

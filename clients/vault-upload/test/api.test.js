@@ -224,6 +224,18 @@ describe('VaultApi', function () {
         expect(err.message).to.include('Not authenticated');
       }
     });
+
+    it('should retry transient 503 errors for JSON requests', async function () {
+      const scope = nock(BASE)
+        .get('/api/tasks/task-1')
+        .reply(503, { error: 'Unavailable' })
+        .get('/api/tasks/task-1')
+        .reply(200, { id: 'task-1', status: 'processing' });
+
+      const result = await api.getTask('task-1');
+      expect(result.status).to.equal('processing');
+      scope.done();
+    });
   });
 
   describe('checkAuth', function () {

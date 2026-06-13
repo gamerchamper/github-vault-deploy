@@ -5,8 +5,22 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 
-const KEEPALIVE_AGENT = new http.Agent({ keepAlive: true, maxSockets: 50, timeout: 600000 });
-const KEEPALIVE_AGENT_HTTPS = new https.Agent({ keepAlive: true, maxSockets: 50, timeout: 600000 });
+const KEEPALIVE_AGENT = new http.Agent({ keepAlive: true, maxSockets: 24, timeout: 600000 });
+const KEEPALIVE_AGENT_HTTPS = new https.Agent({ keepAlive: true, maxSockets: 24, timeout: 600000 });
+
+const DEFAULT_TIMEOUT_MS = 120000;
+const MAX_FETCH_RETRIES = 3;
+const RETRYABLE_STATUSES = new Set([408, 429, 502, 503, 504]);
+const RETRYABLE_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN']);
+
+function fetchRetryDelay(attempt) {
+  const base = 500 * Math.pow(2, Math.min(attempt - 1, 4));
+  return Math.min(base + Math.floor(Math.random() * 250), 8000);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 class VaultApiError extends Error {
   constructor(status, body, url) {
@@ -39,28 +53,61 @@ class VaultApi {
     return `${this.baseUrl}${path}`;
   }
 
+  _isRetryableFetchError(err) {
+    if (!err) return false;
+    if (err.name === 'AbortError') return false;
+    if (err instanceof VaultApiError) return RETRYABLE_STATUSES.has(err.status);
+    if (err.type === 'request-timeout') return true;
+    return RETRYABLE_CODES.has(err.code);
+  }
+
   async _fetch(method, urlPath, opts = {}) {
     const url = this._url(urlPath);
     const headers = { ...this.defaultHeaders, ...opts.headers };
     const agent = this.agent || (url.startsWith('https') ? KEEPALIVE_AGENT_HTTPS : KEEPALIVE_AGENT);
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: opts.body,
-      signal: opts.signal,
-      timeout: opts.timeout || 60000,
-      agent,
-    });
-    const text = await res.text();
-    let body;
-    try { body = JSON.parse(text); } catch { body = text; }
-    if (!res.ok) {
-      if (res.status === 401) {
-        throw new VaultApiError(401, { error: 'Not authenticated — run `vault-upload auth` first' }, url);
+    const timeout = opts.timeout || DEFAULT_TIMEOUT_MS;
+    const maxAttempts = opts.body instanceof FormData
+      ? 1
+      : (opts.retries ?? MAX_FETCH_RETRIES) + 1;
+
+    let lastErr;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch(url, {
+          method,
+          headers,
+          body: opts.body,
+          signal: opts.signal,
+          timeout,
+          agent,
+        });
+        const text = await res.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = text; }
+        if (!res.ok) {
+          if (res.status === 401) {
+            throw new VaultApiError(401, { error: 'Not authenticated — run `vault-upload auth` first' }, url);
+          }
+          const err = new VaultApiError(res.status, body, url);
+          if (attempt < maxAttempts && RETRYABLE_STATUSES.has(res.status)) {
+            lastErr = err;
+            await sleep(fetchRetryDelay(attempt));
+            continue;
+          }
+          throw err;
+        }
+        return body;
+      } catch (err) {
+        lastErr = err;
+        if (err instanceof VaultApiError && err.status === 401) throw err;
+        if (attempt < maxAttempts && this._isRetryableFetchError(err)) {
+          await sleep(fetchRetryDelay(attempt));
+          continue;
+        }
+        throw err;
       }
-      throw new VaultApiError(res.status, body, url);
     }
-    return body;
+    throw lastErr;
   }
 
   async plan(size, chunkSize) {

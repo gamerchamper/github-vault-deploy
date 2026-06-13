@@ -69,9 +69,63 @@ const Playlists = {
   async loadPlaylistDetail(playlistId) {
     const pl = await API.playlists.get(playlistId);
     this.currentPlaylist = pl;
-    explorer.files = (pl.items || []).map((f) => ({ ...f, _inPlaylist: true }));
+    explorer.files = (pl.items || []).map((f, idx) => ({
+      ...f,
+      _inPlaylist: true,
+      _playlistIndex: idx,
+      _playlistPosition: f.position ?? idx,
+    }));
     explorer.listTotal = explorer.files.length;
     explorer.listHasMore = false;
+  },
+
+  playlistItemIds() {
+    return (this.currentPlaylist?.items || explorer.files.filter((f) => f._inPlaylist)).map((f) => f.id);
+  },
+
+  async applyPlaylistOrder(fileIds) {
+    const id = this.currentPlaylist?.id || explorer.playlistId;
+    if (!id || !fileIds.length) return;
+    await API.playlists.reorder(id, fileIds);
+    await this.loadPlaylistDetail(id);
+    explorer.render();
+  },
+
+  async movePlaylistItem(fileId, delta) {
+    const ids = this.playlistItemIds();
+    const idx = ids.indexOf(fileId);
+    if (idx < 0) return;
+    const next = idx + delta;
+    if (next < 0 || next >= ids.length) return;
+    [ids[idx], ids[next]] = [ids[next], ids[idx]];
+    try {
+      await this.applyPlaylistOrder(ids);
+      App.toast('Episode order updated', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  async movePlaylistItemToIndex(fileId, targetIndex) {
+    const ids = this.playlistItemIds();
+    const from = ids.indexOf(fileId);
+    if (from < 0 || from === targetIndex) return;
+    ids.splice(from, 1);
+    ids.splice(targetIndex, 0, fileId);
+    try {
+      await this.applyPlaylistOrder(ids);
+      App.toast('Episode order updated', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  moveBuilderItem(idx, delta) {
+    const next = idx + delta;
+    if (next < 0 || next >= this.builderItems.length) return;
+    const [moved] = this.builderItems.splice(idx, 1);
+    this.builderItems.splice(next, 0, moved);
+    this.renderBuilderList();
   },
 
   renderDiscoverPanel(container) {
@@ -185,8 +239,10 @@ const Playlists = {
         <h1 class="curated-hero-title">${pl.title}</h1>
         <p class="curated-hero-desc">${pl.description || ''}</p>
         <div class="curated-hero-stats">${pl.item_count || 0} items · ${formatSize(pl.total_bytes || 0)}</div>
+        <p class="curated-hero-order-hint">Share links and Play all use the episode order below — drag items or use ↑↓ to reorder.</p>
         <div class="curated-hero-actions">
           <button type="button" class="btn-primary" id="btn-playlist-play">▶ Play all</button>
+          <button type="button" class="btn-secondary" id="btn-playlist-reorder">Reorder episodes</button>
           <button type="button" class="btn-secondary" id="btn-playlist-edit">Edit playlist</button>
           <button type="button" class="btn-secondary" id="btn-playlist-share">${pl.share_url ? 'Copy share link' : 'Share'}</button>
           ${pl.share_url ? '<button type="button" class="btn-secondary" id="btn-playlist-unshare">Stop sharing</button>' : ''}
@@ -197,6 +253,7 @@ const Playlists = {
     `;
     fileView.prepend(hero);
     hero.querySelector('#btn-playlist-play')?.addEventListener('click', () => this.playPlaylist(pl.id));
+    hero.querySelector('#btn-playlist-reorder')?.addEventListener('click', () => this.openBuilder(pl));
     hero.querySelector('#btn-playlist-edit')?.addEventListener('click', () => this.openBuilder(pl));
     hero.querySelector('#btn-playlist-share')?.addEventListener('click', () => this.sharePlaylist(pl.id));
     hero.querySelector('#btn-playlist-unshare')?.addEventListener('click', () => this.unsharePlaylist(pl.id));
@@ -432,6 +489,9 @@ const Playlists = {
       row.dataset.index = String(idx);
       const hasAlias = !!(file.display_name?.trim());
       row.innerHTML = `
+        <span class="builder-ep-num" title="Episode number">${idx + 1}</span>
+        <button type="button" class="builder-move" data-dir="-1" title="Move up" ${idx === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="builder-move" data-dir="1" title="Move down" ${idx === this.builderItems.length - 1 ? 'disabled' : ''}>↓</button>
         <span class="builder-drag" aria-hidden="true">⠿</span>
         <div class="builder-item-fields">
           <input type="text" class="builder-display-name form-input" value="${this.escape(file.display_name || '')}" placeholder="${this.escape(file.name)}" title="Display name in playlist" aria-label="Display name for ${this.escape(file.name)}">
@@ -439,6 +499,9 @@ const Playlists = {
         </div>
         <button type="button" class="builder-remove" data-idx="${idx}" title="Remove">×</button>
       `;
+      row.querySelectorAll('.builder-move').forEach((btn) => {
+        btn.addEventListener('click', () => this.moveBuilderItem(idx, parseInt(btn.dataset.dir, 10)));
+      });
       const input = row.querySelector('.builder-display-name');
       input?.addEventListener('input', () => {
         const value = input.value.trim();

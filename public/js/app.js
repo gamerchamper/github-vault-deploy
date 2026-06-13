@@ -47,6 +47,22 @@ const App = {
     }
   },
 
+  _uploadActivity: 0,
+
+  beginUploadActivity() {
+    this._uploadActivity += 1;
+    if (this._uploadActivity === 1) {
+      App.setButtonLoading(document.getElementById('btn-upload'), true);
+    }
+  },
+
+  endUploadActivity() {
+    this._uploadActivity = Math.max(0, this._uploadActivity - 1);
+    if (this._uploadActivity === 0) {
+      App.setButtonLoading(document.getElementById('btn-upload'), false);
+    }
+  },
+
   async withButton(btn, fn) {
     App.setButtonLoading(btn, true);
     try {
@@ -1308,8 +1324,15 @@ const App = {
     const vm = explorer?.viewMode;
     const plBtn = document.getElementById('btn-new-playlist');
     const colBtn = document.getElementById('btn-new-collection');
+    const sortSel = document.getElementById('sort-select');
     if (plBtn) plBtn.classList.toggle('hidden', vm !== 'playlists' && vm !== 'playlist-detail');
     if (colBtn) colBtn.classList.toggle('hidden', vm !== 'collections' && vm !== 'collection-detail');
+    if (sortSel) {
+      const playlistOrder = vm === 'playlist-detail';
+      sortSel.disabled = playlistOrder;
+      sortSel.title = playlistOrder ? 'Playlist uses custom episode order' : 'Sort files';
+      sortSel.classList.toggle('sort-select-disabled', playlistOrder);
+    }
   },
 
   escapeHtml(value) {
@@ -1387,11 +1410,30 @@ const App = {
     document.getElementById('folder-name').focus();
   },
 
+  async runWithConcurrency(tasks, limit) {
+    const results = new Array(tasks.length);
+    let idx = 0;
+    const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+      while (true) {
+        const i = idx++;
+        if (i >= tasks.length) break;
+        try {
+          results[i] = { ok: true, value: await tasks[i]() };
+        } catch (err) {
+          results[i] = { ok: false, error: err };
+        }
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  },
+
   async uploadFiles(fileList) {
     const files = [...fileList];
     if (!files.length) return;
 
     const uploadMode = UploadPrefs.get();
+    const specs = [];
 
     for (const file of files) {
       let chunkSize = 921600;
@@ -1405,7 +1447,18 @@ const App = {
         mode = confirmed.uploadMode || uploadMode;
         convertHls = confirmed.convertHls || false;
       }
-      await this.uploadSingleFile(file, chunkSize, mode, convertHls);
+      specs.push({ file, chunkSize, mode, convertHls });
+    }
+
+    if (!specs.length) return;
+
+    const results = await this.runWithConcurrency(
+      specs.map((s) => () => this.uploadSingleFile(s.file, s.chunkSize, s.mode, s.convertHls)),
+      2
+    );
+    const failed = results.filter((r) => r && !r.ok);
+    if (failed.length) {
+      this.toast(`${failed.length} of ${specs.length} upload(s) failed`, 'error');
     }
     await this.loadStats();
   },
@@ -1530,10 +1583,9 @@ const App = {
   },
 
   async uploadSingleFile(file, chunkSize, uploadMode = 'api', convertHls = false) {
-    const uploadBtn = document.getElementById('btn-upload');
-    const pendingId = `pending-${Date.now()}`;
+    const pendingId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    App.setButtonLoading(uploadBtn, true);
+    App.beginUploadActivity();
 
     const placeholder = {
       id: pendingId, name: file.name, is_folder: 0, size: file.size,
@@ -1565,9 +1617,9 @@ const App = {
       explorer.files = explorer.files.filter((f) => f.id !== pendingId);
       explorer.render();
       this.toast(`Upload interrupted: ${err?.message || String(err) || 'unknown error'}. Resume from Background tasks.`, 'error');
+    } finally {
+      App.endUploadActivity();
     }
-
-    App.setButtonLoading(uploadBtn, false);
   },
 
   async showDetails(file) {

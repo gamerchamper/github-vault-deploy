@@ -477,7 +477,16 @@ class Explorer {
         <div class="file-size">${this.escape(file.uploadStatus || 'Uploading...')}</div>
       `;
     } else if (!file.is_folder) {
-      metaHtml = `<div class="file-size">${formatSize(file.size)}</div>`;
+      const epBadge = this.viewMode === 'playlist-detail' && file._inPlaylist
+        ? `<span class="playlist-ep-badge" title="Episode order">#${(file._playlistIndex ?? file.position ?? 0) + 1}</span>`
+        : '';
+      const orderControls = this.viewMode === 'playlist-detail' && file._inPlaylist
+        ? `<div class="playlist-order-controls">
+            <button type="button" class="playlist-order-btn" data-order="-1" title="Move earlier" aria-label="Move earlier">↑</button>
+            <button type="button" class="playlist-order-btn" data-order="1" title="Move later" aria-label="Move later">↓</button>
+          </div>`
+        : '';
+      metaHtml = `${orderControls}<div class="file-size">${epBadge}${formatSize(file.size)}</div>`;
     }
 
     let viewBadge = '';
@@ -506,19 +515,62 @@ class Explorer {
       return;
     }
     if (file.pending) return;
+    if (this.viewMode === 'playlist-detail' && file._inPlaylist) {
+      el.querySelectorAll('.playlist-order-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const delta = parseInt(btn.dataset.order, 10);
+          Playlists.movePlaylistItem(file.id, delta);
+        });
+      });
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        if (e.target.closest('.playlist-order-btn')) {
+          e.preventDefault();
+          return;
+        }
+        this.playlistDragFileId = file.id;
+        e.dataTransfer.setData('application/x-vault-playlist-reorder', file.id);
+        e.dataTransfer.effectAllowed = 'move';
+        e.currentTarget.classList.add('dragging');
+      });
+      el.addEventListener('dragover', (e) => {
+        if (!e.dataTransfer.types.includes('application/x-vault-playlist-reorder')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+        el.classList.add('drop-target');
+      });
+      el.addEventListener('dragleave', (e) => {
+        if (!el.contains(e.relatedTarget)) el.classList.remove('drop-target');
+      });
+      el.addEventListener('drop', async (e) => {
+        if (!e.dataTransfer.types.includes('application/x-vault-playlist-reorder')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        el.classList.remove('drop-target');
+        const draggedId = e.dataTransfer.getData('application/x-vault-playlist-reorder');
+        if (!draggedId || draggedId === file.id) return;
+        const targetIndex = this.files.findIndex((f) => f.id === file.id);
+        if (targetIndex < 0) return;
+        await Playlists.movePlaylistItemToIndex(draggedId, targetIndex);
+      });
+      el.addEventListener('dragend', () => {
+        this.playlistDragFileId = null;
+        el.classList.remove('dragging', 'drop-target');
+      });
+    }
     el.onclick = (e) => this.handleClick(e, file);
     el.ondblclick = (e) => {
       if (this.renamingId || e.target.closest('.file-rename-input')) return;
       this.openItem(file);
     };
     el.oncontextmenu = (e) => this.showContextMenu(e, file);
-    if (!this.isTrashView()) {
+    if (!this.isTrashView() && !(this.viewMode === 'playlist-detail' && file._inPlaylist)) {
       el.draggable = true;
       el.addEventListener('dragstart', (e) => this.handleDragStart(e, file));
       el.addEventListener('dragend', () => this.handleDragEnd());
       if (file.is_folder) this.bindFolderDropTarget(el, file);
-    } else {
-      el.draggable = false;
     }
 
     const img = el.querySelector('img.file-thumb');

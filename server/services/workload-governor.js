@@ -1,8 +1,8 @@
 const { AsyncLocalStorage } = require('async_hooks');
 
 const INTERACTIVE_IDLE_MS = 20 * 1000;
-const MAX_GITHUB_OPS = 6;
-const MAX_BACKGROUND_OPS = 2;
+const MAX_GITHUB_OPS = 12;
+const MAX_BACKGROUND_OPS = 4;
 
 const interactiveActivity = new Map();
 const requestContext = new AsyncLocalStorage();
