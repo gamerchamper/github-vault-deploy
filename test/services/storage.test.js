@@ -1,5 +1,6 @@
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
+const crypto = require('crypto');
 const { createMemoryDb, seedTestUser, seedTestFile, seedTestRepo } = require('../helpers/setup');
 
 describe('Storage service (upload session)', function () {
@@ -10,7 +11,11 @@ describe('Storage service (upload session)', function () {
 
   before(function () {
     db = createMemoryDb();
-    const user = seedTestUser(db, { github_id: 'storage-test', username: 'storagetest', master_key: 'x'.repeat(44) });
+    const user = seedTestUser(db, {
+      github_id: 'storage-test',
+      username: 'storagetest',
+      master_key: crypto.randomBytes(32).toString('base64'),
+    });
     userId = user.id;
     const repo = seedTestRepo(db, userId, { full_name: 'test/storagerepo', default_branch: 'main' });
     repoId = repo.id;
@@ -81,13 +86,12 @@ describe('Storage service (upload session)', function () {
   });
 
   describe('initUploadSession resume (findBestUploadSession fix)', function () {
-    it('should find existing failed session when fileId is null (findBestUploadSession includes failed)', async function () {
+    it('should start a fresh session when fileId is null even if a stale session exists', async function () {
       const fileId = 'fbs-failed-resume';
       seedTestFile(db, userId, {
         id: fileId, name: 'resume-me.mp4', path: '/resume-me.mp4', size: 500000, chunk_count: 10,
         upload_status: 'failed',
       });
-      // Insert some chunks so chunksDone > 0
       for (let i = 0; i < 3; i++) {
         db.prepare(`INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size) VALUES (?, ?, ?, ?, ?, ?)`)
           .run(fileId, i, repoId, `.vault/chunks/${fileId}/${String(i).padStart(5, '0')}.bin`, `sha-${i}`, 2000);
@@ -102,11 +106,11 @@ describe('Storage service (upload session)', function () {
         fileId: null,
       });
 
-      // Should have found the failed session and returned chunksDone=3
-      expect(result.fileId).to.equal(fileId);
-      expect(result.chunksDone).to.equal(3);
-      expect(result.nextChunk).to.equal(3);
-      expect(result.resumable).to.be.true;
+      expect(result.fileId).to.not.equal(fileId);
+      expect(result.chunksDone).to.equal(0);
+      expect(result.nextChunk).to.equal(0);
+      expect(result.resumable).to.be.false;
+      expect(db.prepare('SELECT id FROM files WHERE id = ?').get(fileId)).to.equal(undefined);
     });
 
     it('should find existing uploading session when fileId is provided', async function () {

@@ -130,6 +130,17 @@ function createMemoryDb() {
       UNIQUE(chunk_id, repo_id)
     );
 
+    CREATE TABLE IF NOT EXISTS chunk_sync_failures (
+      chunk_id INTEGER NOT NULL,
+      linked_account_id INTEGER NOT NULL,
+      fail_count INTEGER DEFAULT 0,
+      last_fail_at DATETIME,
+      next_retry_at DATETIME,
+      last_error TEXT,
+      confirmed_missing INTEGER DEFAULT 0,
+      PRIMARY KEY (chunk_id, linked_account_id)
+    );
+
     CREATE TABLE IF NOT EXISTS hls_segments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       file_id TEXT NOT NULL,

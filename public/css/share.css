@@ -707,6 +707,57 @@ body.share-cinema-active .share-video-player .plyr__controls {
   width: 100%;
 }
 
+/* Mobile / native fullscreen — undo cinema height caps so Plyr can fill the screen */
+.share-video-player .plyr--fullscreen-fallback,
+.share-video-player .plyr:fullscreen,
+.share-video-player .plyr:-webkit-full-screen {
+  max-width: none !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  flex: none !important;
+  overflow: visible !important;
+}
+
+.share-video-player .plyr--fullscreen-fallback .plyr__video-wrapper,
+.share-video-player .plyr:fullscreen .plyr__video-wrapper,
+.share-video-player .plyr:-webkit-full-screen .plyr__video-wrapper {
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+}
+
+.share-video-player .plyr--fullscreen-fallback .plyr__video-wrapper video,
+.share-video-player .plyr--fullscreen-fallback .share-video-el,
+.share-video-player .plyr:fullscreen .plyr__video-wrapper video,
+.share-video-player .plyr:fullscreen .share-video-el,
+.share-video-player .plyr:-webkit-full-screen .plyr__video-wrapper video,
+.share-video-player .plyr:-webkit-full-screen .share-video-el {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  max-width: none !important;
+  object-fit: contain !important;
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+}
+
+body.share-player-fullscreen {
+  overflow: hidden !important;
+}
+
+body.share-player-fullscreen .share-cinema-dock,
+body.share-player-fullscreen .share-top-dock,
+body.share-player-fullscreen .share-hero,
+body.share-player-fullscreen .share-right-rail,
+body.share-player-fullscreen .shoutbox-open-btn {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .share-audio-player { margin: 0 auto; max-width: 640px; }
 
 .share-loading {

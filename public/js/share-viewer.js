@@ -139,13 +139,7 @@ const ShareViewer = {
     });
     video.src = streamUrl;
     video.load();
-    if (typeof Plyr !== 'undefined' && !this.plyr) {
-      this.plyr = new Plyr(video, {
-        controls: MediaPlayer.CONTROLS_VIDEO,
-        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
-        settings: ['speed'],
-      });
-    }
+    this.initVideoPlyr(video);
     setTimeout(() => {
       videoWrap.classList.remove('hidden');
       this.onMediaReady(video, videoWrap, loading);
@@ -215,13 +209,7 @@ const ShareViewer = {
     });
 
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      if (typeof Plyr !== 'undefined' && !this.plyr) {
-        this.plyr = new Plyr(video, {
-          controls: MediaPlayer.CONTROLS_VIDEO,
-          speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
-          settings: ['speed', 'quality'],
-        });
-      }
+      this.initVideoPlyr(video);
       video.play().catch(() => {});
     });
     this.hls.on(Hls.Events.FRAG_BUFFERED, () => {
@@ -352,12 +340,25 @@ const ShareViewer = {
     const dockStats = document.getElementById('share-dock-stats');
     if (dockStats) dockStats.innerHTML = '';
     this.resetCinemaStage();
-    document.body.classList.remove('share-cinema-active');
+    document.body.classList.remove('share-cinema-active', 'share-player-fullscreen');
   },
 
   setCinemaMode(active) {
     document.body.classList.toggle('share-cinema-active', !!active);
     if (!active) this.resetCinemaStage();
+  },
+
+  setPlayerFullscreen(active) {
+    document.body.classList.toggle('share-player-fullscreen', !!active);
+  },
+
+  initVideoPlyr(video) {
+    if (typeof Plyr === 'undefined' || this.plyr || !video) return this.plyr;
+    this.plyr = MediaPlayer.createPlyr(video, false, {
+      onEnterFullscreen: () => this.setPlayerFullscreen(true),
+      onExitFullscreen: () => this.setPlayerFullscreen(false),
+    });
+    return this.plyr;
   },
 
   resetCinemaStage() {
@@ -808,18 +809,27 @@ const ShareViewer = {
     if (!this.plyr) {
       const isAudio = this.currentMediaType === 'audio';
       const canvas = wrap.querySelector('.share-audio-viz');
-      this.plyr = MediaPlayer.createPlyr(el, isAudio, {
-        onProgress: () => this.updatePlaybackStats(el),
-        onTimeupdate: () => this.updatePlaybackStats(el),
-        onPlay: isAudio ? () => MediaPlayer.resumeAudioViz(this.audioViz, el, canvas) : null,
-        onPause: isAudio ? () => MediaPlayer.drawAudioViz(this.audioViz, el, canvas) : null,
-        onEnded: () => {
-          if (isAudio) MediaPlayer.drawAudioViz(this.audioViz, el, canvas);
-          if (this.playlistMode && typeof SharePlaylist !== 'undefined') {
-            SharePlaylist.onMediaEnded();
-          }
-        },
-      });
+      if (isAudio) {
+        this.plyr = MediaPlayer.createPlyr(el, true, {
+          onProgress: () => this.updatePlaybackStats(el),
+          onTimeupdate: () => this.updatePlaybackStats(el),
+          onPlay: () => MediaPlayer.resumeAudioViz(this.audioViz, el, canvas),
+          onPause: () => MediaPlayer.drawAudioViz(this.audioViz, el, canvas),
+          onEnded: () => {
+            MediaPlayer.drawAudioViz(this.audioViz, el, canvas);
+            if (this.playlistMode && typeof SharePlaylist !== 'undefined') {
+              SharePlaylist.onMediaEnded();
+            }
+          },
+        });
+      } else {
+        this.initVideoPlyr(el);
+      }
+    }
+
+    if (this.currentMediaType === 'video' && this.plyr) {
+      this.plyr.on('progress', () => this.updatePlaybackStats(el));
+      this.plyr.on('timeupdate', () => this.updatePlaybackStats(el));
     }
 
     if (this.currentMediaType === 'audio') {

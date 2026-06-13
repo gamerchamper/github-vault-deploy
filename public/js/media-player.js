@@ -2,18 +2,28 @@ const MediaPlayer = {
   CONTROLS_AUDIO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings'],
   CONTROLS_VIDEO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
 
-  createPlyr(el, isAudio, hooks = {}) {
-    if (typeof Plyr === 'undefined') return null;
-    const plyr = new Plyr(el, {
+  plyrOptions(isAudio) {
+    const options = {
       controls: isAudio ? this.CONTROLS_AUDIO : this.CONTROLS_VIDEO,
       speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
       settings: ['speed'],
-    });
+    };
+    if (!isAudio) {
+      options.fullscreen = { enabled: true, iosNative: true, fallback: true };
+    }
+    return options;
+  },
+
+  createPlyr(el, isAudio, hooks = {}) {
+    if (typeof Plyr === 'undefined') return null;
+    const plyr = new Plyr(el, this.plyrOptions(isAudio));
     if (hooks.onProgress) plyr.on('progress', hooks.onProgress);
     if (hooks.onTimeupdate) plyr.on('timeupdate', hooks.onTimeupdate);
     if (hooks.onPlay) plyr.on('play', hooks.onPlay);
     if (hooks.onPause) plyr.on('pause', hooks.onPause);
     if (hooks.onEnded) plyr.on('ended', hooks.onEnded);
+    if (!isAudio && hooks.onEnterFullscreen) plyr.on('enterfullscreen', hooks.onEnterFullscreen);
+    if (!isAudio && hooks.onExitFullscreen) plyr.on('exitfullscreen', hooks.onExitFullscreen);
     return plyr;
   },
 
@@ -179,7 +189,7 @@ const MediaPlayer = {
   buildVideoPlayerHtml() {
     return `
       <div class="viewer-player-wrap share-video-player">
-        <video class="share-video-el" playsinline preload="auto"></video>
+        <video class="share-video-el" playsinline webkit-playsinline preload="auto"></video>
       </div>
     `;
   },

@@ -68,6 +68,65 @@ function pickRepo(repos, index) {
   return repos[index % repos.length];
 }
 
+function storageRepoExists(repoId) {
+  return !!db.prepare('SELECT id FROM storage_repos WHERE id = ?').get(repoId);
+}
+
+function assertUploadSessionFile(userId, fileId) {
+  const row = db.prepare(
+    "SELECT id, upload_status FROM files WHERE id = ? AND user_id = ? AND upload_status IN ('uploading', 'failed')"
+  ).get(fileId, userId);
+  if (!row) throw new Error('Upload session not found');
+  return row;
+}
+
+function insertChunkRow({
+  fileId, chunkIdx, repoId, repoPath, sha, encSize, iv, authTag, plainSize,
+}) {
+  try {
+    db.prepare(`
+      INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size, chunk_iv, chunk_tag, plain_size)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      fileId, chunkIdx, repoId, repoPath, sha, encSize,
+      iv.toString('base64'), authTag.toString('base64'), plainSize
+    );
+  } catch (err) {
+    if (/FOREIGN KEY constraint failed/i.test(String(err.message))) {
+      throw new Error(
+        'Could not save chunk — the upload session or storage repo changed mid-upload. Click Resume to continue.'
+      );
+    }
+    throw err;
+  }
+}
+
+async function recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath) {
+  const repos = getActiveRepos(userId);
+  if (!repos.length) {
+    throw new Error('Storage repository was removed. Add a repo in Settings, then click Resume.');
+  }
+  const { repo, octokit, owner, repoName } = await resolveRepoForChunkUpload(userId, repos, chunkIdx);
+  const sha = await github.uploadChunk(
+    octokit, owner, repoName, repoPath, encrypted, repo.default_branch
+  );
+  db.prepare(
+    'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
+  ).run(encrypted.length, repo.id);
+  return { repo, sha };
+}
+
+function pickActiveRepo(userId, repos, chunkIdx) {
+  let pool = repos;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const repo = pickRepo(pool, chunkIdx);
+    if (repo && storageRepoExists(repo.id)) return repo;
+    pool = getActiveRepos(userId);
+    if (!pool.length) break;
+  }
+  throw new Error('Storage repository unavailable. Check Settings → Storage, then click Resume.');
+}
+
 function isGitHubNotFound(err) {
   const status = err?.status ?? err?.response?.status;
   const msg = String(err?.response?.data?.message || err?.message || '');
@@ -385,9 +444,78 @@ function findBestUploadSession(userId, fileName, parentPath, size) {
     FROM files f
     WHERE f.user_id = ? AND f.parent_path = ? AND f.name = ?
       AND f.upload_status IN ('uploading', 'failed') AND f.size = ?
+      AND COALESCE(f.is_deleted, 0) = 0
     ORDER BY chunks_done DESC, f.updated_at DESC
     LIMIT 1
   `).get(userId, normalizedParent, fileName, size);
+}
+
+async function abandonStaleUploadSessions(userId, fileName, parentPath, size) {
+  const normalizedParent = normalizeParentPath(parentPath);
+  const stale = db.prepare(`
+    SELECT id FROM files
+    WHERE user_id = ? AND parent_path = ? AND name = ? AND size = ?
+      AND upload_status IN ('uploading', 'failed')
+  `).all(userId, normalizedParent, fileName, size);
+
+  for (const { id } of stale) {
+    await purgeUploadSessionLocal(userId, id);
+  }
+}
+
+async function purgeUploadSessionLocal(userId, fileId) {
+  const file = db.prepare('SELECT id FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
+  if (!file) return;
+
+  capacity.releaseHlsReserve(userId, fileId);
+  require('./git-upload').cleanupWorkspace(userId, fileId);
+  db.prepare(`
+    DELETE FROM chunk_sync_failures
+    WHERE chunk_id IN (SELECT id FROM chunks WHERE file_id = ?)
+  `).run(fileId);
+  db.prepare('DELETE FROM chunk_backups WHERE chunk_id IN (SELECT id FROM chunks WHERE file_id = ?)').run(fileId);
+  db.prepare('DELETE FROM chunks WHERE file_id = ?').run(fileId);
+  db.prepare('DELETE FROM hls_segments WHERE file_id = ?').run(fileId);
+  db.prepare('DELETE FROM playlist_items WHERE file_id = ?').run(fileId);
+  invalidateUploadTasksForFile(userId, fileId);
+  db.prepare('DELETE FROM files WHERE id = ?').run(fileId);
+}
+
+async function cleanupSiblingStaleUploadSessions(userId, file) {
+  const normalizedParent = normalizeParentPath(file.parent_path);
+  const stale = db.prepare(`
+    SELECT id FROM files
+    WHERE user_id = ? AND parent_path = ? AND name = ? AND size = ?
+      AND upload_status IN ('uploading', 'failed') AND id != ?
+  `).all(userId, normalizedParent, file.name, file.size, file.id);
+
+  for (const { id } of stale) {
+    await purgeUploadSessionLocal(userId, id);
+  }
+}
+
+function invalidateUploadTasksForFile(userId, fileId) {
+  const tasks = require('./tasks');
+  const rows = db.prepare(`
+    SELECT id, payload FROM tasks
+    WHERE user_id = ? AND type = 'upload'
+      AND status IN ('processing', 'pending', 'paused', 'error')
+  `).all(userId);
+
+  for (const row of rows) {
+    let payload = {};
+    try {
+      payload = row.payload ? JSON.parse(row.payload) : {};
+    } catch {
+      payload = {};
+    }
+    if (payload.fileId !== fileId) continue;
+    tasks.update(row.id, userId, {
+      status: 'error',
+      error: 'Upload session removed — start a new upload',
+      resumable: false,
+    });
+  }
 }
 
 function resolveResumeChunkSize(userId, fileId, rawChunkSize, totalChunks, size) {
@@ -490,31 +618,24 @@ async function initUploadSession(userId, params) {
     `).get(userId, normalizedParent, fileName);
     if (conflict) throw new Error('A file with this name already exists');
 
-    existing = findBestUploadSession(userId, fileName, parentPath, size);
-    if (existing) {
-      fileId = existing.id;
-      totalChunks = existing.chunk_count;
-      chunkSize = resolveResumeChunkSize(userId, fileId, rawChunkSize, totalChunks, size);
-      db.prepare('UPDATE files SET upload_status = ? WHERE id = ?').run('uploading', fileId);
-      await cleanupEmptyUploadDuplicates(userId, fileName, parentPath, size, fileId);
-    } else {
-      fileId = uuidv4();
-      const masterKey = crypto.getMasterKey(user);
-      const fileKey = crypto.generateKey();
-      const encryptionMeta = crypto.wrapFileKey(fileKey, masterKey);
+    await abandonStaleUploadSessions(userId, fileName, parentPath, size);
 
-      db.prepare(`
-        INSERT INTO files (
-          id, user_id, name, path, size, mime_type, parent_path, chunk_count,
-          has_thumbnail, encryption_meta, encryption_mode, upload_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'chunk', 'uploading')
-      `).run(
-        fileId, userId, fileName, filePath, size,
-        mimeType || 'application/octet-stream',
-        normalizedParent, totalChunks,
-        JSON.stringify(encryptionMeta)
-      );
-    }
+    fileId = uuidv4();
+    const masterKey = crypto.getMasterKey(user);
+    const fileKey = crypto.generateKey();
+    const encryptionMeta = crypto.wrapFileKey(fileKey, masterKey);
+
+    db.prepare(`
+      INSERT INTO files (
+        id, user_id, name, path, size, mime_type, parent_path, chunk_count,
+        has_thumbnail, encryption_meta, encryption_mode, upload_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'chunk', 'uploading')
+    `).run(
+      fileId, userId, fileName, filePath, size,
+      mimeType || 'application/octet-stream',
+      normalizedParent, totalChunks,
+      JSON.stringify(encryptionMeta)
+    );
   }
 
   if (shouldReserveHls(convertHls, mimeType, fileName)) {
@@ -586,7 +707,7 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
   let repoName;
 
   if (uploadMode === 'git') {
-    repo = pickRepo(repos, chunkIdx);
+    repo = pickActiveRepo(userId, repos, chunkIdx);
     const gitUpload = require('./git-upload');
     const available = await gitUpload.isGitAvailable();
     if (!available) throw new Error('Git is not installed on the server');
@@ -654,20 +775,34 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
         });
       }
     }
+  }
+
+  assertUploadSessionFile(userId, fileId);
+  if (!storageRepoExists(repo.id)) {
+    if (uploadMode === 'git') {
+      throw new Error('Storage repository was removed during upload. Click Resume to continue.');
+    }
+    ({ repo, sha } = await recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath));
+  } else if (uploadMode !== 'git') {
     db.prepare(
       'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
     ).run(encrypted.length, repo.id);
   }
 
-  const chunkResult = db.prepare(`
-    INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size, chunk_iv, chunk_tag, plain_size)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    fileId, chunkIdx, repo.id, repoPath, sha, encrypted.length,
-    iv.toString('base64'), authTag.toString('base64'), buffer.length
-  );
+  insertChunkRow({
+    fileId,
+    chunkIdx,
+    repoId: repo.id,
+    repoPath,
+    sha,
+    encSize: encrypted.length,
+    iv,
+    authTag,
+    plainSize: buffer.length,
+  });
 
-  if (file.upload_status === 'failed') {
+  const sessionFile = db.prepare('SELECT upload_status FROM files WHERE id = ?').get(fileId);
+  if (sessionFile?.upload_status === 'failed') {
     db.prepare('UPDATE files SET upload_status = ? WHERE id = ?').run('uploading', fileId);
     const logger = require('../lib/logger');
     logger.info('upload_chunk_resumed_after_failure', { userId, fileId, chunkIndex });
@@ -1398,6 +1533,10 @@ async function deleteFile(userId, fileId) {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file) throw new Error('File not found');
 
+  if (!file.is_folder) {
+    await cleanupSiblingStaleUploadSessions(userId, file);
+  }
+
   capacity.releaseHlsReserve(userId, fileId);
 
   if (file.is_folder) {
@@ -1455,7 +1594,15 @@ async function deleteFile(userId, fileId) {
     }
   }
 
+  db.prepare(`
+    DELETE FROM chunk_sync_failures
+    WHERE chunk_id IN (SELECT id FROM chunks WHERE file_id = ?)
+  `).run(fileId);
+  db.prepare('DELETE FROM chunk_backups WHERE chunk_id IN (SELECT id FROM chunks WHERE file_id = ?)').run(fileId);
   db.prepare('DELETE FROM chunks WHERE file_id = ?').run(fileId);
+  db.prepare('DELETE FROM hls_segments WHERE file_id = ?').run(fileId);
+  db.prepare('DELETE FROM playlist_items WHERE file_id = ?').run(fileId);
+  invalidateUploadTasksForFile(userId, fileId);
   db.prepare('DELETE FROM files WHERE id = ?').run(fileId);
   await metadata.deleteFileMetadata(userId, fileId);
   require('./cache').remove(userId, fileId);
