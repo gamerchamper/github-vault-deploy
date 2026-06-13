@@ -526,7 +526,7 @@ const ShareViewer = {
   async playClientImage(info, token, viewer) {
     const loading = document.createElement('div');
     loading.className = 'viewer-loading';
-    loading.innerHTML = '<div class="spinner"></div><span>Decrypting in browser...</span>';
+    loading.innerHTML = vaultLoaderHtml('Decrypting in browser...');
     viewer.appendChild(loading);
     try {
       await ShareClientStream.load(token, info.id);
@@ -666,8 +666,7 @@ const ShareViewer = {
           <div class="share-theater-player">
             <div class="viewer-media-area share-media-area share-media-area-full">
               <div id="share-media-loading" class="viewer-loading">
-                <div class="spinner"></div>
-                <span id="share-media-status">Loading...</span>
+                ${vaultLoaderHtml('Loading...', 'share-media-status')}
               </div>
               ${MediaPlayer.buildVideoPlayerHtml().replace('share-video-player', 'share-video-player hidden')}
             </div>
@@ -724,8 +723,7 @@ const ShareViewer = {
       viewer.innerHTML = `
         <div class="viewer-media-area share-media-area">
           <div id="share-media-loading" class="viewer-loading">
-            <div class="spinner"></div>
-            <span id="share-media-status">Loading...</span>
+            ${vaultLoaderHtml('Loading...', 'share-media-status')}
           </div>
           ${MediaPlayer.buildAudioPlayerHtml().replace('share-audio-player', 'share-audio-player hidden')}
         </div>

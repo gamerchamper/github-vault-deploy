@@ -96,14 +96,26 @@ function getFileKey(userId, file) {
 }
 
 async function assembleFile(userId, fileId, file, workDir, onProgress) {
+  const outPath = path.join(workDir, 'source.mp4');
   const cached = cache.get(userId, fileId);
   if (cached?.path && fs.existsSync(cached.path)) {
-    return cached.path;
+    fs.copyFileSync(cached.path, outPath);
+    return outPath;
   }
 
-  const outPath = path.join(workDir, 'source.mp4');
-  const { buffer } = await storage.downloadFile(userId, fileId);
-  fs.writeFileSync(outPath, buffer);
+  await storage.downloadFileToPath(userId, fileId, outPath, (fetched, total, phase) => {
+    if (!onProgress) return;
+    if (phase === 'cached') {
+      onProgress({ phase: 'assembling', percent: 5, lastLog: 'Using cached file for HLS conversion...' });
+      return;
+    }
+    const pct = 5 + Math.round((fetched / Math.max(total, 1)) * 20);
+    onProgress({
+      phase: 'assembling',
+      percent: Math.min(25, pct),
+      lastLog: `Assembling file (${fetched}/${total} chunks)...`,
+    });
+  });
   return outPath;
 }
 
@@ -263,6 +275,14 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
   if (!file.encryption_meta) { log(`No encryption_meta (has_hls=${file.has_hls})`); throw new Error('File has no encryption metadata'); }
   if (file.has_hls) { log('Already has HLS'); return { fileId, hls: true, alreadyConverted: true }; }
   log(`File: ${file.name}, size=${file.size}, mime=${file.mime_type}`);
+
+  const chunkSample = db.prepare('SELECT chunk_iv FROM chunks WHERE file_id = ? LIMIT 1').get(fileId);
+  if (!chunkSample?.chunk_iv && file.size > 0x7fffffff) {
+    throw new Error(
+      'HLS conversion cannot load this file into memory (over 2 GB with whole-file encryption). '
+      + 'Re-upload the file to use chunked encryption, then convert again.'
+    );
+  }
 
   const existingSegments = db.prepare(
     'SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?'

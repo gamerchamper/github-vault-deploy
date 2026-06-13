@@ -203,6 +203,14 @@ const API = {
     updateItem: (id, fileId, body) => API.patch(`/api/playlists/${id}/items/${fileId}`, body),
     updateItems: (id, items) => API.patch(`/api/playlists/${id}/items`, { items }),
     reorder: (id, fileIds) => API.patch(`/api/playlists/${id}/reorder`, { file_ids: fileIds }),
+    linkFolder: (id, folderId, opts = {}) => API.post(`/api/playlists/${id}/folders`, {
+      folder_id: folderId,
+      include_subfolders: !!opts.include_subfolders,
+      sort_by: opts.sort_by,
+      sort_order: opts.sort_order,
+    }),
+    unlinkFolder: (id, folderId) => API.delete(`/api/playlists/${id}/folders/${folderId}`),
+    sync: (id) => API.post(`/api/playlists/${id}/sync`),
     share: (id) => API.post(`/api/playlists/${id}/share`),
     unshare: (id) => API.delete(`/api/playlists/${id}/share`),
     saveProgress: (id, body) => API.post(`/api/playlists/${id}/progress`, body),
@@ -312,10 +320,23 @@ function renderDriveBar(vaultPercent, usedPercent) {
   const cls = driveBarClass(usedPercent);
   return `
     <div class="drive-bar ${cls}">
-      <div class="drive-bar-vault" style="width:${vaultPercent}%"></div>
-      <div class="drive-bar-other" style="left:${vaultPercent}%;width:${otherPercent}%"></div>
+      <div class="drive-bar-vault" data-bar="${vaultPercent}"></div>
+      <div class="drive-bar-other" data-bar-left="${vaultPercent}" data-bar="${otherPercent}"></div>
     </div>
   `;
+}
+
+/** Apply widths/colors set via data-bar / data-bar-left / data-avatar-color (avoids inline style attributes in HTML). */
+function applyDynamicStyles(root = document) {
+  root.querySelectorAll('[data-bar]').forEach((el) => {
+    el.style.width = `${el.dataset.bar}%`;
+  });
+  root.querySelectorAll('[data-bar-left]').forEach((el) => {
+    el.style.left = `${el.dataset.barLeft}%`;
+  });
+  root.querySelectorAll('[data-avatar-color]').forEach((el) => {
+    el.style.backgroundColor = el.dataset.avatarColor;
+  });
 }
 
 function formatSize(bytes) {

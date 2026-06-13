@@ -230,6 +230,22 @@ const Playlists = {
 
   renderPlaylistHero(fileView) {
     const pl = this.currentPlaylist;
+    const folderLinks = pl.folder_links || [];
+    const folderLinksHtml = folderLinks.length ? `
+      <div class="playlist-folder-links">
+        <span class="playlist-folder-links-label">Linked folders (auto-sync)</span>
+        <ul class="playlist-folder-links-list">
+          ${folderLinks.map((link) => `
+            <li class="playlist-folder-link-item">
+              <span class="playlist-folder-link-name">📁 ${link.folder_name}</span>
+              <span class="playlist-folder-link-meta">${link.include_subfolders ? 'incl. subfolders · ' : ''}${link.sort_by} ${link.sort_order}</span>
+              <button type="button" class="btn-link btn-sync-folder-link" data-folder-id="${link.folder_id}">Sync</button>
+              <button type="button" class="btn-link btn-unlink-folder" data-folder-id="${link.folder_id}">Unlink</button>
+            </li>
+          `).join('')}
+        </ul>
+      </div>
+    ` : '';
     const hero = document.createElement('div');
     hero.className = 'curated-hero';
     hero.innerHTML = `
@@ -239,11 +255,13 @@ const Playlists = {
         <h1 class="curated-hero-title">${pl.title}</h1>
         <p class="curated-hero-desc">${pl.description || ''}</p>
         <div class="curated-hero-stats">${pl.item_count || 0} items · ${formatSize(pl.total_bytes || 0)}</div>
-        <p class="curated-hero-order-hint">Share links and Play all use the episode order below — drag items or use ↑↓ to reorder.</p>
+        ${folderLinksHtml}
+        <p class="curated-hero-order-hint">Share links and Play all use the episode order below — drag items or use ↑↓ to reorder. Synced folder items re-sort on sync.</p>
         <div class="curated-hero-actions">
           <button type="button" class="btn-primary" id="btn-playlist-play">▶ Play all</button>
           <button type="button" class="btn-secondary" id="btn-playlist-reorder">Reorder episodes</button>
           <button type="button" class="btn-secondary" id="btn-playlist-edit">Edit playlist</button>
+          ${folderLinks.length ? '<button type="button" class="btn-secondary" id="btn-playlist-sync-folders">Sync folders</button>' : ''}
           <button type="button" class="btn-secondary" id="btn-playlist-share">${pl.share_url ? 'Copy share link' : 'Share'}</button>
           ${pl.share_url ? '<button type="button" class="btn-secondary" id="btn-playlist-unshare">Stop sharing</button>' : ''}
           <button type="button" class="btn-secondary" id="btn-playlist-duplicate">Duplicate</button>
@@ -255,10 +273,17 @@ const Playlists = {
     hero.querySelector('#btn-playlist-play')?.addEventListener('click', () => this.playPlaylist(pl.id));
     hero.querySelector('#btn-playlist-reorder')?.addEventListener('click', () => this.openBuilder(pl));
     hero.querySelector('#btn-playlist-edit')?.addEventListener('click', () => this.openBuilder(pl));
+    hero.querySelector('#btn-playlist-sync-folders')?.addEventListener('click', () => this.syncPlaylistFolders(pl.id));
     hero.querySelector('#btn-playlist-share')?.addEventListener('click', () => this.sharePlaylist(pl.id));
     hero.querySelector('#btn-playlist-unshare')?.addEventListener('click', () => this.unsharePlaylist(pl.id));
     hero.querySelector('#btn-playlist-duplicate')?.addEventListener('click', () => this.duplicatePlaylist(pl.id));
     hero.querySelector('#btn-playlist-delete')?.addEventListener('click', () => this.deletePlaylist(pl.id, pl.title));
+    hero.querySelectorAll('.btn-unlink-folder').forEach((btn) => {
+      btn.addEventListener('click', () => this.unlinkFolderFromPlaylist(pl.id, btn.dataset.folderId));
+    });
+    hero.querySelectorAll('.btn-sync-folder-link').forEach((btn) => {
+      btn.addEventListener('click', () => this.syncPlaylistFolders(pl.id));
+    });
   },
 
   async deletePlaylist(id, title) {
@@ -609,14 +634,92 @@ const Playlists = {
       this.openCreatePlaylistModal();
       return;
     }
-    this.openPlaylistPicker(ids, playlists);
+    this.openPlaylistPicker(ids, playlists, { mode: 'add' });
   },
 
-  openPlaylistPicker(fileIds, playlists) {
+  async promptLinkFolderToPlaylist(folderId) {
+    const folder = explorer.files.find((f) => f.id === folderId);
+    if (!folder?.is_folder) {
+      App.toast('Select a folder to link', 'error');
+      return;
+    }
+    const data = await API.playlists.list();
+    const playlists = data.playlists || [];
+    if (!playlists.length) {
+      App.toast('Create a playlist first', 'error');
+      this.openCreatePlaylistModal();
+      return;
+    }
+    this.openPlaylistPicker([folderId], playlists, { mode: 'link', folderId, folderName: folder.name });
+  },
+
+  async linkFolderToPlaylist(playlistId, folderId, options = {}) {
+    try {
+      const pl = await API.playlists.linkFolder(playlistId, folderId, options);
+      App.toast('Folder linked — playlist will stay in sync', 'success');
+      if (explorer.viewMode === 'playlist-detail' && this.currentPlaylist?.id === playlistId) {
+        this.currentPlaylist = pl;
+        await this.loadPlaylistDetail(playlistId);
+        explorer.render();
+      }
+      return pl;
+    } catch (err) {
+      App.toast(err.message, 'error');
+      return null;
+    }
+  },
+
+  async unlinkFolderFromPlaylist(playlistId, folderId) {
+    if (!confirm('Unlink this folder? Synced items from the folder will be removed from the playlist.')) return;
+    try {
+      const pl = await API.playlists.unlinkFolder(playlistId, folderId);
+      App.toast('Folder unlinked', 'success');
+      if (explorer.viewMode === 'playlist-detail' && this.currentPlaylist?.id === playlistId) {
+        this.currentPlaylist = pl;
+        await this.loadPlaylistDetail(playlistId);
+        explorer.render();
+      }
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  async syncPlaylistFolders(playlistId) {
+    try {
+      const res = await API.playlists.sync(playlistId);
+      const msg = res.added || res.removed
+        ? `Synced (+${res.added || 0} / −${res.removed || 0})`
+        : 'Playlist is up to date';
+      App.toast(msg, 'success');
+      if (explorer.viewMode === 'playlist-detail' && this.currentPlaylist?.id === playlistId) {
+        this.currentPlaylist = res.playlist;
+        await this.loadPlaylistDetail(playlistId);
+        explorer.render();
+      }
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  openPlaylistPicker(fileIds, playlists, { mode = 'add', folderId = null, folderName = '' } = {}) {
     const modal = document.getElementById('playlist-picker-modal');
     const list = document.getElementById('playlist-picker-list');
+    const title = document.getElementById('playlist-picker-title');
+    const folderOpts = document.getElementById('playlist-picker-folder-opts');
     if (!modal || !list) return;
+    modal.dataset.mode = mode;
     modal.dataset.fileIds = JSON.stringify(fileIds);
+    modal.dataset.folderId = folderId || '';
+    if (title) {
+      title.textContent = mode === 'link'
+        ? `Link “${folderName || 'folder'}” to playlist`
+        : 'Add to playlist';
+    }
+    folderOpts?.classList.toggle('hidden', mode !== 'link');
+    if (mode === 'link') {
+      const subCb = document.getElementById('playlist-picker-include-subfolders');
+      if (subCb) subCb.checked = false;
+    }
     list.innerHTML = '';
     for (const pl of playlists) {
       const btn = document.createElement('button');
@@ -624,7 +727,12 @@ const Playlists = {
       btn.className = 'playlist-picker-item';
       btn.textContent = `${pl.title} (${pl.item_count || 0} items)`;
       btn.addEventListener('click', async () => {
-        await this.addFilesToPlaylist(pl.id, fileIds);
+        if (mode === 'link' && folderId) {
+          const includeSubfolders = document.getElementById('playlist-picker-include-subfolders')?.checked;
+          await this.linkFolderToPlaylist(pl.id, folderId, { include_subfolders: includeSubfolders });
+        } else {
+          await this.addFilesToPlaylist(pl.id, fileIds);
+        }
         this.closePlaylistPicker();
       });
       list.appendChild(btn);
@@ -744,6 +852,11 @@ const Playlists = {
     });
     document.getElementById('playlist-picker-new')?.addEventListener('click', () => {
       const modal = document.getElementById('playlist-picker-modal');
+      if (modal?.dataset.mode === 'link') {
+        this.closePlaylistPicker();
+        this.openCreatePlaylistModal();
+        return;
+      }
       const fileIds = JSON.parse(modal?.dataset.fileIds || '[]');
       this.pendingAddFileIds = fileIds;
       this.closePlaylistPicker();

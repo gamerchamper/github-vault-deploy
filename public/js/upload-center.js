@@ -131,7 +131,7 @@ const UploadCenter = {
             <span class="upload-center-pct">${failed ? 'Failed' : `${pct}%`}</span>
           </div>
           <div class="upload-center-detail">${TaskPanel.label(task)}</div>
-          <div class="upload-center-bar"><div class="upload-center-bar-fill" style="width:${pct}%"></div></div>
+          <div class="upload-center-bar"><div class="upload-center-bar-fill" data-bar="${pct}"></div></div>
           <div class="upload-center-meta">
             <span>${this.formatSpeed(task)}</span>
             <span>${task.fileSize ? formatSize(task.fileSize) : ''}</span>
@@ -140,6 +140,8 @@ const UploadCenter = {
         </div>
       `;
     }).join('');
+
+    applyDynamicStyles(list);
   },
 
   escape(s) {

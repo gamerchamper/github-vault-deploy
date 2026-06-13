@@ -148,6 +148,7 @@ const UploadManager = {
       for (let i = startChunk; i < totalChunks; i++) chunkIndices.push(i);
 
       let lastProgressAt = 0;
+      let lastTaskPanelAt = 0;
       const reportProgress = async () => {
         const now = Date.now();
         if (now - lastProgressAt < 400) return;
@@ -155,7 +156,10 @@ const UploadManager = {
         const job = await API.tasks.get(taskId).catch(() => null);
         if (!job) return;
         if (onProgress) onProgress(job);
-        TaskPanel.handleTask(job);
+        if (now - lastTaskPanelAt >= 1200) {
+          lastTaskPanelAt = now;
+          TaskPanel.handleTask(job);
+        }
       };
 
       const checkPaused = async () => {

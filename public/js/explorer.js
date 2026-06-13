@@ -473,7 +473,7 @@ class Explorer {
       `;
     } else if (isPending) {
       metaHtml = `
-        <div class="file-upload-bar"><div class="file-upload-bar-fill" style="width:${file.uploadPercent || 0}%"></div></div>
+        <div class="file-upload-bar"><div class="file-upload-bar-fill" data-bar="${file.uploadPercent || 0}"></div></div>
         <div class="file-size">${this.escape(file.uploadStatus || 'Uploading...')}</div>
       `;
     } else if (!file.is_folder) {
@@ -621,29 +621,40 @@ class Explorer {
     });
   }
 
-  createFileElement(file) {
+  createFileElement(file, { settled = false } = {}) {
     const el = document.createElement('div');
-    el.className = this.fileItemClass(file, { settled: false });
+    el.className = this.fileItemClass(file, { settled });
     el.dataset.id = file.id;
+    el.dataset.renderSig = this.fileRenderSig(file);
     el.tabIndex = 0;
     el.setAttribute('role', 'option');
     el.setAttribute('aria-selected', this.selected.has(file.id) ? 'true' : 'false');
     el.innerHTML = this.fileItemHtml(file);
+    applyDynamicStyles(el);
     this.bindFileItem(el, file);
     return el;
   }
 
   updateFileElement(el, file) {
-    el.className = this.fileItemClass(file);
+    const sig = this.fileRenderSig(file);
+    const nextClass = this.fileItemClass(file, { settled: true });
+    el.className = nextClass;
     el.setAttribute('aria-selected', this.selected.has(file.id) ? 'true' : 'false');
+
     if (file.pending) {
       const fill = el.querySelector('.file-upload-bar-fill');
       const statusEl = el.querySelector('.file-size');
       if (fill) fill.style.width = `${file.uploadPercent || 0}%`;
       if (statusEl) statusEl.textContent = file.uploadStatus || 'Uploading...';
+      el.dataset.renderSig = sig;
       return;
     }
+
+    if (el.dataset.renderSig === sig) return;
+
+    el.dataset.renderSig = sig;
     el.innerHTML = this.fileItemHtml(file);
+    applyDynamicStyles(el);
     this.bindFileItem(el, file);
   }
 
@@ -729,7 +740,7 @@ class Explorer {
         existing.delete(file.id);
         this.updateFileElement(el, file);
       } else {
-        el = this.createFileElement(file);
+        el = this.createFileElement(file, { settled: virtual });
       }
       nextEls.push(el);
     }
@@ -737,7 +748,7 @@ class Explorer {
     if (virtual) nextEls.push(VirtualGrid.bottomSentinel);
 
     for (const el of existing.values()) el.remove();
-    grid.replaceChildren(...nextEls);
+    this.syncGridChildren(grid, nextEls);
 
     if (virtual) {
       const cols = VirtualGrid.getColumns();
@@ -753,10 +764,35 @@ class Explorer {
         virtual: true,
       };
       VirtualGrid.updateSpacers(VirtualGrid.range);
-      requestAnimationFrame(() => VirtualGrid.scheduleUpdate());
     }
 
     ThumbCache.warmVisible(slice);
+  }
+
+  syncGridChildren(grid, nextEls) {
+    const current = [...grid.children];
+    if (current.length === nextEls.length && current.every((node, i) => node === nextEls[i])) return;
+    grid.replaceChildren(...nextEls);
+  }
+
+  fileRenderSig(file) {
+    return [
+      file.id,
+      file.name,
+      file.size,
+      file.mime_type || '',
+      file.is_folder ? 1 : 0,
+      file.pending ? 1 : 0,
+      file.uploadPercent || 0,
+      file.uploadStatus || '',
+      file.has_thumbnail ? 1 : 0,
+      file.has_hls ? 1 : 0,
+      file.is_favorite ? 1 : 0,
+      file._inPlaylist ? (file._playlistIndex ?? file.position ?? '') : '',
+      file._trash ? 1 : 0,
+      file._trashGroupHeader ? `${file._trashGroupPath}:${file._trashGroupCount}` : '',
+      this.viewMode,
+    ].join('\x1e');
   }
 
   handleClick(e, file) {
@@ -1184,19 +1220,23 @@ class Explorer {
     const thumbItem = menu.querySelector('[data-action="refresh-thumb"]');
     const verifyItem = menu.querySelector('[data-action="verify-file"]');
     const hlsItem = menu.querySelector('[data-action="hls-convert"]');
+    const moveItem = menu.querySelector('[data-action="move"]');
+    const addPlaylistItem = menu.querySelector('[data-action="add-to-playlist"]');
+    const linkFolderItem = menu.querySelector('[data-action="link-folder-to-playlist"]');
+    const deleteItem = menu.querySelector('[data-action="delete"]');
+
     dlItem.style.display = file.is_folder ? 'none' : '';
     detailsItem.style.display = file.is_folder ? 'none' : '';
-    shareItem.style.display = '';
+    shareItem.style.display = file.is_folder ? 'none' : '';
     if (thumbItem) thumbItem.style.display = file.is_folder ? 'none' : '';
     if (verifyItem) verifyItem.style.display = file.is_folder ? 'none' : '';
+    if (addPlaylistItem) addPlaylistItem.style.display = file.is_folder ? 'none' : '';
+    if (linkFolderItem) linkFolderItem.style.display = file.is_folder ? '' : 'none';
     if (hlsItem) {
       const isVideo = !file.is_folder && (file.mime_type?.startsWith('video/') || /\.mp4$/i.test(file.name || ''));
       hlsItem.classList.toggle('hidden', !isVideo);
     }
 
-    const moveItem = menu.querySelector('[data-action="move"]');
-    const addPlaylistItem = menu.querySelector('[data-action="add-to-playlist"]');
-    const deleteItem = menu.querySelector('[data-action="delete"]');
     const playlistDetail = this.viewMode === 'playlist-detail' && file._inPlaylist;
 
     if (playlistDetail) {
@@ -1212,10 +1252,12 @@ class Explorer {
       hlsItem?.classList.add('hidden');
       if (moveItem) moveItem.style.display = 'none';
       if (addPlaylistItem) addPlaylistItem.style.display = 'none';
+      if (linkFolderItem) linkFolderItem.style.display = 'none';
       if (deleteItem) deleteItem.textContent = 'Remove from playlist';
     } else if (this.isCuratedBrowseView()) {
       if (moveItem) moveItem.style.display = 'none';
       if (addPlaylistItem) addPlaylistItem.style.display = 'none';
+      if (linkFolderItem) linkFolderItem.style.display = 'none';
       if (deleteItem) deleteItem.style.display = 'none';
     } else if (deleteItem) {
       deleteItem.textContent = 'Move to trash';

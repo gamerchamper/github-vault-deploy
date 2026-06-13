@@ -9,6 +9,7 @@ describe('playlists routes', function () {
   let user;
   let file1;
   let file2;
+  let playlistsService;
 
   before(function () {
     db = createMemoryDb();
@@ -16,7 +17,7 @@ describe('playlists routes', function () {
     file1 = seedTestFile(db, user.id, { id: 'pl-file-1', name: 'a.mp4' });
     file2 = seedTestFile(db, user.id, { id: 'pl-file-2', name: 'b.mp3', mime_type: 'audio/mpeg' });
 
-    const playlistsService = proxyquire('../../server/services/playlists', {
+    playlistsService = proxyquire('../../server/services/playlists', {
       '../db/database': db,
     });
 
@@ -151,5 +152,135 @@ describe('playlists routes', function () {
     expect(prog.status).to.equal(200);
     const get = await request(app).get(`/api/playlists/${id}/progress`);
     expect(get.body.progress[0].progress_pct).to.equal(50);
+  });
+
+  it('links a folder and syncs files into the playlist', async function () {
+    const folder = seedTestFile(db, user.id, {
+      id: 'pl-folder-1',
+      name: 'Season 1',
+      path: '/Season 1',
+      size: 0,
+      mime_type: null,
+      is_folder: 1,
+      parent_path: '/',
+    });
+    const ep1 = seedTestFile(db, user.id, {
+      id: 'pl-ep-1',
+      name: 'ep01.mp4',
+      path: '/Season 1/ep01.mp4',
+      parent_path: '/Season 1',
+    });
+    const ep2 = seedTestFile(db, user.id, {
+      id: 'pl-ep-2',
+      name: 'ep02.mp4',
+      path: '/Season 1/ep02.mp4',
+      parent_path: '/Season 1',
+    });
+
+    const created = await request(app).post('/api/playlists').send({ title: 'Show' });
+    const id = created.body.id;
+
+    const linked = await request(app)
+      .post(`/api/playlists/${id}/folders`)
+      .send({ folder_id: folder.id });
+    expect(linked.status).to.equal(200);
+    expect(linked.body.folder_links).to.have.length(1);
+    expect(linked.body.items).to.have.length(2);
+    expect(linked.body.items.map((i) => i.id)).to.deep.equal([ep1.id, ep2.id]);
+    expect(linked.body.items.every((i) => i.sync_managed)).to.be.true;
+  });
+
+  it('auto-syncs when a new file is added to a linked folder', async function () {
+    const folder = seedTestFile(db, user.id, {
+      id: 'pl-folder-2',
+      name: 'Album',
+      path: '/Album',
+      size: 0,
+      mime_type: null,
+      is_folder: 1,
+      parent_path: '/',
+    });
+    seedTestFile(db, user.id, {
+      id: 'pl-track-1',
+      name: '01.mp3',
+      path: '/Album/01.mp3',
+      parent_path: '/Album',
+      mime_type: 'audio/mpeg',
+    });
+
+    const created = await request(app).post('/api/playlists').send({ title: 'Album playlist' });
+    const id = created.body.id;
+    await request(app).post(`/api/playlists/${id}/folders`).send({ folder_id: folder.id });
+
+    const track2 = seedTestFile(db, user.id, {
+      id: 'pl-track-2',
+      name: '02.mp3',
+      path: '/Album/02.mp3',
+      parent_path: '/Album',
+      mime_type: 'audio/mpeg',
+    });
+
+    playlistsService.syncPlaylistsForFile(user.id, track2.id);
+
+    const get = await request(app).get(`/api/playlists/${id}`);
+    expect(get.body.items).to.have.length(2);
+    expect(get.body.items.map((i) => i.id)).to.include(track2.id);
+  });
+
+  it('removes synced items when a file is trashed in a linked folder', async function () {
+    const folder = seedTestFile(db, user.id, {
+      id: 'pl-folder-3',
+      name: 'Clips',
+      path: '/Clips',
+      size: 0,
+      mime_type: null,
+      is_folder: 1,
+      parent_path: '/',
+    });
+    const clip = seedTestFile(db, user.id, {
+      id: 'pl-clip-1',
+      name: 'clip.mp4',
+      path: '/Clips/clip.mp4',
+      parent_path: '/Clips',
+    });
+
+    const created = await request(app).post('/api/playlists').send({ title: 'Clips playlist' });
+    const id = created.body.id;
+    await request(app).post(`/api/playlists/${id}/folders`).send({ folder_id: folder.id });
+
+    db.prepare('UPDATE files SET is_deleted = 1 WHERE id = ?').run(clip.id);
+
+    const synced = await request(app).post(`/api/playlists/${id}/sync`);
+    expect(synced.status).to.equal(200);
+    expect(synced.body.removed).to.be.at.least(1);
+    expect(synced.body.playlist.items).to.have.length(0);
+  });
+
+  it('unlinks a folder and removes synced items', async function () {
+    const folder = seedTestFile(db, user.id, {
+      id: 'pl-folder-4',
+      name: 'Docs',
+      path: '/Docs',
+      size: 0,
+      mime_type: null,
+      is_folder: 1,
+      parent_path: '/',
+    });
+    seedTestFile(db, user.id, {
+      id: 'pl-doc-1',
+      name: 'readme.pdf',
+      path: '/Docs/readme.pdf',
+      parent_path: '/Docs',
+      mime_type: 'application/pdf',
+    });
+
+    const created = await request(app).post('/api/playlists').send({ title: 'Docs playlist' });
+    const id = created.body.id;
+    await request(app).post(`/api/playlists/${id}/folders`).send({ folder_id: folder.id });
+
+    const unlinked = await request(app).delete(`/api/playlists/${id}/folders/${folder.id}`);
+    expect(unlinked.status).to.equal(200);
+    expect(unlinked.body.folder_links).to.have.length(0);
+    expect(unlinked.body.items).to.have.length(0);
   });
 });

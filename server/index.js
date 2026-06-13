@@ -30,11 +30,17 @@ const { requireAuth } = require('./middleware/auth');
 const { ensureSetup } = require('./middleware/setup');
 
 const appUrlService = require('./services/app-url');
+const {
+  applySecurityHeaders,
+  ensureUtf8Charset,
+  staticAssetHeaders,
+} = require('./middleware/http-headers');
 
 const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, '../public');
 const sessionSecret = process.env.SESSION_SECRET || (() => {
   const gen = crypto.randomBytes(32).toString('hex');
   console.warn('SESSION_SECRET not set — generated random secret for this session. All sessions will be invalidated on restart. Set SESSION_SECRET in .env for persistent sessions.');
@@ -43,7 +49,11 @@ const sessionSecret = process.env.SESSION_SECRET || (() => {
 const secureCookies = appUrlService.isSecureAppUrl();
 
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.set('etag', true);
 
+app.use(applySecurityHeaders);
+app.use(ensureUtf8Charset);
 app.use(express.json());
 
 app.use(cookieSession({
@@ -164,11 +174,19 @@ app.get('/health', (req, res) => {
 
 // Dynamic share pages with Open Graph embed tags (Discord, Slack, etc.)
 // Serve static assets under /share (e.g. sw.js) before dynamic routes
-app.use('/share', express.static(path.join(__dirname, '../public/share')));
+app.use('/share', express.static(path.join(PUBLIC_DIR, 'share'), {
+  cacheControl: false,
+  setHeaders: (res, filePath) => staticAssetHeaders(res, filePath, path.join(PUBLIC_DIR, 'share')),
+}));
 app.use('/share', sharePageRoutes);
 
 // Serve static assets before passport so the UI shell loads even under heavy background work
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(PUBLIC_DIR, {
+  cacheControl: false,
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => staticAssetHeaders(res, filePath, PUBLIC_DIR),
+}));
 
 app.use(passport.initialize());
 app.use(passport.session());
@@ -188,7 +206,9 @@ app.use('/api/viewers', viewerRoutes);
 app.use('/api/bandwidth', bandwidthRoutes);
 
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  res.type('html');
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
 app.listen(PORT, () => {

@@ -78,6 +78,31 @@ const ShareShoutbox = {
     return node.innerHTML;
   },
 
+  setPanelAccessibility(open) {
+    if (!this.shoutboxEl) return;
+    const focusable = this.shoutboxEl.querySelectorAll('button, input, textarea, select, a[href]');
+    if (open) {
+      this.shoutboxEl.removeAttribute('inert');
+      this.shoutboxEl.removeAttribute('aria-hidden');
+      focusable.forEach((el) => {
+        if (!Object.prototype.hasOwnProperty.call(el.dataset, 'shoutboxTabindex')) return;
+        const prev = el.dataset.shoutboxTabindex;
+        if (prev === '') el.removeAttribute('tabindex');
+        else el.setAttribute('tabindex', prev);
+        delete el.dataset.shoutboxTabindex;
+      });
+    } else {
+      this.shoutboxEl.setAttribute('inert', '');
+      this.shoutboxEl.setAttribute('aria-hidden', 'true');
+      focusable.forEach((el) => {
+        if (!Object.prototype.hasOwnProperty.call(el.dataset, 'shoutboxTabindex')) {
+          el.dataset.shoutboxTabindex = el.getAttribute('tabindex') ?? '';
+        }
+        el.setAttribute('tabindex', '-1');
+      });
+    }
+  },
+
   formatPosition(seconds) {
     if (seconds == null || seconds < 0) return '';
     const h = Math.floor(seconds / 3600);
@@ -236,7 +261,7 @@ const ShareShoutbox = {
   openPanel() {
     const scrollY = window.scrollY;
     this.shoutboxEl.classList.remove('hidden', 'shoutbox-closed');
-    this.shoutboxEl.setAttribute('aria-hidden', 'false');
+    this.setPanelAccessibility(true);
     this.openBtnEl.classList.add('hidden');
     document.body.classList.add('share-shoutbox-open');
     document.getElementById('share-right-rail')?.classList.add('share-right-rail-open');
@@ -260,9 +285,9 @@ const ShareShoutbox = {
   },
 
   closePanel() {
+    this.setPanelAccessibility(false);
     this.shoutboxEl.classList.remove('shoutbox-open');
     this.shoutboxEl.classList.add('shoutbox-closed');
-    this.shoutboxEl.setAttribute('aria-hidden', 'true');
     this.openBtnEl.classList.remove('hidden');
     document.body.classList.remove('share-shoutbox-open');
     this.open = false;
@@ -307,7 +332,7 @@ const ShareShoutbox = {
 
     this.shoutboxEl.classList.add('hidden', 'shoutbox-closed');
     this.shoutboxEl.classList.remove('shoutbox-open');
-    this.shoutboxEl.setAttribute('aria-hidden', 'true');
+    this.setPanelAccessibility(false);
     this.openBtnEl.classList.remove('hidden');
     document.body.classList.remove('share-shoutbox-open');
 
@@ -348,6 +373,7 @@ const ShareShoutbox = {
     if (el) {
       el.classList.add('hidden');
       el.classList.remove('shoutbox-open', 'shoutbox-closed');
+      el.setAttribute('inert', '');
       el.setAttribute('aria-hidden', 'true');
     }
     const btn = document.getElementById('shoutbox-open-btn');

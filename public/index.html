@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css">
-  <link rel="stylesheet" href="/css/playlists.css">
-  <link rel="stylesheet" href="/css/plyr.css">
-  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.0">
+  <link rel="stylesheet" href="/css/playlists.css?v=1.0.0">
+  <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
+  <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
   <meta name="theme-color" content="#5b8cf7">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+  <link rel="icon" href="/favicon.ico" sizes="any">
 </head>
 <body>
   <!-- Login Screen -->
@@ -82,7 +82,8 @@
           <span class="ribbon-icon">📤</span>
           <span>Upload</span>
         </button>
-        <select id="upload-mode" class="upload-mode-select" title="Upload method">
+        <label class="visually-hidden" for="upload-mode">Upload method</label>
+        <select id="upload-mode" class="upload-mode-select" aria-label="Upload method">
           <option value="api">API (resumable)</option>
           <option value="git">Git push (faster)</option>
         </select>
@@ -155,8 +156,8 @@
           <span>Refresh</span>
         </button>
       </div>
-      <input type="file" id="file-input" multiple hidden>
-      <input type="file" id="verify-file-input" hidden>
+      <input type="file" id="file-input" multiple hidden aria-label="Choose files to upload">
+      <input type="file" id="verify-file-input" hidden aria-label="Choose file to verify">
     </div>
 
     <!-- Address Bar -->
@@ -333,6 +334,7 @@
             <p class="viewers-subtitle">Create client credentials for the desktop uploader without copying browser session cookies.</p>
           </div>
           <div class="api-key-actions">
+            <label class="visually-hidden" for="api-key-name">API key name</label>
             <input id="api-key-name" class="api-key-name" type="text" maxlength="80" placeholder="Vault Upload Client">
             <button id="btn-create-api-key" class="btn-primary" type="button">Create key</button>
           </div>
@@ -340,7 +342,7 @@
         <div id="api-key-new" class="api-key-new hidden">
           <div class="api-key-new-header">New API key created. Copy it now; it will not be shown again.</div>
           <div class="api-key-copy-row">
-            <input id="api-key-new-value" class="api-key-value" type="text" readonly spellcheck="false">
+            <input id="api-key-new-value" class="api-key-value" type="text" readonly spellcheck="false" aria-label="New API key value">
             <button type="button" class="btn-primary" data-copy-target="api-key-new-value">Copy key</button>
           </div>
           <div class="api-key-command-grid">
@@ -364,10 +366,16 @@
       <!-- File View -->
       <div class="file-view vault-scroll" id="file-view">
         <div class="view-loading hidden" id="view-loading">
-          <div class="skeleton-grid" id="skeleton-grid">
-            <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
-            <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
-            <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+          <div class="vault-loader" role="status" aria-live="polite" aria-label="Loading files">
+            <div class="vault-loader-mark" aria-hidden="true">
+              <div class="vault-loader-ring"></div>
+              <svg class="vault-loader-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+              </svg>
+            </div>
+            <span class="vault-loader-label">Loading files…</span>
           </div>
         </div>
         <div class="file-grid" id="file-grid" role="listbox" aria-label="Files" aria-multiselectable="true"></div>
@@ -603,12 +611,21 @@
         <div class="viewer-main-column">
         <div class="viewer-media-area">
           <div id="viewer-loading" class="viewer-loading">
-            <div class="spinner"></div>
-            <span id="viewer-status">Loading...</span>
+            <div class="vault-loader" role="status" aria-live="polite">
+              <div class="vault-loader-mark" aria-hidden="true">
+                <div class="vault-loader-ring"></div>
+                <svg class="vault-loader-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                  <path d="M2 17l10 5 10-5"/>
+                  <path d="M2 12l10 5 10-5"/>
+                </svg>
+              </div>
+              <span class="vault-loader-label" id="viewer-status">Loading...</span>
+            </div>
           </div>
           <img id="viewer-image" class="viewer-media hidden" alt="">
           <div id="viewer-video-wrap" class="viewer-player-wrap hidden">
-            <video id="viewer-video" playsinline preload="auto"></video>
+            <video id="viewer-video" playsinline webkit-playsinline preload="auto"></video>
           </div>
           <div id="viewer-audio-wrap" class="viewer-player-wrap viewer-audio-player hidden">
             <div class="audio-visual-stage">
@@ -675,6 +692,7 @@
             <span id="viewer-playlist-title" class="playlist-panel-title">Playlist</span>
             <span id="viewer-playlist-meta" class="playlist-panel-count"></span>
           </div>
+          <label class="visually-hidden" for="viewer-playlist-search">Search playlist queue</label>
           <input type="search" id="viewer-playlist-search" class="playlist-panel-search" placeholder="Search queue…" autocomplete="off">
           <div class="playlist-panel-controls">
             <button type="button" id="viewer-playlist-prev" class="playlist-ctrl-btn" title="Previous">⏮</button>
@@ -696,15 +714,16 @@
         <button class="modal-close" data-close="playlist-modal">&times;</button>
       </div>
       <div class="modal-body">
-        <label class="form-label">Title<input type="text" id="playlist-form-title" class="form-input" placeholder="My playlist"></label>
-        <label class="form-label">Description<textarea id="playlist-form-desc" class="form-input" rows="3" placeholder="Optional description"></textarea></label>
-        <label class="form-label">Visibility
+        <label class="form-label" for="playlist-form-title">Title</label>
+        <input type="text" id="playlist-form-title" class="form-input" placeholder="My playlist">
+        <label class="form-label" for="playlist-form-desc">Description</label>
+        <textarea id="playlist-form-desc" class="form-input" rows="3" placeholder="Optional description"></textarea>
+        <label class="form-label" for="playlist-form-visibility">Visibility</label>
           <select id="playlist-form-visibility" class="form-input">
             <option value="private">Private</option>
             <option value="unlisted">Unlisted</option>
             <option value="public">Public</option>
           </select>
-        </label>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-primary" id="btn-save-playlist">Save</button>
@@ -720,15 +739,16 @@
         <button class="modal-close" data-close="collection-modal">&times;</button>
       </div>
       <div class="modal-body">
-        <label class="form-label">Title<input type="text" id="collection-form-title" class="form-input" placeholder="My collection"></label>
-        <label class="form-label">Description<textarea id="collection-form-desc" class="form-input" rows="3"></textarea></label>
-        <label class="form-label">Visibility
-          <select id="collection-form-visibility" class="form-input">
+        <label class="form-label" for="collection-form-title">Title</label>
+        <input type="text" id="collection-form-title" class="form-input" placeholder="My collection">
+        <label class="form-label" for="collection-form-desc">Description</label>
+        <textarea id="collection-form-desc" class="form-input" rows="3"></textarea>
+        <label class="form-label" for="collection-form-visibility">Visibility</label>
+        <select id="collection-form-visibility" class="form-input">
             <option value="private">Private</option>
             <option value="unlisted">Unlisted</option>
             <option value="public">Public</option>
           </select>
-        </label>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-primary" id="btn-save-collection">Save</button>
@@ -736,14 +756,21 @@
     </div>
   </div>
 
-  <!-- Playlist picker (add files to playlist) -->
+  <!-- Playlist picker (add files / link folder to playlist) -->
   <div id="playlist-picker-modal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>Add to playlist</h2>
+        <h2 id="playlist-picker-title">Add to playlist</h2>
         <button class="modal-close" data-close="playlist-picker-modal">&times;</button>
       </div>
       <div class="modal-body">
+        <div id="playlist-picker-folder-opts" class="playlist-picker-folder-opts hidden">
+          <label class="plan-checkbox">
+            <input type="checkbox" id="playlist-picker-include-subfolders">
+            Include subfolders
+          </label>
+          <p class="form-hint">Files in this folder will stay in sync — uploads, moves, and deletes update the playlist automatically.</p>
+        </div>
         <div id="playlist-picker-list" class="playlist-picker-list vault-scroll"></div>
       </div>
       <div class="modal-footer">
@@ -761,6 +788,7 @@
       </div>
       <div class="modal-body">
         <div class="builder-search-row">
+          <label class="visually-hidden" for="collection-builder-search">Search playlists</label>
           <input type="text" id="collection-builder-search" class="form-input" placeholder="Search playlists to add…">
           <button type="button" class="btn-secondary" id="collection-builder-add">Search</button>
         </div>
@@ -783,6 +811,7 @@
       <div class="modal-body">
         <p class="builder-order-hint">Drag rows or use ↑↓ to set episode order — share pages play items in this sequence.</p>
         <div class="builder-search-row">
+          <label class="visually-hidden" for="builder-search">Search vault files</label>
           <input type="text" id="builder-search" class="form-input" placeholder="Search vault to add files…">
           <button type="button" class="btn-secondary" id="builder-add-files">Search</button>
         </div>
@@ -816,7 +845,7 @@
           <input type="checkbox" id="plan-hls-convert">
           Convert to HLS segments for streaming (MP4 only)
         </label>
-        <p class="plan-hint" id="plan-hls-hint" style="display:none">HLS uses stream copy (~same size as the original) in addition to encrypted chunks. Total storage reserved is roughly 2× the file size.</p>
+        <p class="plan-hint plan-hls-hint hidden" id="plan-hls-hint">HLS uses stream copy (~same size as the original) in addition to encrypted chunks. Total storage reserved is roughly 2× the file size.</p>
       </div>
       <div class="modal-footer">
         <button id="plan-cancel" class="btn-secondary">Cancel</button>
@@ -845,13 +874,14 @@
       </div>
       <div class="modal-body">
         <p class="modal-desc">Anyone with this link can view or download the file.</p>
-        <label class="form-check share-client-toggle" style="display:flex;align-items:flex-start;gap:8px;margin:12px 0;text-align:left;">
-          <input type="checkbox" id="share-client-stream" checked style="margin-top:3px;">
+        <label class="form-check share-client-toggle" for="share-client-stream">
+          <input type="checkbox" id="share-client-stream" checked>
           <span>Decrypt media in the viewer's browser (no server download)</span>
         </label>
         <p class="form-hint">When enabled, encrypted chunks are fetched through the server but decrypted locally. Video and audio never touch server disk.</p>
+        <label class="visually-hidden" for="share-url">Share link</label>
         <div class="share-url-row">
-          <input type="text" id="share-url" readonly>
+          <input type="text" id="share-url" readonly aria-label="Share link URL">
           <button id="share-copy" class="btn-primary">Copy</button>
         </div>
       </div>
@@ -923,6 +953,7 @@
       <div class="context-item" data-action="move">Move to...</div>
       <div class="context-item" data-action="favorite">Add to favorites</div>
       <div class="context-item" data-action="add-to-playlist">Add to playlist</div>
+      <div class="context-item" data-action="link-folder-to-playlist">Link folder to playlist</div>
       <div class="context-item" data-action="refresh-thumb">Refresh thumbnail</div>
       <div class="context-item" data-action="verify-file">Verify file</div>
       <div class="context-item hls-convert-item hidden" data-action="hls-convert">Convert to HLS</div>
@@ -968,6 +999,7 @@
   <div id="global-search" class="global-search-overlay hidden" role="dialog" aria-label="Global search">
     <div class="global-search-panel">
       <div class="global-search-header">
+        <label class="visually-hidden" for="global-search-input">Search vault</label>
         <input type="text" id="global-search-input" class="global-search-input" placeholder="Search entire vault…" autocomplete="off">
         <button type="button" id="global-search-close" class="nav-btn" aria-label="Close">✕</button>
       </div>
@@ -983,40 +1015,41 @@
         <span>Command Palette</span>
         <kbd>Esc</kbd>
       </div>
+      <label class="visually-hidden" for="cmd-input">Command palette search</label>
       <input type="text" class="cmd-input" id="cmd-input" placeholder="Search files, create folders, upload..." autocomplete="off" autofocus>
       <div class="cmd-results" id="cmd-results"></div>
     </div>
   </div>
-  <script src="/js/hls.min.js"></script>
+  <script src="/js/hls.min.js?v=1.0.0"></script>
 
-  <script src="/js/plyr.polyfilled.min.js"></script>
-  <script src="/js/media-player.js"></script>
-  <script src="/js/api.js?v=5"></script>
-  <script src="/js/playback-memory.js"></script>
-  <script src="/js/pdf-viewer.js"></script>
-  <script src="/js/image-viewer.js"></script>
-  <script src="/js/details-preview.js"></script>
-  <script src="/js/thumb-cache.js"></script>
-  <script src="/js/virtual-scroll.js"></script>
-  <script src="/js/display-names.js"></script>
-  <script src="/js/upload-store.js"></script>
-  <script src="/js/adaptive-concurrency.js"></script>
-  <script src="/js/verify-repair.js"></script>
-  <script src="/js/upload-manager.js"></script>
-  <script src="/js/chunk-blocks.js"></script>
-  <script src="/js/download-manager.js"></script>
-  <script src="/js/tasks.js"></script>
-  <script src="/js/audio-queue.js"></script>
-  <script src="/js/playlist-queue.js"></script>
-  <script src="/js/playlist-player.js"></script>
-  <script src="/js/playlists.js"></script>
-  <script src="/js/viewer.js"></script>
-  <script src="/js/viewers.js"></script>
-  <script src="/js/bandwidth.js"></script>
-  <script src="/js/explorer.js"></script>
-  <script src="/js/upload-center.js"></script>
-  <script src="/js/global-search.js"></script>
-  <script src="/js/explorer-keyboard.js"></script>
-  <script src="/js/app.js?v=5"></script>
+  <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
+  <script src="/js/media-player.js?v=1.0.0"></script>
+  <script src="/js/api.js?v=1.0.0"></script>
+  <script src="/js/playback-memory.js?v=1.0.0"></script>
+  <script src="/js/pdf-viewer.js?v=1.0.0"></script>
+  <script src="/js/image-viewer.js?v=1.0.0"></script>
+  <script src="/js/details-preview.js?v=1.0.0"></script>
+  <script src="/js/thumb-cache.js?v=1.0.0"></script>
+  <script src="/js/virtual-scroll.js?v=1.0.0"></script>
+  <script src="/js/display-names.js?v=1.0.0"></script>
+  <script src="/js/upload-store.js?v=1.0.0"></script>
+  <script src="/js/adaptive-concurrency.js?v=1.0.0"></script>
+  <script src="/js/verify-repair.js?v=1.0.0"></script>
+  <script src="/js/upload-manager.js?v=1.0.0"></script>
+  <script src="/js/chunk-blocks.js?v=1.0.0"></script>
+  <script src="/js/download-manager.js?v=1.0.0"></script>
+  <script src="/js/tasks.js?v=1.0.0"></script>
+  <script src="/js/audio-queue.js?v=1.0.0"></script>
+  <script src="/js/playlist-queue.js?v=1.0.0"></script>
+  <script src="/js/playlist-player.js?v=1.0.0"></script>
+  <script src="/js/playlists.js?v=1.0.0"></script>
+  <script src="/js/viewer.js?v=1.0.0"></script>
+  <script src="/js/viewers.js?v=1.0.0"></script>
+  <script src="/js/bandwidth.js?v=1.0.0"></script>
+  <script src="/js/explorer.js?v=1.0.0"></script>
+  <script src="/js/upload-center.js?v=1.0.0"></script>
+  <script src="/js/global-search.js?v=1.0.0"></script>
+  <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
+  <script src="/js/app.js?v=1.0.0"></script>
 </body>
 </html>

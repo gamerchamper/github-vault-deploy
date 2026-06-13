@@ -58,8 +58,21 @@ const PlaybackMemory = {
     for (let i = 0; i < remove; i++) localStorage.removeItem(entries[i].k);
   },
 
+  _bindings: new WeakMap(),
+
+  detach(el) {
+    if (!el) return;
+    const binding = this._bindings.get(el);
+    if (!binding) return;
+    el.removeEventListener('timeupdate', binding.save);
+    el.removeEventListener('pause', binding.save);
+    el.removeEventListener('ended', binding.onEnded);
+    this._bindings.delete(el);
+  },
+
   apply(el, fileId) {
     if (!el || !fileId) return;
+    this.detach(el);
     const pos = this.get(fileId);
     if (pos > 0) {
       const seek = () => {
@@ -77,8 +90,10 @@ const PlaybackMemory = {
       lastSave = now;
       this.set(fileId, el.currentTime, el.duration);
     };
+    const onEnded = () => this.remove(fileId);
     el.addEventListener('timeupdate', save);
     el.addEventListener('pause', save);
-    el.addEventListener('ended', () => this.remove(fileId));
+    el.addEventListener('ended', onEnded);
+    this._bindings.set(el, { save, onEnded });
   },
 };

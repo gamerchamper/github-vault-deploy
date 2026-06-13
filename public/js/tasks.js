@@ -4,6 +4,16 @@ const TaskPanel = {
   doneTimers: new Map(),
   expandedTaskId: null,
   panelExpanded: false,
+  _renderScheduled: false,
+
+  scheduleRender() {
+    if (this._renderScheduled) return;
+    this._renderScheduled = true;
+    requestAnimationFrame(() => {
+      this._renderScheduled = false;
+      this.render();
+    });
+  },
 
   async init() {
     try {
@@ -346,7 +356,7 @@ const TaskPanel = {
   handleTask(task) {
     const prev = this.tasks.get(task.id);
     this.tasks.set(task.id, task);
-    this.render();
+    this.scheduleRender();
 
     if (task.type === 'backup-sync' && (task.status === 'processing' || task.status === 'pending')) {
       App.ensureBackupPoll();
@@ -681,13 +691,15 @@ const TaskPanel = {
           </div>
           <div class="task-detail">${this.escape(detail)}${task.lastLog && !expanded ? ` · <span class="task-last-log">${this.escape(task.lastLog)}</span>` : ''}</div>
           <div class="task-bar ${failed && !resumable ? 'task-bar-error' : failed && resumable ? 'task-bar-paused' : ''}">
-            <div class="task-bar-fill" style="width:${percent}%"></div>
+            <div class="task-bar-fill" data-bar="${percent}"></div>
           </div>
           ${expanded ? this.renderDebug(task) : ''}
           ${actions}
         </div>
       `;
     }).join('');
+
+    applyDynamicStyles(list);
 
     if (this.expandedTaskId) {
       const logEl = list.querySelector(`.task-item[data-task-id="${this.expandedTaskId}"] .task-debug-log`);

@@ -177,6 +177,7 @@ const GlobalSearch = {
 
     spacerEl.style.height = `${total * this.rowHeight}px`;
     windowEl.style.transform = `translateY(${start * this.rowHeight}px)`;
+    windowEl.style.setProperty('--global-search-row-height', `${this.rowHeight}px`);
 
     let html = '';
     for (let i = start; i < end; i++) {
@@ -186,7 +187,7 @@ const GlobalSearch = {
       } else {
         const f = item.file;
         html += `
-          <button type="button" class="global-search-row" data-search-id="${f.id}" style="height:${this.rowHeight}px">
+          <button type="button" class="global-search-row" data-search-id="${f.id}">
             <span class="global-search-icon">${getFileIcon(f.name, f.is_folder)}</span>
             <span class="global-search-name">${this.escape(f.name)}</span>
             <span class="global-search-meta">${f.is_folder ? 'Folder' : formatSize(f.size || 0)}</span>

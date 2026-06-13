@@ -172,7 +172,7 @@ router.get('/share/:token/hls', async (req, res) => {
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Content-Disposition', `inline; filename="${encodeURIComponent(baseName)}.m3u8"`);
     res.set('Access-Control-Allow-Origin', '*');
-    res.send(content);
+    res.send(Buffer.from(content, 'utf8'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -649,7 +649,7 @@ router.get('/playlist/:token/hls', async (req, res) => {
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Content-Disposition', `inline; filename="${encodeURIComponent(baseName)}.m3u8"`);
     res.set('Access-Control-Allow-Origin', '*');
-    res.send(content);
+    res.send(Buffer.from(content, 'utf8'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

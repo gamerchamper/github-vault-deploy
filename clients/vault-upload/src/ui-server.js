@@ -9,13 +9,24 @@ const configStore = require('./config');
 
 const jobs = new Map();
 
+const API_CACHE = 'private, no-cache, must-revalidate';
+const HTML_CACHE = 'no-cache, must-revalidate';
+
+function responseHeaders(extra = {}) {
+  const { cacheControl, ...rest } = extra;
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': cacheControl || API_CACHE,
+    ...rest,
+  };
+}
+
 function json(res, status, body) {
   const data = JSON.stringify(body);
-  res.writeHead(status, {
+  res.writeHead(status, responseHeaders({
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(data),
-    'Cache-Control': 'no-store',
-  });
+  }));
   res.end(data);
 }
 
@@ -396,7 +407,10 @@ function createServer() {
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
       if (req.method === 'GET' && url.pathname === '/') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.writeHead(200, responseHeaders({
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': HTML_CACHE,
+        }));
         return res.end(html());
       }
       if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, safeConfig(configStore.load(), true));

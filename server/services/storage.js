@@ -914,6 +914,8 @@ async function finalizeUpload(userId, fileId, previewBuffer, onProgress, uploadM
 
   reportProgress(onProgress, { phase: 'done', percent: 100, chunksDone, chunksTotal: file.chunk_count });
 
+  notifyPlaylistFolderSync(userId, [fileId]);
+
   return {
     id: fileId,
     name: file.name,
@@ -1195,6 +1197,63 @@ async function downloadFileWithProgress(userId, fileId, onProgress, view = null)
 
 async function downloadFile(userId, fileId, view = null) {
   return downloadFileWithProgress(userId, fileId, null, view);
+}
+
+const NODE_BUFFER_MAX = 0x7fffffff;
+
+async function downloadFileToPath(userId, fileId, outPath, onProgress = null, view = null) {
+  const user = getUser(userId);
+  if (!user) throw new Error('User not found');
+
+  const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
+  if (!file || file.is_folder) throw new Error('File not found');
+
+  const cacheMod = require('./cache');
+  const useCache = !view || view.type === 'primary';
+  if (useCache) {
+    const cached = cacheMod.get(userId, fileId);
+    if (cached?.path && fs.existsSync(cached.path)) {
+      if (onProgress) onProgress(1, 1, 'cached');
+      fs.copyFileSync(cached.path, outPath);
+      return file;
+    }
+  }
+
+  const chunks = db.prepare(
+    'SELECT c.*, r.full_name, r.default_branch FROM chunks c JOIN storage_repos r ON c.repo_id = r.id WHERE c.file_id = ? ORDER BY c.chunk_index'
+  ).all(fileId);
+  if (!chunks.length) throw new Error('No file chunks found');
+
+  if (isChunkMode(file, chunks)) {
+    const fileKey = await getFileKeyFromMeta(userId, file);
+    const total = chunks.length;
+    const fd = fs.openSync(outPath, 'w');
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const enc = await accounts.downloadChunkForView(userId, chunk, view);
+        const dec = crypto.decryptChunk(enc, fileKey, chunk.chunk_iv, chunk.chunk_tag);
+        fs.writeSync(fd, dec, 0, dec.length, null);
+        if (onProgress) onProgress(i + 1, total, 'fetching');
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (onProgress) onProgress(total, total, 'done');
+    return file;
+  }
+
+  if (file.size > NODE_BUFFER_MAX) {
+    throw new Error(
+      'File exceeds 2 GB in-memory limit for whole-file encryption. '
+      + 'Re-upload with chunked encryption to enable HLS conversion.'
+    );
+  }
+
+  const buffer = await fetchAndDecrypt(userId, file, chunks, onProgress, view);
+  fs.writeFileSync(outPath, buffer);
+  if (useCache && buffer.length) cacheMod.put(userId, fileId, buffer, file);
+  return file;
 }
 
 function getFileDetails(userId, fileId, req = null) {
@@ -1746,6 +1805,7 @@ function softTrashItems(userId, ids) {
       if (r.changes) moved++;
     }
   }
+  notifyPlaylistFolderSync(userId, ids);
   return moved;
 }
 
@@ -1771,6 +1831,7 @@ function restoreItems(userId, ids) {
       if (r.changes) restored++;
     }
   }
+  notifyPlaylistFolderSync(userId, ids);
   return restored;
 }
 
@@ -1886,6 +1947,8 @@ async function moveItems(userId, ids, destinationParentPath) {
     const file = db.prepare('SELECT * FROM files WHERE id = ?').get(id);
     if (file) await metadata.updatePathMetadata(userId, file);
   }
+
+  notifyPlaylistFolderSync(userId, [...affectedIds]);
 
   return { moved: movedIds.length };
 }
@@ -2257,6 +2320,19 @@ async function finalizeFileRepair(userId, fileId) {
   return { fileId, totalChunks: file.chunk_count, repaired: true };
 }
 
+function notifyPlaylistFolderSync(userId, fileIds) {
+  if (!fileIds?.length) return;
+  try {
+    const playlistsSvc = require('./playlists');
+    const unique = [...new Set(fileIds.filter(Boolean))];
+    for (const fileId of unique) {
+      playlistsSvc.syncPlaylistsForFile(userId, fileId);
+    }
+  } catch {
+    /* playlist sync is best-effort */
+  }
+}
+
 module.exports = {
   isChunkMode,
   uploadFile,
@@ -2268,6 +2344,7 @@ module.exports = {
   markUploadFailed,
   uploadPercent,
   downloadFile,
+  downloadFileToPath,
   downloadFileWithProgress,
   deleteFile,
   listFiles,

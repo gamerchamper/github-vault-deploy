@@ -75,4 +75,14 @@ const ThumbCache = {
       }
     }
   },
+
+  clear() {
+    for (const entry of this.map.values()) {
+      if (entry?.data?.startsWith?.('blob:')) {
+        try { URL.revokeObjectURL(entry.data); } catch { /* ignore */ }
+      }
+    }
+    this.map.clear();
+    this.pending.clear();
+  },
 };

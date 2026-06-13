@@ -481,11 +481,12 @@ async function servePlaylist(req, res, userId, fileId, baseUrl, view = null) {
   res.setHeader('Cache-Control', 'no-cache');
 
   if (!hasSegment) {
-    return res.status(503).setHeader('Retry-After', '2').send('#EXTM3U\n# Waiting for first segment\n');
+    return res.status(503).setHeader('Retry-After', '2')
+      .send(Buffer.from('#EXTM3U\n# Waiting for first segment\n', 'utf8'));
   }
 
   const playlist = session.buildPlaylist(baseUrl);
-  res.send(playlist);
+  res.send(Buffer.from(playlist, 'utf8'));
   recordBytes(userId, fileId, Buffer.byteLength(playlist, 'utf-8'), 'stream');
 }
 

@@ -34,6 +34,8 @@ function fileRowToItem(row) {
     parent_path: row.parent_path,
     position: row.position,
     added_at: row.added_at,
+    folder_link_id: row.folder_link_id ?? null,
+    sync_managed: !!row.folder_link_id,
     progress_pct: row.progress_pct ?? null,
     completed: row.completed ?? null,
     position_seconds: row.position_seconds ?? null,
@@ -111,6 +113,268 @@ function enrichCollection(row, req = null) {
   return result;
 }
 
+function assertFolderOwned(userId, folderId) {
+  const folder = db.prepare(`
+    SELECT id, path, name FROM files
+    WHERE id = ? AND user_id = ? AND is_deleted = 0 AND is_folder = 1
+  `).get(folderId, userId);
+  if (!folder) throw new Error('Folder not found');
+  return folder;
+}
+
+function listFolderLinks(playlistId) {
+  return db.prepare(`
+    SELECT l.id, l.folder_id, l.include_subfolders, l.sort_by, l.sort_order, l.last_synced_at,
+           f.name AS folder_name, f.path AS folder_path
+    FROM playlist_folder_links l
+    JOIN files f ON f.id = l.folder_id
+    WHERE l.playlist_id = ?
+    ORDER BY l.id ASC
+  `).all(playlistId).map((row) => ({
+    id: row.id,
+    folder_id: row.folder_id,
+    folder_name: row.folder_name,
+    folder_path: row.folder_path,
+    include_subfolders: !!row.include_subfolders,
+    sort_by: row.sort_by || 'name',
+    sort_order: row.sort_order || 'ASC',
+    last_synced_at: row.last_synced_at,
+  }));
+}
+
+function sortFileRows(rows, sortBy, sortOrder) {
+  const dir = sortOrder === 'DESC' ? -1 : 1;
+  const sorted = [...rows];
+  if (sortBy === 'created_at') {
+    sorted.sort((a, b) => dir * String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  } else {
+    sorted.sort((a, b) => dir * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+  return sorted;
+}
+
+function listFilesForFolderLink(userId, folder, includeSubfolders) {
+  if (includeSubfolders) {
+    const childPrefix = folder.path === '/' ? '/%' : `${folder.path}/%`;
+    return db.prepare(`
+      SELECT id, name, created_at FROM files
+      WHERE user_id = ? AND is_deleted = 0 AND is_folder = 0
+        AND (upload_status IS NULL OR upload_status = 'ready')
+        AND (parent_path = ? OR path LIKE ?)
+    `).all(userId, folder.path, childPrefix);
+  }
+  return db.prepare(`
+    SELECT id, name, created_at FROM files
+    WHERE user_id = ? AND parent_path = ? AND is_deleted = 0 AND is_folder = 0
+      AND (upload_status IS NULL OR upload_status = 'ready')
+  `).all(userId, folder.path);
+}
+
+function fileMatchesFolderLink(file, folderPath, includeSubfolders) {
+  if (!file || file.is_folder) return false;
+  if (file.parent_path === folderPath) return true;
+  if (!includeSubfolders) return false;
+  const prefix = folderPath === '/' ? '/' : `${folderPath}/`;
+  return file.path.startsWith(prefix);
+}
+
+function rebuildPlaylistPositions(playlistId) {
+  const playlist = db.prepare('SELECT user_id FROM playlists WHERE id = ?').get(playlistId);
+  if (!playlist) return;
+
+  const links = db.prepare(
+    'SELECT * FROM playlist_folder_links WHERE playlist_id = ? ORDER BY id ASC'
+  ).all(playlistId);
+
+  let pos = 0;
+  const upd = db.prepare('UPDATE playlist_items SET position = ? WHERE playlist_id = ? AND file_id = ?');
+
+  for (const link of links) {
+    const folder = db.prepare('SELECT * FROM files WHERE id = ? AND is_deleted = 0').get(link.folder_id);
+    if (!folder) continue;
+    const files = sortFileRows(
+      listFilesForFolderLink(playlist.user_id, folder, !!link.include_subfolders),
+      link.sort_by,
+      link.sort_order,
+    );
+    for (const f of files) {
+      const managed = db.prepare(`
+        SELECT 1 FROM playlist_items
+        WHERE playlist_id = ? AND file_id = ? AND folder_link_id = ?
+      `).get(playlistId, f.id, link.id);
+      if (managed) upd.run(pos, playlistId, f.id);
+      pos += 1;
+    }
+  }
+
+  const manual = db.prepare(`
+    SELECT file_id FROM playlist_items
+    WHERE playlist_id = ? AND folder_link_id IS NULL
+    ORDER BY position ASC, id ASC
+  `).all(playlistId);
+  for (const { file_id: fileId } of manual) {
+    upd.run(pos, playlistId, fileId);
+    pos += 1;
+  }
+}
+
+function syncPlaylistFolderLink(userId, linkId) {
+  const link = db.prepare(`
+    SELECT l.*, p.user_id AS playlist_user_id
+    FROM playlist_folder_links l
+    JOIN playlists p ON p.id = l.playlist_id
+    WHERE l.id = ? AND p.user_id = ?
+  `).get(linkId, userId);
+  if (!link) throw new Error('Folder link not found');
+
+  const folder = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(link.folder_id, userId);
+  if (!folder || folder.is_deleted || !folder.is_folder) {
+    db.prepare('DELETE FROM playlist_items WHERE playlist_id = ? AND folder_link_id = ?')
+      .run(link.playlist_id, linkId);
+    rebuildPlaylistPositions(link.playlist_id);
+    db.prepare('UPDATE playlist_folder_links SET last_synced_at = CURRENT_TIMESTAMP WHERE id = ?').run(linkId);
+    return { added: 0, removed: 0 };
+  }
+
+  const sorted = sortFileRows(
+    listFilesForFolderLink(userId, folder, !!link.include_subfolders),
+    link.sort_by,
+    link.sort_order,
+  );
+  const targetIds = sorted.map((f) => f.id);
+  const targetSet = new Set(targetIds);
+
+  let removed = 0;
+  const managed = db.prepare(
+    'SELECT file_id FROM playlist_items WHERE playlist_id = ? AND folder_link_id = ?'
+  ).all(link.playlist_id, linkId);
+  const del = db.prepare(
+    'DELETE FROM playlist_items WHERE playlist_id = ? AND file_id = ? AND folder_link_id = ?'
+  );
+  for (const { file_id: fileId } of managed) {
+    if (!targetSet.has(fileId)) {
+      del.run(link.playlist_id, fileId, linkId);
+      removed += 1;
+    }
+  }
+
+  const insert = db.prepare(`
+    INSERT INTO playlist_items (playlist_id, file_id, position, folder_link_id)
+    VALUES (?, ?, 0, ?)
+  `);
+  let added = 0;
+  for (const fileId of targetIds) {
+    const existing = db.prepare(
+      'SELECT folder_link_id FROM playlist_items WHERE playlist_id = ? AND file_id = ?'
+    ).get(link.playlist_id, fileId);
+    if (existing) continue;
+    try {
+      assertFileOwned(userId, fileId);
+      insert.run(link.playlist_id, fileId, linkId);
+      added += 1;
+    } catch {
+      /* file became unavailable during sync */
+    }
+  }
+
+  rebuildPlaylistPositions(link.playlist_id);
+  db.prepare('UPDATE playlist_folder_links SET last_synced_at = CURRENT_TIMESTAMP WHERE id = ?').run(linkId);
+  if (added || removed) {
+    db.prepare('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(link.playlist_id);
+  }
+  return { added, removed };
+}
+
+function syncPlaylistsForFolder(userId, folderId) {
+  const links = db.prepare(`
+    SELECT l.id FROM playlist_folder_links l
+    JOIN playlists p ON p.id = l.playlist_id AND p.user_id = ?
+    WHERE l.folder_id = ?
+  `).all(userId, folderId);
+  for (const { id } of links) syncPlaylistFolderLink(userId, id);
+}
+
+function syncPlaylistsForFile(userId, fileId) {
+  const file = db.prepare(`
+    SELECT id, parent_path, path, is_folder, is_deleted FROM files WHERE id = ? AND user_id = ?
+  `).get(fileId, userId);
+  if (!file) return;
+
+  const links = db.prepare(`
+    SELECT l.id, l.folder_id, l.include_subfolders, f.path AS folder_path
+    FROM playlist_folder_links l
+    JOIN playlists p ON p.id = l.playlist_id AND p.user_id = ?
+    JOIN files f ON f.id = l.folder_id
+  `).all(userId);
+
+  const affected = new Set();
+  for (const link of links) {
+    if (file.is_folder && file.id === link.folder_id) {
+      affected.add(link.id);
+      continue;
+    }
+    if (!file.is_folder && fileMatchesFolderLink(file, link.folder_path, !!link.include_subfolders)) {
+      affected.add(link.id);
+    }
+  }
+  for (const linkId of affected) syncPlaylistFolderLink(userId, linkId);
+}
+
+function linkFolder(userId, playlistId, folderId, options = {}) {
+  const pl = db.prepare('SELECT id FROM playlists WHERE id = ? AND user_id = ?').get(playlistId, userId);
+  if (!pl) throw new Error('Playlist not found');
+  assertFolderOwned(userId, folderId);
+
+  const includeSubfolders = options.include_subfolders ? 1 : 0;
+  const sortBy = options.sort_by === 'created_at' ? 'created_at' : 'name';
+  const sortOrder = options.sort_order === 'DESC' ? 'DESC' : 'ASC';
+
+  let linkId;
+  try {
+    const result = db.prepare(`
+      INSERT INTO playlist_folder_links (playlist_id, folder_id, include_subfolders, sort_by, sort_order)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(playlistId, folderId, includeSubfolders, sortBy, sortOrder);
+    linkId = result.lastInsertRowid;
+  } catch (err) {
+    if (String(err.message).includes('UNIQUE')) throw new Error('Folder already linked to this playlist');
+    throw err;
+  }
+
+  syncPlaylistFolderLink(userId, linkId);
+  return getPlaylist(userId, playlistId);
+}
+
+function unlinkFolder(userId, playlistId, folderId) {
+  const link = db.prepare(`
+    SELECT l.id FROM playlist_folder_links l
+    JOIN playlists p ON p.id = l.playlist_id AND p.user_id = ?
+    WHERE l.playlist_id = ? AND l.folder_id = ?
+  `).get(userId, playlistId, folderId);
+  if (!link) throw new Error('Folder link not found');
+
+  db.prepare('DELETE FROM playlist_items WHERE playlist_id = ? AND folder_link_id = ?')
+    .run(playlistId, link.id);
+  db.prepare('DELETE FROM playlist_folder_links WHERE id = ?').run(link.id);
+  normalizePositions(playlistId);
+  db.prepare('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(playlistId);
+  return getPlaylist(userId, playlistId);
+}
+
+function syncPlaylist(userId, playlistId) {
+  const pl = db.prepare('SELECT id FROM playlists WHERE id = ? AND user_id = ?').get(playlistId, userId);
+  if (!pl) throw new Error('Playlist not found');
+  const links = db.prepare('SELECT id FROM playlist_folder_links WHERE playlist_id = ?').all(playlistId);
+  let added = 0;
+  let removed = 0;
+  for (const { id } of links) {
+    const r = syncPlaylistFolderLink(userId, id);
+    added += r.added;
+    removed += r.removed;
+  }
+  return { added, removed, playlist: getPlaylist(userId, playlistId) };
+}
+
 function assertFileOwned(userId, fileId) {
   const file = db.prepare(`
     SELECT id FROM files
@@ -126,13 +390,14 @@ function getPlaylist(userId, playlistId, req = null) {
   if (!row) throw new Error('Playlist not found');
   const playlist = enrichPlaylist(row, userId, req);
   playlist.items = listPlaylistItems(userId, playlistId);
+  playlist.folder_links = listFolderLinks(playlistId);
   return playlist;
 }
 
 function listPlaylistItems(userId, playlistId, { limit, offset } = {}) {
   let sql = `
     SELECT f.id, f.name, f.path, f.size, f.mime_type, f.chunk_count, f.has_thumbnail, f.has_hls,
-           f.parent_path, pi.position, pi.added_at, pi.display_name,
+           f.parent_path, pi.position, pi.added_at, pi.display_name, pi.folder_link_id,
            pp.progress_pct, pp.completed, pp.position_seconds
     FROM playlist_items pi
     JOIN files f ON f.id = pi.file_id AND f.is_deleted = 0 AND f.is_folder = 0
@@ -200,13 +465,27 @@ function duplicatePlaylist(userId, playlistId) {
     cover_file_id: src.cover_file_id,
   });
   if (src.items?.length) {
-    addItems(userId, copy.id, src.items.map((i) => i.id));
-    const named = src.items.filter((i) => i.display_name);
-    if (named.length) {
-      updateItemsDisplayNames(userId, copy.id, named.map((i) => ({
-        file_id: i.id,
-        display_name: i.display_name,
-      })));
+    const manualItems = src.items.filter((i) => !i.sync_managed);
+    if (manualItems.length) {
+      addItems(userId, copy.id, manualItems.map((i) => i.id));
+      const named = manualItems.filter((i) => i.display_name);
+      if (named.length) {
+        updateItemsDisplayNames(userId, copy.id, named.map((i) => ({
+          file_id: i.id,
+          display_name: i.display_name,
+        })));
+      }
+    }
+  }
+  for (const link of src.folder_links || []) {
+    try {
+      linkFolder(userId, copy.id, link.folder_id, {
+        include_subfolders: link.include_subfolders,
+        sort_by: link.sort_by,
+        sort_order: link.sort_order,
+      });
+    } catch {
+      /* folder may have been deleted */
     }
   }
   return getPlaylist(userId, copy.id);
@@ -598,4 +877,11 @@ module.exports = {
   removePlaylistFromCollection,
   createCollectionShareToken,
   getCollectionByShareToken,
+  listFolderLinks,
+  linkFolder,
+  unlinkFolder,
+  syncPlaylist,
+  syncPlaylistFolderLink,
+  syncPlaylistsForFile,
+  syncPlaylistsForFolder,
 };

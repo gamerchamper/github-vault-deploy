@@ -134,6 +134,35 @@ router.post('/:id/duplicate', (req, res) => {
   }
 });
 
+router.post('/:id/folders', (req, res) => {
+  try {
+    const { folder_id, include_subfolders, sort_by, sort_order } = req.body;
+    res.json(playlists.linkFolder(req.user.id, req.params.id, folder_id, {
+      include_subfolders,
+      sort_by,
+      sort_order,
+    }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/folders/:folderId', (req, res) => {
+  try {
+    res.json(playlists.unlinkFolder(req.user.id, req.params.id, req.params.folderId));
+  } catch (err) {
+    res.status(err.message === 'Folder link not found' ? 404 : 400).json({ error: err.message });
+  }
+});
+
+router.post('/:id/sync', (req, res) => {
+  try {
+    res.json(playlists.syncPlaylist(req.user.id, req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/:id/items', (req, res) => {
   try {
     const { file_ids, position } = req.body;

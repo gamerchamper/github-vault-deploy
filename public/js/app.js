@@ -4,6 +4,9 @@ let toastTimer = null;
 const App = {
   backupPollTimer: null,
   rateLimitPollTimer: null,
+  viewersBadgeTimer: null,
+  softReloadTimer: null,
+  SOFT_RELOAD_MS: 45 * 60 * 1000,
   lastBackupSync: null,
   lastCapacity: null,
   lastCacheStats: null,
@@ -77,6 +80,94 @@ const App = {
     await Promise.all([this.loadStats(), this.loadAccountViews()]);
   },
 
+  hasActiveTransfers() {
+    if (this._uploadActivity > 0) return true;
+    if (typeof UploadManager !== 'undefined' && UploadManager.active?.size > 0) return true;
+    if (typeof DownloadManager !== 'undefined') {
+      for (const job of DownloadManager.jobs.values()) {
+        if (!job.done) return true;
+      }
+    }
+    return false;
+  },
+
+  teardownRuntime() {
+    Viewer?.close?.();
+    if (typeof LiveViewers !== 'undefined') LiveViewers.hide?.();
+    if (typeof BandwidthPanel !== 'undefined') BandwidthPanel.hide?.();
+    if (typeof GlobalSearch !== 'undefined') GlobalSearch.hide?.();
+    DetailsPreview?.clear?.();
+    ThumbCache?.clear?.();
+    VirtualGrid?.teardown?.();
+
+    this.stopBackupPoll();
+    this.stopRateLimitPoll();
+    if (this.viewersBadgeTimer) {
+      clearInterval(this.viewersBadgeTimer);
+      this.viewersBadgeTimer = null;
+    }
+
+    if (typeof DownloadManager !== 'undefined') {
+      for (const [id, job] of DownloadManager.jobs) {
+        if (job.done) DownloadManager.jobs.delete(id);
+      }
+    }
+
+    explorer.files = [];
+    explorer.listOffset = 0;
+    explorer.listHasMore = false;
+  },
+
+  async rehydrateAfterSoftReload(saved) {
+    VirtualGrid.init(explorer);
+    try {
+      const { tasks } = await API.tasks.list({ resumable: true });
+      TaskPanel.tasks.clear();
+      for (const task of tasks) TaskPanel.tasks.set(task.id, task);
+      TaskPanel.scheduleRender();
+      TaskPanel.ensurePoll();
+    } catch {
+      /* tasks rehydrate is best-effort */
+    }
+    await explorer.navigate(saved.path || '/', {
+      viewMode: saved.viewMode || 'files',
+      type: saved.type ?? null,
+      search: saved.search ?? '',
+      playlistId: saved.playlistId ?? null,
+      collectionId: saved.collectionId ?? null,
+    });
+    await Promise.all([this.loadStats(), this.loadAccountViews()]);
+    this.startBackupPoll();
+    this.startRateLimitPoll();
+    this.startViewersBadgePoll();
+  },
+
+  scheduleSoftReload() {
+    if (this.softReloadTimer) clearTimeout(this.softReloadTimer);
+    this.softReloadTimer = setTimeout(() => {
+      this.softReload().catch(() => {});
+    }, this.SOFT_RELOAD_MS);
+  },
+
+  async softReload() {
+    if (this.hasActiveTransfers()) {
+      this.scheduleSoftReload();
+      return false;
+    }
+    const saved = {
+      path: explorer.currentPath,
+      viewMode: explorer.viewMode,
+      type: explorer.filterType,
+      search: explorer.searchQuery,
+      playlistId: explorer.playlistId,
+      collectionId: explorer.collectionId,
+    };
+    this.teardownRuntime();
+    await this.rehydrateAfterSoftReload(saved);
+    this.scheduleSoftReload();
+    return true;
+  },
+
   async checkAuth(retries = 3) {
     for (let i = 0; i < retries; i++) {
       try {
@@ -127,6 +218,11 @@ const App = {
   },
 
   showLogin() {
+    if (this.softReloadTimer) {
+      clearTimeout(this.softReloadTimer);
+      this.softReloadTimer = null;
+    }
+    this.teardownRuntime();
     document.getElementById('login-screen').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
   },
@@ -158,6 +254,7 @@ const App = {
     this.startBackupPoll();
     this.startRateLimitPoll();
     this.startViewersBadgePoll();
+    this.scheduleSoftReload();
     const uploadMode = document.getElementById('upload-mode');
     if (uploadMode) uploadMode.value = UploadPrefs.get();
   },
@@ -343,8 +440,8 @@ const App = {
           <span class="rate-limit-user">@${account.username}</span>
           ${pauseBadge}
         </div>
-        <div class="drive-bar ${cls}">
-          <div class="drive-bar-vault" style="width:${Math.min(100, usedPct)}%"></div>
+          <div class="drive-bar ${cls}">
+          <div class="drive-bar-vault" data-bar="${Math.min(100, usedPct)}"></div>
         </div>
         <div class="rate-limit-detail">
           <span>${used} / ${limit} used</span>
@@ -370,6 +467,7 @@ const App = {
          <div id="rate-limit-dashboard">${this.renderApiDashboard(this.lastApiDashboard)}</div>`
       : '';
     el.innerHTML = header + accounts.map((a) => this.renderRateLimitAccount(a)).join('');
+    applyDynamicStyles(el);
   },
 
   renderApiDashboard(dashboard) {
@@ -662,6 +760,8 @@ const App = {
       </div>
     `;
 
+    applyDynamicStyles(el);
+
     el.querySelector('.drive-cache-settings')?.addEventListener('click', (e) => {
       e.stopPropagation();
       this.openCacheSettings(cache);
@@ -724,6 +824,7 @@ const App = {
     el.innerHTML = repos.length
       ? repos.map((repo) => this.renderRepoDriveItem(repo)).join('')
       : '<div class="drive-empty">No storage repos</div>';
+    applyDynamicStyles(el);
     el.dataset.loaded = '1';
   },
 
@@ -734,6 +835,7 @@ const App = {
     el.innerHTML = repos.length
       ? repos.map((repo) => this.renderRepoDriveItem(repo)).join('')
       : '<div class="drive-empty">No metadata repo</div>';
+    applyDynamicStyles(el);
     el.dataset.loaded = '1';
   },
 
@@ -801,6 +903,8 @@ const App = {
         <span class="drive-legend other">Other ${formatSize(t.other_used)}</span>
       </div>
     `;
+
+    applyDynamicStyles(totalEl);
 
     this.updateRepoSidebarCounts();
 
@@ -1049,6 +1153,10 @@ const App = {
       if (action === 'add-to-playlist' && !file.is_folder) {
         const ids = explorer.selected.size ? [...explorer.selected] : [file.id];
         Playlists.promptAddToPlaylist(ids);
+      }
+      if (action === 'link-folder-to-playlist' && file.is_folder) {
+        const folderId = file.id;
+        Playlists.promptLinkFolderToPlaylist(folderId);
       }
       if (action === 'restore') explorer.restoreFile(file);
       if (action === 'permanent-delete') {
@@ -1486,9 +1594,9 @@ const App = {
       const hlsCheck = document.getElementById('plan-hls-convert');
       const hlsLabel = document.getElementById('plan-hls-label');
       const hlsHint = document.getElementById('plan-hls-hint');
-      if (hlsLabel) hlsLabel.style.display = isMp4 ? '' : 'none';
+      if (hlsLabel) hlsLabel.classList.toggle('hidden', !isMp4);
       if (hlsCheck) hlsCheck.checked = false;
-      if (hlsHint) hlsHint.style.display = 'none';
+      if (hlsHint) hlsHint.classList.add('hidden');
 
       const render = async () => {
         const cs = this.chunkSizeFromMbInput(chunkInput);
@@ -1547,7 +1655,7 @@ const App = {
 
       if (hlsCheck) {
         hlsCheck.onchange = () => {
-          if (hlsHint) hlsHint.style.display = hlsCheck.checked ? '' : 'none';
+          if (hlsHint) hlsHint.classList.toggle('hidden', !hlsCheck.checked);
           render();
         };
       }
@@ -1977,7 +2085,7 @@ const App = {
   async loadRepos() {
     const configuredEl = document.getElementById('configured-repos');
     const availableEl = document.getElementById('available-repos');
-    configuredEl.innerHTML = '<div style="padding:8px;color:#8a8a8a">Loading...</div>';
+    configuredEl.innerHTML = '<div class="panel-status-msg">Loading...</div>';
     availableEl.innerHTML = '';
 
     try {
@@ -1986,18 +2094,18 @@ const App = {
         API.repos.available(),
       ]);
 
-      configuredEl.innerHTML = configured.repos.length ? '' : '<div style="padding:8px;color:#8a8a8a">No repos configured. Add one below.</div>';
+      configuredEl.innerHTML = configured.repos.length ? '' : '<div class="panel-status-msg">No repos configured. Add one below.</div>';
       for (const repo of configured.repos) {
         configuredEl.appendChild(this.createRepoCard(repo, true));
       }
 
       const unconfigured = available.repos.filter(r => !r.configured);
-      availableEl.innerHTML = unconfigured.length ? '' : '<div style="padding:8px;color:#8a8a8a">All repos are already configured.</div>';
+      availableEl.innerHTML = unconfigured.length ? '' : '<div class="panel-status-msg">All repos are already configured.</div>';
       for (const repo of unconfigured) {
         availableEl.appendChild(this.createRepoCard(repo, false));
       }
     } catch (err) {
-      configuredEl.innerHTML = `<div style="padding:8px;color:#c42b1c">${err.message}</div>`;
+      configuredEl.innerHTML = `<div class="panel-status-error">${err.message}</div>`;
     }
   },
 
@@ -2036,11 +2144,10 @@ const App = {
       </span>
       ${driveHtml}
     `;
+    applyDynamicStyles(info);
 
     const actions = document.createElement('div');
-    actions.style.display = 'flex';
-    actions.style.gap = '6px';
-    actions.style.alignItems = 'center';
+    actions.className = 'repo-card-actions';
 
     if (isConfigured) {
       if (repo.is_metadata) {
@@ -2279,7 +2386,7 @@ document.getElementById('btn-migrate-mysql')?.addEventListener('click', async ()
         if (fileSection) fileSection.remove();
         const div = document.createElement('div');
         div.className = 'cmd-file-section';
-        div.innerHTML = '<div style="padding:4px 18px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;border-top:1px solid var(--glass-border)">Files</div>' + searchFiles.join('');
+        div.innerHTML = '<div class="cmd-file-section-label">Files</div>' + searchFiles.join('');
         results.appendChild(div);
         div.querySelectorAll('.cmd-item').forEach(el => {
           el.addEventListener('click', () => {

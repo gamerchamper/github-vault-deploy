@@ -285,11 +285,13 @@ const DownloadManager = {
           <div class="download-detail">${this.escape(detail)}</div>
           <div class="download-chunk-blocks chunk-blocks-wrap"></div>
           <div class="download-bar">
-            <div class="download-bar-fill" style="width:${percent}%"></div>
+            <div class="download-bar-fill" data-bar="${percent}"></div>
           </div>
         </div>
       `;
     }).join('');
+
+    applyDynamicStyles(list);
 
     for (const job of items) {
       if (job.blocks && job.status) {

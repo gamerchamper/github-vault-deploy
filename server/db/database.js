@@ -300,6 +300,28 @@ try {
 } catch { /* exists */ }
 
 ensureColumn('playlist_items', 'display_name', 'TEXT');
+ensureColumn('playlist_items', 'folder_link_id', 'INTEGER');
+
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS playlist_folder_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      playlist_id TEXT NOT NULL,
+      folder_id TEXT NOT NULL,
+      include_subfolders INTEGER DEFAULT 0,
+      sort_by TEXT DEFAULT 'name',
+      sort_order TEXT DEFAULT 'ASC',
+      last_synced_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+      FOREIGN KEY (folder_id) REFERENCES files(id),
+      UNIQUE(playlist_id, folder_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_playlist_folder_links_playlist ON playlist_folder_links(playlist_id);
+    CREATE INDEX IF NOT EXISTS idx_playlist_folder_links_folder ON playlist_folder_links(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_playlist_items_folder_link ON playlist_items(playlist_id, folder_link_id);
+  `);
+} catch { /* exists */ }
 ensureColumn('storage_repos', 'reserved_bytes', 'INTEGER DEFAULT 0');
 ensureColumn('files', 'hls_reserved', 'TEXT');
 

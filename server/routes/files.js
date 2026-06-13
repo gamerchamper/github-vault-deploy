@@ -229,7 +229,7 @@ router.get('/hls/:id/uploaded/playlist.m3u8', async (req, res) => {
     const body = await resp.text();
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(baseName)}.m3u8"`);
-    res.send(body);
+    res.send(Buffer.from(body, 'utf8'));
     recordBytes(fileRec.user_id, req.params.id, Buffer.byteLength(body, 'utf-8'), 'stream');
   } catch (err) {
     console.error('[uploaded playlist]', err.message, err.stack?.split('\n').slice(1, 4).join(' '));

@@ -96,7 +96,9 @@ const LiveViewers = {
       for (let i = existing.length; i < sessions.length; i++) {
         const wrapper = document.createElement('div');
         wrapper.innerHTML = this.sessionHtml(sessions[i]);
-        container.appendChild(wrapper.firstElementChild);
+        const section = wrapper.firstElementChild;
+        applyDynamicStyles(section);
+        container.appendChild(section);
       }
     } else if (lenDiff < 0) {
       for (let i = existing.length - 1; i >= sessions.length; i--) {
@@ -153,7 +155,7 @@ const LiveViewers = {
       const idle = v.idleMs < 5000 ? 'now' : `${Math.round(v.idleMs / 1000)}s ago`;
 
       return `<tr>
-        <td><div class="viewer-cell-name"><span class="viewer-avatar" style="background:${v.color}">${this.escape(v.initials)}</span><span>${this.escape(v.name)}</span></div></td>
+        <td><div class="viewer-cell-name"><span class="viewer-avatar" data-avatar-color="${v.color}">${this.escape(v.initials)}</span><span>${this.escape(v.name)}</span></div></td>
         <td><code class="viewer-ip">${this.escape(ip)}</code></td>
         <td><div class="viewer-location">${this.escape(location)}</div>${coords ? `<div class="viewer-coords">${this.escape(coords)}</div>` : ''}</td>
         <td>${this.escape(isp)}</td>
@@ -187,13 +189,14 @@ const LiveViewers = {
     const idle = viewer.idleMs < 5000 ? 'now' : `${Math.round(viewer.idleMs / 1000)}s ago`;
 
     tr.innerHTML = `
-      <td><div class="viewer-cell-name"><span class="viewer-avatar" style="background:${viewer.color}">${this.escape(viewer.initials)}</span><span>${this.escape(viewer.name)}</span></div></td>
+      <td><div class="viewer-cell-name"><span class="viewer-avatar" data-avatar-color="${viewer.color}">${this.escape(viewer.initials)}</span><span>${this.escape(viewer.name)}</span></div></td>
       <td><code class="viewer-ip">${this.escape(ip)}</code></td>
       <td><div class="viewer-location">${this.escape(location)}</div>${coords ? `<div class="viewer-coords">${this.escape(coords)}</div>` : ''}</td>
       <td>${this.escape(isp)}</td>
       <td><span class="viewer-active">${active}</span></td>
       <td>${idle}</td>
       <td title="${this.escape(viewer.userAgent || '')}">${this.escape(browser)}</td>`;
+    applyDynamicStyles(tr);
     return tr;
   },
 

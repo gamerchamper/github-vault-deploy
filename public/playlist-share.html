@@ -10,7 +10,19 @@
 </head>
 <body class="share-body vault-scroll">
   <div id="playlist-share-app" class="playlist-share-app">
-    <div id="share-loading" class="share-loading">Loading playlist...</div>
+    <div id="share-loading" class="share-loading">
+      <div class="vault-loader" role="status" aria-live="polite">
+        <div class="vault-loader-mark" aria-hidden="true">
+          <div class="vault-loader-ring"></div>
+          <svg class="vault-loader-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="vault-loader-label">Loading playlist…</span>
+      </div>
+    </div>
     <div id="share-content" class="hidden">
       <div class="curated-hero playlist-share-hero">
         <div class="curated-hero-art" id="share-cover"></div>

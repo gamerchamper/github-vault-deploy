@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><!-- SHARE_PAGE_TITLE --> — GitHub Vault</title>
   <!-- SHARE_EMBED_META -->
-  <link rel="stylesheet" href="/css/explorer.css">
-  <link rel="stylesheet" href="/css/share.css">
-  <link rel="stylesheet" href="/css/playlists.css">
-  <link rel="stylesheet" href="/css/plyr.css">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.0">
+  <link rel="stylesheet" href="/css/share.css?v=1.0.0">
+  <link rel="stylesheet" href="/css/playlists.css?v=1.0.0">
+  <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <!-- SHARE_EMBED_BOOT -->
 </head>
 <body class="share-body vault-scroll">
@@ -45,7 +45,19 @@
       <p class="share-hero-tagline">Secure shared content · Stream or download</p>
     </header>
   <div id="share-page" class="share-page">
-    <div id="share-loading" class="share-loading">Loading shared content...</div>
+    <div id="share-loading" class="share-loading">
+      <div class="vault-loader" role="status" aria-live="polite">
+        <div class="vault-loader-mark" aria-hidden="true">
+          <div class="vault-loader-ring"></div>
+          <svg class="vault-loader-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <span class="vault-loader-label">Loading shared content…</span>
+      </div>
+    </div>
 
     <div id="share-folder-view" class="hidden">
       <div class="share-topbar">
@@ -100,6 +112,7 @@
           </div>
         </div>
       </div>
+      <label class="visually-hidden" for="share-playlist-search">Filter playlist queue</label>
       <input type="search" id="share-playlist-search" class="playlist-panel-search" placeholder="Filter queue…" autocomplete="off">
       <div class="playlist-panel-controls">
         <button type="button" id="share-playlist-prev" class="playlist-ctrl-btn" title="Previous">⏮</button>
@@ -109,7 +122,7 @@
       </div>
       <div id="share-playlist-list" class="playlist-panel-list vault-scroll"></div>
     </aside>
-    <aside id="share-shoutbox" class="share-shoutbox shoutbox-closed hidden" aria-hidden="true">
+    <aside id="share-shoutbox" class="share-shoutbox shoutbox-closed hidden" aria-hidden="true" inert>
       <div class="shoutbox-header">
         <span class="shoutbox-title">Shoutbox</span>
         <button id="shoutbox-close" class="shoutbox-close" type="button" title="Close">×</button>
@@ -117,6 +130,7 @@
       <div id="shoutbox-messages" class="shoutbox-messages vault-scroll" role="log" aria-live="polite" aria-relevant="additions"></div>
       <div class="shoutbox-input-row">
         <span id="shoutbox-at" class="shoutbox-at hidden" aria-live="polite"></span>
+        <label class="visually-hidden" for="shoutbox-input">Shoutbox message</label>
         <input id="shoutbox-input" class="shoutbox-input" type="text" placeholder="Chat with viewers..." maxlength="500" autocomplete="off">
         <button id="shoutbox-send" class="shoutbox-send" type="button" title="Send message">Send</button>
       </div>
@@ -126,23 +140,23 @@
 
   <button id="shoutbox-open-btn" class="shoutbox-open-btn hidden" type="button" title="Open chat" aria-label="Open chat">💬</button>
 
-  <script src="/js/hls.min.js"></script>
-  <script src="/js/pdf-viewer.js"></script>
-  <script src="/js/plyr.polyfilled.min.js"></script>
-  <script src="/js/adaptive-concurrency.js"></script>
-  <script src="/js/share-crypto.js"></script>
-  <script src="/js/share-media-cache.js"></script>
-  <script src="/js/share-client-stream.js?v=4"></script>
-  <script src="/js/share-download.js"></script>
-  <script src="/js/api.js"></script>
-  <script src="/js/media-player.js"></script>
-  <script src="/js/chunk-blocks.js"></script>
-  <script src="/js/download-manager.js"></script>
-  <script src="/js/share-viewer.js"></script>
-  <script src="/js/share-presence.js"></script>
-  <script src="/js/playlist-queue.js"></script>
-  <script src="/js/share-shoutbox.js"></script>
-  <script src="/js/share-playlist.js"></script>
+  <script src="/js/hls.min.js?v=1.0.0"></script>
+  <script src="/js/pdf-viewer.js?v=1.0.0"></script>
+  <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
+  <script src="/js/adaptive-concurrency.js?v=1.0.0"></script>
+  <script src="/js/share-crypto.js?v=1.0.0"></script>
+  <script src="/js/share-media-cache.js?v=1.0.0"></script>
+  <script src="/js/share-client-stream.js?v=1.0.0"></script>
+  <script src="/js/share-download.js?v=1.0.0"></script>
+  <script src="/js/api.js?v=1.0.0"></script>
+  <script src="/js/media-player.js?v=1.0.0"></script>
+  <script src="/js/chunk-blocks.js?v=1.0.0"></script>
+  <script src="/js/download-manager.js?v=1.0.0"></script>
+  <script src="/js/share-viewer.js?v=1.0.0"></script>
+  <script src="/js/share-presence.js?v=1.0.0"></script>
+  <script src="/js/playlist-queue.js?v=1.0.0"></script>
+  <script src="/js/share-shoutbox.js?v=1.0.0"></script>
+  <script src="/js/share-playlist.js?v=1.0.0"></script>
   <script>
     function parseShareRoute() {
       const pathParts = location.pathname.split('/').filter(Boolean);
@@ -394,7 +408,7 @@
 
       const grid = document.getElementById('share-folder-grid');
       if (!data.files.length) {
-        grid.innerHTML = '<p class="share-no-preview" style="grid-column:1/-1;text-align:center;padding:32px;">This folder is empty.</p>';
+        grid.innerHTML = '<p class="share-no-preview share-folder-empty-msg">This folder is empty.</p>';
         return;
       }
 

@@ -16,6 +16,7 @@ body.share-body {
   flex-direction: column;
   align-items: stretch;
   padding: var(--space-lg);
+  -webkit-user-select: auto;
   user-select: auto;
 }
 
@@ -105,8 +106,8 @@ body.share-shoutbox-open.share-cinema-active .share-shell {
   z-index: 60;
   min-height: var(--share-top-dock-height);
   background: var(--glass-bg);
-  backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--glass-border);
   padding: var(--space-sm) var(--space-lg);
   box-shadow: var(--shadow);
@@ -288,6 +289,8 @@ body.share-cinema-active .share-page {
   padding: 0;
   box-shadow: none;
   background: transparent;
+  -webkit-backdrop-filter: none;
+
   backdrop-filter: none;
 }
 
@@ -355,6 +358,8 @@ body.share-cinema-active .share-viewer-stage {
 .share-cinema-dock {
   flex-shrink: 0;
   background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px);
+
   backdrop-filter: blur(16px);
   border-top: 1px solid var(--glass-border);
   padding: var(--space-md) var(--space-lg) var(--space-lg);
@@ -445,8 +450,8 @@ body.share-media-header-mode .share-top-dock-actions .share-actions {
 
 .share-page {
   background: var(--glass-bg);
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
   padding: var(--space-xl);
@@ -761,9 +766,11 @@ body.share-player-fullscreen .shoutbox-open-btn {
 .share-audio-player { margin: 0 auto; max-width: 640px; }
 
 .share-loading {
-  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
   padding: 48px;
-  text-align: center;
 }
 
 .share-actions {
@@ -951,8 +958,8 @@ body.share-has-top-dock .share-cinema-stage:not(.share-stage-fitted) {
   flex-direction: column;
   min-height: 0;
   background: var(--glass-bg);
-  backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
   border-left: 1px solid var(--glass-border);
   border-bottom: 1px solid var(--border);
   overflow: hidden;
@@ -1066,6 +1073,8 @@ body.share-playlist-active .share-playlist-panel .playlist-panel-list {
   visibility: hidden;
   align-self: stretch;
   background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px);
+
   backdrop-filter: blur(16px);
   border-left: 0 solid var(--glass-border);
   border-radius: var(--radius-xl) 0 0 var(--radius-xl);

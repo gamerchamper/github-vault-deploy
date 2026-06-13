@@ -41,7 +41,7 @@ const PdfViewer = {
         <button type="button" class="btn-secondary pdf-next" title="Next page">▶</button>
         <button type="button" class="btn-secondary pdf-zoom-out" title="Zoom out">−</button>
         <button type="button" class="btn-secondary pdf-zoom-in" title="Zoom in">+</button>
-        <input type="text" class="pdf-search-input form-input" placeholder="Search…" style="max-width:140px;padding:4px 8px;font-size:12px;">
+        <input type="text" class="pdf-search-input form-input" placeholder="Search…" aria-label="Search PDF">
         <span class="pdf-page-info">—</span>
       </div>
       <div class="pdf-canvas-container vault-scroll"></div>

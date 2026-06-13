@@ -151,6 +151,12 @@ const MediaPlayer = {
   attachStreamPlayback(el, hooks = {}) {
     el.preload = 'auto';
     let ready = false;
+    const handlers = [];
+    const on = (type, fn) => {
+      el.addEventListener(type, fn);
+      handlers.push({ type, fn });
+    };
+
     const markReady = () => {
       if (ready) return;
       ready = true;
@@ -160,13 +166,17 @@ const MediaPlayer = {
       }
     };
 
-    el.addEventListener('loadedmetadata', markReady);
-    el.addEventListener('canplay', markReady);
-    el.addEventListener('progress', () => {
+    on('loadedmetadata', markReady);
+    on('canplay', markReady);
+    on('progress', () => {
       if (el.buffered.length > 0) markReady();
     });
-    if (hooks.onPlaying) el.addEventListener('playing', hooks.onPlaying);
-    if (hooks.onError) el.addEventListener('error', hooks.onError);
+    if (hooks.onPlaying) on('playing', hooks.onPlaying);
+    if (hooks.onError) on('error', hooks.onError);
+
+    return () => {
+      for (const { type, fn } of handlers) el.removeEventListener(type, fn);
+    };
   },
 
   buildAudioPlayerHtml() {
@@ -194,3 +204,18 @@ const MediaPlayer = {
     `;
   },
 };
+
+function vaultLoaderHtml(label = 'Loading...', statusId = '') {
+  const idAttr = statusId ? ` id="${statusId}"` : '';
+  return `<div class="vault-loader" role="status" aria-live="polite">
+    <div class="vault-loader-mark" aria-hidden="true">
+      <div class="vault-loader-ring"></div>
+      <svg class="vault-loader-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+        <path d="M2 17l10 5 10-5"/>
+        <path d="M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <span class="vault-loader-label"${idAttr}>${label}</span>
+  </div>`;
+}

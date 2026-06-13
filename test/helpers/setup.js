@@ -288,7 +288,21 @@ function createMemoryDb() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (user_id, playlist_id, file_id)
     );
+    CREATE TABLE IF NOT EXISTS playlist_folder_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      playlist_id TEXT NOT NULL,
+      folder_id TEXT NOT NULL,
+      include_subfolders INTEGER DEFAULT 0,
+      sort_by TEXT DEFAULT 'name',
+      sort_order TEXT DEFAULT 'ASC',
+      last_synced_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(playlist_id, folder_id)
+    );
   `);
+
+  try { db.exec('ALTER TABLE playlist_items ADD COLUMN folder_link_id INTEGER'); } catch { }
+  try { db.exec('ALTER TABLE files ADD COLUMN is_deleted INTEGER DEFAULT 0'); } catch { }
 
   return db;
 }
@@ -338,6 +352,18 @@ function seedTestFile(db, userId, overrides = {}) {
   if (overrides.encryption_mode !== undefined) {
     cols.push('encryption_mode');
     vals.push(overrides.encryption_mode);
+  }
+  if (overrides.is_folder !== undefined) {
+    cols.push('is_folder');
+    vals.push(overrides.is_folder);
+  }
+  if (overrides.parent_path !== undefined) {
+    cols.push('parent_path');
+    vals.push(overrides.parent_path);
+  }
+  if (overrides.is_deleted !== undefined) {
+    cols.push('is_deleted');
+    vals.push(overrides.is_deleted);
   }
   db.prepare(`INSERT INTO files (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...vals);
   return db.prepare('SELECT * FROM files WHERE id = ?').get(vals[0]);

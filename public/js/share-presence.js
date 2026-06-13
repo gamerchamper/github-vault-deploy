@@ -49,7 +49,7 @@ const SharePresence = {
       return `
         <span
           class="share-presence-avatar${isSelf ? ' is-self' : ''}"
-          style="background:${v.color}"
+          data-avatar-color="${v.color}"
           title="${this.escape(isSelf ? `${v.name} (you)` : v.name)}"
         >${this.escape(v.initials)}</span>
       `;
@@ -69,6 +69,7 @@ const SharePresence = {
         <div class="share-presence-avatars">${avatars}${overflowHtml}</div>
       </div>
     `;
+    applyDynamicStyles(el);
   },
 
   escape(str) {
@@ -102,7 +103,6 @@ const SharePresence = {
       }
     }, 15000);
 
-    window.addEventListener('beforeunload', this.onLeave);
     window.addEventListener('pagehide', this.onLeave);
   },
 
@@ -117,7 +117,6 @@ const SharePresence = {
   },
 
   stop() {
-    window.removeEventListener('beforeunload', this.onLeave);
     window.removeEventListener('pagehide', this.onLeave);
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);

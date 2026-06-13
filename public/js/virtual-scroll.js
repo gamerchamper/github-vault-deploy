@@ -10,8 +10,11 @@ const VirtualGrid = {
   rafId: null,
   range: { start: 0, end: 0 },
   enabled: false,
+  _onScroll: null,
+  _onResize: null,
 
   init(explorer) {
+    this.teardown();
     this.explorer = explorer;
     this.viewport = document.getElementById('file-view');
     this.grid = document.getElementById('file-grid');
@@ -22,8 +25,10 @@ const VirtualGrid = {
     this.bottomSentinel = document.createElement('div');
     this.bottomSentinel.className = 'virtual-spacer virtual-spacer-bottom';
 
-    this.viewport.addEventListener('scroll', () => this.scheduleUpdate(), { passive: true });
-    window.addEventListener('resize', () => this.scheduleUpdate());
+    this._onScroll = () => this.scheduleUpdate();
+    this._onResize = () => this.scheduleUpdate();
+    this.viewport.addEventListener('scroll', this._onScroll, { passive: true });
+    window.addEventListener('resize', this._onResize);
 
     this.observer = new IntersectionObserver(
       () => this.scheduleUpdate(),
@@ -141,5 +146,26 @@ const VirtualGrid = {
     } else {
       this.scheduleUpdate();
     }
+  },
+
+  teardown() {
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+    if (this.viewport && this._onScroll) {
+      this.viewport.removeEventListener('scroll', this._onScroll);
+    }
+    if (this._onResize) {
+      window.removeEventListener('resize', this._onResize);
+    }
+    this._onScroll = null;
+    this._onResize = null;
+    this.reset();
+    this.enabled = false;
   },
 };

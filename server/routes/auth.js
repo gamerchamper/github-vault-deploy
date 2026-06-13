@@ -104,7 +104,7 @@ router.get('/github/callback', (req, res, next) => {
 });
 
 router.get('/me', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
   if (!req.isAuthenticated || !req.isAuthenticated()) {
     return res.json({ authenticated: false, app_url: appUrl.getAppUrl(req) });
   }

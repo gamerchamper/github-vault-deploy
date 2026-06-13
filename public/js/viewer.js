@@ -22,6 +22,29 @@ const Viewer = {
   chunkBlocks: null,
   lastChunkStateKey: null,
   activePlaylist: null,
+  streamCleanups: new Map(),
+
+  resetMediaElement(el) {
+    if (!el) return;
+    PlaybackMemory.detach(el);
+    const cleanup = this.streamCleanups.get(el);
+    if (cleanup) {
+      cleanup();
+      this.streamCleanups.delete(el);
+    }
+    el.oncanplay = null;
+    el.onplaying = null;
+    el.onended = null;
+    el.onerror = null;
+  },
+
+  setStreamCleanup(el, cleanup) {
+    if (!el) return;
+    const prev = this.streamCleanups.get(el);
+    if (prev) prev();
+    if (cleanup) this.streamCleanups.set(el, cleanup);
+    else this.streamCleanups.delete(el);
+  },
 
   shouldUseHls(file, status = null) {
     const ext = file.name.split('.').pop().toLowerCase();
@@ -36,11 +59,12 @@ const Viewer = {
   },
 
   playDirectStream(file, video, videoWrap, loading) {
-    MediaPlayer.attachStreamPlayback(video, {
+    this.resetMediaElement(video);
+    this.setStreamCleanup(video, MediaPlayer.attachStreamPlayback(video, {
       onReady: () => this.onMediaReady(video, videoWrap),
       onPlaying: () => this.setStat('stat-stage', 'Playing'),
       onError: () => this.handleVideoError(file, video, loading),
-    });
+    }));
     video.src = API.files.stream(file.id, explorer.accountView);
     video.load();
   },
@@ -79,6 +103,7 @@ const Viewer = {
 
   playWithHls(file, video, videoWrap, loading) {
     this.destroyHls();
+    this.resetMediaElement(video);
     this.hlsFallbackTimer = setTimeout(() => {
       if (!this.mediaReady) {
         this.destroyHls();
@@ -139,6 +164,7 @@ const Viewer = {
 
   playWithUploadedHls(file, video, videoWrap, loading) {
     this.destroyHls();
+    this.resetMediaElement(video);
     if (typeof Hls === 'undefined' || !Hls.isSupported()) {
       this.playDirectStream(file, video, videoWrap, loading);
       return;
@@ -273,6 +299,8 @@ const Viewer = {
     const audio = document.getElementById('viewer-audio');
     const videoWrap = document.getElementById('viewer-video-wrap');
     const audioWrap = document.getElementById('viewer-audio-wrap');
+    this.resetMediaElement(video);
+    this.resetMediaElement(audio);
     const frame = document.getElementById('viewer-frame');
     const textEl = document.getElementById('viewer-text');
     const loading = document.getElementById('viewer-loading');
@@ -352,14 +380,14 @@ const Viewer = {
       this.mountChunkBlocks(file);
       this.setupAudioArt(file);
       this.startStatusPoll(file);
-      MediaPlayer.attachStreamPlayback(audio, {
+      this.setStreamCleanup(audio, MediaPlayer.attachStreamPlayback(audio, {
         onReady: () => this.onMediaReady(audio, audioWrap),
         onError: () => {
           loading.classList.add('hidden');
           App.toast('Failed to load audio', 'error');
           this.close();
         },
-      });
+      }));
       audio.src = API.files.stream(file.id, explorer.accountView);
       audio.load();
     } else if (type === 'pdf') {
@@ -432,6 +460,7 @@ const Viewer = {
       });
     }
     if (this.currentFile?.id && (this.currentMediaType === 'video' || this.currentMediaType === 'audio')) {
+      PlaybackMemory.detach(el);
       PlaybackMemory.apply(el, this.currentFile.id);
     }
     if (this.currentMediaType === 'audio') {
@@ -849,8 +878,8 @@ const Viewer = {
     const img = document.getElementById('viewer-image');
     const frame = document.getElementById('viewer-frame');
 
-    video.onerror = null;
-    audio.onerror = null;
+    this.resetMediaElement(video);
+    this.resetMediaElement(audio);
     img.onerror = null;
     if (frame) frame.onerror = null;
 

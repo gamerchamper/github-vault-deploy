@@ -15,7 +15,16 @@ const DetailsPreview = {
       PdfViewer?.destroy?.(this.pdfId);
       this.pdfId = null;
     }
-    if (this.mount) this.mount.innerHTML = '';
+    if (this.mount) {
+      this.mount.querySelectorAll('video, audio').forEach((el) => {
+        try {
+          el.pause();
+          el.removeAttribute('src');
+          el.load();
+        } catch { /* ignore */ }
+      });
+      this.mount.innerHTML = '';
+    }
     this.mount?.classList.add('hidden');
   },
 
