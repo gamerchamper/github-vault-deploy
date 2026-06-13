@@ -20,6 +20,10 @@ const CONVERT_DIR = path.join(__dirname, '../../data/hls-convert');
 const SEGMENT_DURATION = 6;
 const activeJobs = new Map();
 
+function hlsLog(msg) {
+  console.log(`[HLS] ${msg}`);
+}
+
 function jobKey(userId, fileId) {
   return `${userId}:${fileId}`;
 }
@@ -254,7 +258,7 @@ async function uploadSegmentsParallel(userId, fileId, segments, repos, job, onPr
       assertNotCancelled(job);
       if (isTaskCancelled(taskId, userId)) throw new Error('Cancelled');
 
-      log(`Uploading segment ${index + 1}/${total} (${(seg.size / 1024 / 1024).toFixed(2)} MB)`);
+      hlsLog(`Uploading segment ${index + 1}/${total} (${(seg.size / 1024 / 1024).toFixed(2)} MB)`);
       await uploadSegment(userId, fileId, seg, repos, index, pool);
 
       segmentsDone += 1;
@@ -268,7 +272,7 @@ async function uploadSegmentsParallel(userId, fileId, segments, repos, job, onPr
           lastLog: `Uploaded HLS segment ${segmentsDone}/${total}`,
         });
       }
-      log(`Segment ${index + 1}/${total} uploaded`);
+      hlsLog(`Segment ${index + 1}/${total} uploaded`);
     });
   } finally {
     clearRateCb();
@@ -334,24 +338,23 @@ function isTaskCancelled(taskId, userId) {
 }
 
 async function convertFile(userId, fileId, onProgress, taskId = null) {
-  const log = (msg) => { console.log(`[HLS] ${msg}`); };
-  log(`convertFile called userId=${userId} fileId=${fileId}`);
+  hlsLog(`convertFile called userId=${userId} fileId=${fileId}`);
   const job = ensureJob(userId, fileId);
   job.cancelled = false;
   job.ffmpegChild = null;
 
   const available = await isFfmpegAvailable();
   if (!available) {
-    log('FFmpeg not available');
+    hlsLog('FFmpeg not available');
     throw new Error('FFmpeg is required for HLS conversion but is not installed on the server');
   }
-  log(`FFmpeg binary: ${ffmpeg()}`);
+  hlsLog(`FFmpeg binary: ${ffmpeg()}`);
 
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
-  if (!file) { log('File not found'); throw new Error('File not found'); }
-  if (!file.encryption_meta) { log(`No encryption_meta (has_hls=${file.has_hls})`); throw new Error('File has no encryption metadata'); }
-  if (file.has_hls) { log('Already has HLS'); return { fileId, hls: true, alreadyConverted: true }; }
-  log(`File: ${file.name}, size=${file.size}, mime=${file.mime_type}`);
+  if (!file) { hlsLog('File not found'); throw new Error('File not found'); }
+  if (!file.encryption_meta) { hlsLog(`No encryption_meta (has_hls=${file.has_hls})`); throw new Error('File has no encryption metadata'); }
+  if (file.has_hls) { hlsLog('Already has HLS'); return { fileId, hls: true, alreadyConverted: true }; }
+  hlsLog(`File: ${file.name}, size=${file.size}, mime=${file.mime_type}`);
 
   const chunkSample = db.prepare('SELECT chunk_iv FROM chunks WHERE file_id = ? LIMIT 1').get(fileId);
   if (!chunkSample?.chunk_iv && file.size > 0x7fffffff) {
@@ -366,7 +369,7 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
   ).get(fileId);
   const hasPartialSegments = existingSegments?.n > 0;
   if (hasPartialSegments) {
-    log(`Found ${existingSegments.n} existing HLS segments — resuming interrupted conversion`);
+    hlsLog(`Found ${existingSegments.n} existing HLS segments — resuming interrupted conversion`);
   }
 
   const repos = db.prepare(`
@@ -378,8 +381,8 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
       AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
     ORDER BY r.chunk_count ASC
   `).all(userId, REPO_CAPACITY_BYTES);
-  if (repos.length === 0) { log('No repos found'); throw new Error('No storage repositories configured'); }
-  log(`Found ${repos.length} repos for HLS storage`);
+  if (repos.length === 0) { hlsLog('No repos found'); throw new Error('No storage repositories configured'); }
+  hlsLog(`Found ${repos.length} repos for HLS storage`);
 
   ensureDir(CONVERT_DIR);
   const workDir = path.join(CONVERT_DIR, `${userId}_${fileId}`);
@@ -402,21 +405,21 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
         index: s.segment_index, duration: s.duration,
         size: s.size, path: null,
       }));
-      log(`Recovered ${segments.length} already-uploaded segments`);
+      hlsLog(`Recovered ${segments.length} already-uploaded segments`);
     } else {
       if (onProgress) onProgress({ phase: 'assembling', percent: 5, lastLog: 'Assembling file from chunks...' });
-      log('Assembling file from chunks...');
+      hlsLog('Assembling file from chunks...');
       assertNotCancelled(job);
       const inputPath = await assembleFile(userId, fileId, file, workDir, onProgress);
-      log(`Assembled file at ${inputPath}`);
+      hlsLog(`Assembled file at ${inputPath}`);
 
       if (onProgress) onProgress({ phase: 'converting', percent: 30, lastLog: 'Running FFmpeg HLS conversion...' });
-      log('Running FFmpeg HLS conversion...');
+      hlsLog('Running FFmpeg HLS conversion...');
       assertNotCancelled(job);
 
       const result = await convertToHls(inputPath, workDir, SEGMENT_DURATION, job);
       segments = result.segments;
-      log(`FFmpeg produced ${segments.length} segments`);
+      hlsLog(`FFmpeg produced ${segments.length} segments`);
     }
 
     const total = segments.length;
@@ -434,13 +437,13 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
     }
 
     await uploadSegmentsParallel(userId, fileId, segments, repos, job, onProgress, taskId);
-    log(`Uploaded ${total} segments`);
+    hlsLog(`Uploaded ${total} segments`);
 
     if (onProgress) onProgress({ phase: 'playlist', percent: 92, lastLog: 'Uploading m3u8 playlist...' });
-    log('Uploading m3u8 playlist...');
+    hlsLog('Uploading m3u8 playlist...');
 
     const playlist = await uploadPlaylist(userId, fileId, repos);
-    log(`Playlist uploaded: ${playlist.repoPath}`);
+    hlsLog(`Playlist uploaded: ${playlist.repoPath}`);
 
     if (onProgress) onProgress({ phase: 'done', percent: 100, lastLog: 'HLS conversion complete' });
 
