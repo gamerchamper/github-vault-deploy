@@ -44,6 +44,22 @@ describe('playlists routes', function () {
     expect(res.body.item_count).to.equal(0);
   });
 
+  it('reorders after pruning orphaned playlist items', async function () {
+    const orphanFile = seedTestFile(db, user.id, { id: 'pl-file-orphan', name: 'gone.mp4' });
+    const created = await request(app).post('/api/playlists').send({ title: 'Orphans' });
+    const id = created.body.id;
+    await request(app).post(`/api/playlists/${id}/items`).send({ file_ids: [file1.id, orphanFile.id] });
+
+    db.prepare('UPDATE files SET is_deleted = 1 WHERE id = ?').run(orphanFile.id);
+
+    const reordered = await request(app)
+      .patch(`/api/playlists/${id}/reorder`)
+      .send({ file_ids: [file1.id] });
+    expect(reordered.status).to.equal(200);
+    expect(reordered.body.items).to.have.length(1);
+    expect(reordered.body.items[0].id).to.equal(file1.id);
+  });
+
   it('adds items and preserves order', async function () {
     const created = await request(app).post('/api/playlists').send({ title: 'Queue' });
     const id = created.body.id;

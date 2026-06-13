@@ -4,7 +4,7 @@ const { program } = require('commander');
 const { VaultApi } = require('./api');
 const { UploadEngine, DEFAULT_CONCURRENCY } = require('./upload-engine');
 const { SessionStore } = require('./session-store');
-const { load, save } = require('./config');
+const { load, save, addToServerHistory } = require('./config');
 const { renderProgressLine, renderFinalLine, renderTable } = require('./progress');
 const path = require('path');
 const fs = require('fs');
@@ -93,6 +93,9 @@ program
     if (opts.url) config.serverUrl = opts.url.replace(/\/+$/, '');
     if (opts.cookie) config.cookie = opts.cookie;
     if (opts.apiKey) config.apiKey = opts.apiKey;
+    if (config.serverUrl && (config.apiKey || config.cookie)) {
+      config.serverHistory = addToServerHistory(config);
+    }
     save(config);
 
     if (config.serverUrl && (config.apiKey || config.cookie)) {

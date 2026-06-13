@@ -30,7 +30,7 @@ function save(config) {
 const MAX_SERVER_HISTORY = 20;
 
 function normalizeServerUrl(url) {
-  return String(url || '').replace(/\/+$/, '');
+  return String(url || '').trim().replace(/\/+$/, '');
 }
 
 function serverEntryId(serverUrl, apiKey, cookie) {
@@ -55,11 +55,15 @@ function addToServerHistory(config, opts = {}) {
   const serverUrl = normalizeServerUrl(config.serverUrl);
   if (!serverUrl) return Array.isArray(config.serverHistory) ? config.serverHistory : [];
 
-  const apiKey = config.apiKey || '';
-  const cookie = config.cookie || '';
+  const apiKey = String(config.apiKey || '').trim();
+  const cookie = String(config.cookie || '').trim();
+  if (!apiKey && !cookie) return Array.isArray(config.serverHistory) ? config.serverHistory : [];
+
   const id = opts.id || serverEntryId(serverUrl, apiKey, cookie);
   const label = opts.label || serverLabel(serverUrl);
-  const history = Array.isArray(config.serverHistory) ? config.serverHistory.filter((h) => h.id !== id) : [];
+  const history = Array.isArray(config.serverHistory)
+    ? config.serverHistory.filter((h) => h.id !== id && normalizeServerUrl(h.serverUrl) !== serverUrl)
+    : [];
   history.unshift({
     id,
     label,
@@ -92,7 +96,11 @@ function removeFromServerHistory(config, id) {
 
 function activeServerId(config) {
   if (!config.serverUrl) return '';
-  return serverEntryId(config.serverUrl, config.apiKey, config.cookie);
+  return serverEntryId(
+    config.serverUrl,
+    String(config.apiKey || '').trim(),
+    String(config.cookie || '').trim(),
+  );
 }
 
 function safeServerHistory(config, includeSecrets = false) {

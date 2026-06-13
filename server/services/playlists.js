@@ -268,6 +268,18 @@ function normalizePositions(playlistId) {
   items.forEach((item, idx) => upd.run(idx, item.id));
 }
 
+function pruneOrphanedPlaylistItems(playlistId) {
+  const result = db.prepare(`
+    DELETE FROM playlist_items
+    WHERE playlist_id = ?
+      AND file_id NOT IN (
+        SELECT id FROM files WHERE is_deleted = 0 AND is_folder = 0
+      )
+  `).run(playlistId);
+  if (result.changes > 0) normalizePositions(playlistId);
+  return result.changes;
+}
+
 function updateItemDisplayName(userId, playlistId, fileId, displayName) {
   const pl = db.prepare('SELECT id FROM playlists WHERE id = ? AND user_id = ?').get(playlistId, userId);
   if (!pl) throw new Error('Playlist not found');
@@ -302,16 +314,36 @@ function reorderItems(userId, playlistId, orderedFileIds) {
   if (!pl) throw new Error('Playlist not found');
   if (!Array.isArray(orderedFileIds)) throw new Error('Invalid order');
 
-  const existing = db.prepare('SELECT file_id FROM playlist_items WHERE playlist_id = ?').all(playlistId)
-    .map((r) => r.file_id);
-  if (orderedFileIds.length !== existing.length) throw new Error('Order must include all items');
-  const set = new Set(existing);
+  pruneOrphanedPlaylistItems(playlistId);
+
+  const uniqueOrder = [];
+  const seen = new Set();
   for (const id of orderedFileIds) {
-    if (!set.has(id)) throw new Error('Invalid file in order');
+    if (typeof id !== 'string' || seen.has(id)) continue;
+    seen.add(id);
+    uniqueOrder.push(id);
+  }
+
+  const existing = listPlaylistItems(userId, playlistId).map((i) => i.id);
+  const existingSet = new Set(existing);
+
+  let finalOrder = uniqueOrder;
+  if (finalOrder.length !== existing.length) {
+    const orderSet = new Set(finalOrder);
+    const missing = existing.filter((id) => !orderSet.has(id));
+    if (missing.length && finalOrder.every((id) => existingSet.has(id))) {
+      finalOrder = [...finalOrder, ...missing];
+    } else {
+      throw new Error('Order must include all items');
+    }
+  }
+
+  for (const id of finalOrder) {
+    if (!existingSet.has(id)) throw new Error('Invalid file in order');
   }
 
   const upd = db.prepare('UPDATE playlist_items SET position = ? WHERE playlist_id = ? AND file_id = ?');
-  orderedFileIds.forEach((fileId, idx) => upd.run(idx, playlistId, fileId));
+  finalOrder.forEach((fileId, idx) => upd.run(idx, playlistId, fileId));
   db.prepare('UPDATE playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(playlistId);
   return { items: listPlaylistItems(userId, playlistId) };
 }

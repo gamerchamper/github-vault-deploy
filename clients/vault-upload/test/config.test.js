@@ -24,6 +24,14 @@ describe('config server history', function () {
     expect(again[0].lastUsed).to.be.at.least(history[0].lastUsed);
   });
 
+  it('should not add entries without credentials', function () {
+    const history = addToServerHistory({
+      serverUrl: 'https://vault.test',
+      serverHistory: [],
+    });
+    expect(history).to.have.length(0);
+  });
+
   it('should find, remove, and compute active id', function () {
     const config = {
       serverUrl: 'http://localhost:3000',

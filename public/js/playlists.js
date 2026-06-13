@@ -537,6 +537,17 @@ const Playlists = {
     });
   },
 
+  buildOrderedFileIds() {
+    const seen = new Set();
+    const ids = [];
+    for (const f of this.builderItems) {
+      if (!f?.id || seen.has(f.id)) continue;
+      seen.add(f.id);
+      ids.push(f.id);
+    }
+    return ids;
+  },
+
   async saveBuilder() {
     const modal = document.getElementById('playlist-builder-modal');
     const id = modal?.dataset.playlistId;
@@ -544,13 +555,14 @@ const Playlists = {
     try {
       const current = await API.playlists.get(id);
       const currentIds = new Set((current.items || []).map((f) => f.id));
-      const newIds = new Set(this.builderItems.map((f) => f.id));
+      const newIds = new Set(this.buildOrderedFileIds());
       const toRemove = [...currentIds].filter((x) => !newIds.has(x));
       const toAdd = [...newIds].filter((x) => !currentIds.has(x));
       if (toRemove.length) await API.playlists.removeItems(id, toRemove);
       if (toAdd.length) await API.playlists.addItems(id, toAdd);
-      if (this.builderItems.length) {
-        await API.playlists.reorder(id, this.builderItems.map((f) => f.id));
+      const orderedIds = this.buildOrderedFileIds();
+      if (orderedIds.length) {
+        await API.playlists.reorder(id, orderedIds);
       }
       const displayUpdates = this.builderItems.map((f) => ({
         file_id: f.id,

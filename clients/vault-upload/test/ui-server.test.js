@@ -129,6 +129,14 @@ describe('UI server', function () {
     expect(res.body.serverHistory[0].serverUrl).to.equal('https://vault.test');
   });
 
+  it('should reject config without credentials', async function () {
+    const res = await request(baseUrl, 'POST', '/api/config', {
+      serverUrl: 'https://vault.test/',
+    });
+    expect(res.status).to.equal(400);
+    expect(res.body.error).to.include('API key or session cookie');
+  });
+
   it('should list, select, and remove saved servers', async function () {
     nock('https://vault.test').get('/api/tasks/').query({ active: '1', resumable: '1' }).reply(200, { tasks: [] });
     nock('https://vault.other').get('/api/tasks/').query({ active: '1', resumable: '1' }).reply(200, { tasks: [] });
