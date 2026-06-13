@@ -1,6 +1,7 @@
 const { execFile, exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
 const db = require('../db/database');
 const accounts = require('./accounts');
@@ -174,10 +175,10 @@ async function convertToHls(inputPath, outputDir, segmentDuration, job = null) {
   return { segments: durations, playlistPath, totalDuration: totalDur };
 }
 
-async function uploadSegment(userId, fileId, segment, repos, segmentIndex) {
+async function uploadSegment(userId, fileId, segment, repos, segmentIndex, pool = null) {
   const repo = storage.pickRepo(repos, segmentIndex);
   const repoPath = `.vault/hls/${fileId}/${String(segmentIndex).padStart(5, '0')}.dat`;
-  const data = fs.readFileSync(segment.path);
+  const data = await fsp.readFile(segment.path);
 
   const [owner, repoName] = repo.full_name.split('/');
   const octokit = accounts.createClientForRepo(userId, repo);
@@ -194,8 +195,84 @@ async function uploadSegment(userId, fileId, segment, repos, segmentIndex) {
   capacity.consumeHlsReserve(userId, fileId, repo.id, data.length);
 
   recordBytes(userId, fileId, data.length, 'hls_upload');
+  if (pool) pool.recordBytes(data.length);
 
   return { repo: repo.full_name, sha };
+}
+
+async function uploadSegmentsParallel(userId, fileId, segments, repos, job, onProgress, taskId) {
+  const total = segments.length;
+  const pending = segments
+    .map((seg, index) => ({ seg, index }))
+    .filter(({ seg }) => seg.path !== null);
+
+  let segmentsDone = total - pending.length;
+  if (segmentsDone > 0 && onProgress) {
+    onProgress({
+      phase: 'uploading',
+      percent: 50 + Math.round((segmentsDone / total) * 40),
+      segmentsDone,
+      segmentsTotal: total,
+      lastLog: `Resuming: ${segmentsDone}/${total} segments already uploaded`,
+    });
+  }
+
+  if (!pending.length) return;
+
+  const { createAdaptivePool, mapAdaptive } = require('./adaptive-concurrency');
+  const rateLimit = require('./github-rate-limit');
+
+  let tokenKey = null;
+  let clearRateCb = () => {};
+  try {
+    const token = accounts.getTokenForRepo(userId, repos[0]);
+    tokenKey = rateLimit.keyForToken(token);
+    if (taskId) {
+      const tasks = require('./tasks');
+      clearRateCb = rateLimit.setWaitCallback(tokenKey, (info) => {
+        const secs = Math.ceil(info.waitMs / 1000);
+        const mins = Math.ceil(secs / 60);
+        const waitLabel = mins >= 2 ? `${mins} min` : `${secs}s`;
+        tasks.update(taskId, userId, {
+          phase: 'rate-limit',
+          currentRepo: `GitHub rate limit — resuming in ${waitLabel}`,
+          lastLog: `Waiting for GitHub rate limit (${waitLabel})`,
+        });
+      });
+    }
+  } catch {}
+
+  const recommended = tokenKey ? rateLimit.getRecommendedConcurrency(tokenKey, 8) : 8;
+  const pool = createAdaptivePool(pending.length, {
+    max: 12,
+    initial: recommended,
+    getMax: tokenKey ? () => rateLimit.getRecommendedConcurrency(tokenKey, 8) : null,
+  });
+
+  try {
+    await mapAdaptive(pending, pool, async ({ seg, index }) => {
+      assertNotCancelled(job);
+      if (isTaskCancelled(taskId, userId)) throw new Error('Cancelled');
+
+      log(`Uploading segment ${index + 1}/${total} (${(seg.size / 1024 / 1024).toFixed(2)} MB)`);
+      await uploadSegment(userId, fileId, seg, repos, index, pool);
+
+      segmentsDone += 1;
+      const pct = 50 + Math.round((segmentsDone / total) * 40);
+      if (onProgress) {
+        onProgress({
+          phase: 'uploading',
+          percent: pct,
+          segmentsDone,
+          segmentsTotal: total,
+          lastLog: `Uploaded HLS segment ${segmentsDone}/${total}`,
+        });
+      }
+      log(`Segment ${index + 1}/${total} uploaded`);
+    });
+  } finally {
+    clearRateCb();
+  }
 }
 
 function buildRawUrl(fullName, branch, repoPath) {
@@ -342,24 +419,21 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
       log(`FFmpeg produced ${segments.length} segments`);
     }
 
-    if (onProgress) onProgress({ phase: 'uploading', percent: 50, lastLog: `Uploading ${segments.length} HLS segments...` });
-
     const total = segments.length;
-    for (let i = 0; i < total; i++) {
-      assertNotCancelled(job);
-      if (isTaskCancelled(taskId, userId)) throw new Error('Cancelled');
-      const seg = segments[i];
-      // Skip segments already uploaded (recovery)
-      if (seg.path === null) {
-        if (onProgress) onProgress({ phase: 'uploading', percent: 50 + Math.round(((i + 1) / total) * 40), segmentsDone: i + 1, segmentsTotal: total, lastLog: `Segment ${i + 1}/${total} already uploaded (recovered)` });
-        continue;
-      }
-      log(`Uploading segment ${i + 1}/${total} (${(seg.size / 1024 / 1024).toFixed(2)} MB)`);
-      await uploadSegment(userId, fileId, seg, repos, i);
-      log(`Segment ${i + 1}/${total} uploaded`);
-      const pct = 50 + Math.round(((i + 1) / total) * 40);
-      if (onProgress) onProgress({ phase: 'uploading', percent: pct, segmentsDone: i + 1, segmentsTotal: total, lastLog: `Uploaded HLS segment ${i + 1}/${total}` });
+    const pendingCount = segments.filter((s) => s.path !== null).length;
+    if (onProgress) {
+      onProgress({
+        phase: 'uploading',
+        percent: 50,
+        segmentsDone: total - pendingCount,
+        segmentsTotal: total,
+        lastLog: pendingCount
+          ? `Uploading ${pendingCount} HLS segments (${Math.min(12, pendingCount)} at a time)...`
+          : `All ${total} HLS segments already uploaded`,
+      });
     }
+
+    await uploadSegmentsParallel(userId, fileId, segments, repos, job, onProgress, taskId);
     log(`Uploaded ${total} segments`);
 
     if (onProgress) onProgress({ phase: 'playlist', percent: 92, lastLog: 'Uploading m3u8 playlist...' });
