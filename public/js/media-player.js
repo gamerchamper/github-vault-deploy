@@ -1,6 +1,125 @@
 const MediaPlayer = {
   CONTROLS_AUDIO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'airplay'],
   CONTROLS_VIDEO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'airplay', 'fullscreen'],
+  VOLUME_MAX: 2,
+  VOLUME_STORAGE_KEY: 'vault-player-volume',
+  _volumeGraphs: null,
+
+  getVolumeGraphs() {
+    if (!this._volumeGraphs) this._volumeGraphs = new WeakMap();
+    return this._volumeGraphs;
+  },
+
+  readStoredVolume() {
+    try {
+      const v = parseFloat(localStorage.getItem(this.VOLUME_STORAGE_KEY));
+      if (Number.isFinite(v)) return Math.max(0, Math.min(this.VOLUME_MAX, v));
+    } catch { /* ignore */ }
+    return 1;
+  },
+
+  writeStoredVolume(value) {
+    try {
+      localStorage.setItem(this.VOLUME_STORAGE_KEY, String(value));
+    } catch { /* ignore */ }
+  },
+
+  ensureVolumeGraph(el) {
+    if (!el) return null;
+    const graphs = this.getVolumeGraphs();
+    if (graphs.has(el)) return graphs.get(el);
+
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+
+    try {
+      const ctx = new Ctx();
+      const source = ctx.createMediaElementSource(el);
+      const gain = ctx.createGain();
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      const graph = { ctx, source, gain, output: gain };
+      graphs.set(el, graph);
+      return graph;
+    } catch {
+      return null;
+    }
+  },
+
+  applyBoostVolume(media, graph, level) {
+    const v = Math.max(0, Math.min(this.VOLUME_MAX, Number(level) || 0));
+    if (graph) {
+      media.volume = 1;
+      graph.gain.gain.value = v;
+      if (graph.ctx.state === 'suspended') graph.ctx.resume().catch(() => {});
+    } else {
+      media.volume = Math.min(1, v);
+    }
+    return v;
+  },
+
+  syncBoostVolumeUi(input, level) {
+    if (!input) return;
+    const pct = Math.round(level * 100);
+    input.value = String(level);
+    input.style.setProperty('--value', `${(level / this.VOLUME_MAX) * 100}%`);
+    input.setAttribute('aria-valuenow', String(pct));
+    input.setAttribute('aria-valuetext', `${pct}%`);
+  },
+
+  enableVolumeBoost(plyr) {
+    const max = this.VOLUME_MAX;
+    const attach = () => {
+      const media = plyr.media;
+      const input = plyr.elements?.container?.querySelector('input[data-plyr="volume"]');
+      if (!media || !input || input.dataset.vaultBoostBound) return;
+      input.dataset.vaultBoostBound = '1';
+      input.max = String(max);
+      input.step = '0.01';
+
+      const graph = this.ensureVolumeGraph(media);
+      let level = this.readStoredVolume();
+
+      const setVolume = (value, { persist = true } = {}) => {
+        level = this.applyBoostVolume(media, graph, value);
+        this.syncBoostVolumeUi(input, level);
+        if (persist) this.writeStoredVolume(level);
+      };
+
+      setVolume(level, { persist: false });
+
+      input.addEventListener('input', (e) => {
+        e.stopImmediatePropagation();
+        setVolume(parseFloat(input.value));
+      }, true);
+
+      input.addEventListener('change', (e) => {
+        e.stopImmediatePropagation();
+        setVolume(parseFloat(input.value));
+      }, true);
+
+      plyr.on('volumechange', () => {
+        if (media.muted) {
+          if (graph) graph.gain.gain.value = 0;
+          return;
+        }
+        const fromSlider = parseFloat(input.value);
+        if (Number.isFinite(fromSlider) && Math.abs(fromSlider - level) > 0.001) {
+          setVolume(fromSlider);
+          return;
+        }
+        setVolume(level, { persist: false });
+      });
+
+      plyr.on('destroy', () => {
+        this.getVolumeGraphs().delete(media);
+        graph?.ctx?.close?.().catch(() => {});
+      });
+    };
+
+    if (plyr.elements?.container) attach();
+    else plyr.on('ready', attach);
+  },
 
   CAST_ICON: `<svg class="icon--cast" role="presentation" focusable="false" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>`,
 
@@ -176,6 +295,7 @@ const MediaPlayer = {
       if (wrapper) wrapper.classList.add('vault-video-enhanced-wrap');
     }
     this.enableRemotePlayback(plyr);
+    this.enableVolumeBoost(plyr);
     if (hooks.onProgress) plyr.on('progress', hooks.onProgress);
     if (hooks.onTimeupdate) plyr.on('timeupdate', hooks.onTimeupdate);
     if (hooks.onPlay) plyr.on('play', hooks.onPlay);
@@ -216,16 +336,28 @@ const MediaPlayer = {
 
     if (!viz.source) {
       try {
-        const ctx = new AudioContext();
+        const graph = this.ensureVolumeGraph(audioEl);
+        const ctx = graph?.ctx || new AudioContext();
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 256;
         analyser.smoothingTimeConstant = 0.82;
-        const source = ctx.createMediaElementSource(audioEl);
-        source.connect(analyser);
-        analyser.connect(ctx.destination);
+
+        if (graph) {
+          graph.gain.disconnect();
+          graph.gain.connect(analyser);
+          analyser.connect(ctx.destination);
+          graph.output = analyser;
+          viz.source = graph.source;
+          viz.gain = graph.gain;
+        } else {
+          const source = ctx.createMediaElementSource(audioEl);
+          source.connect(analyser);
+          analyser.connect(ctx.destination);
+          viz.source = source;
+        }
+
         viz.ctx = ctx;
         viz.analyser = analyser;
-        viz.source = source;
         viz.data = new Uint8Array(analyser.frequencyBinCount);
       } catch {
         return viz;
