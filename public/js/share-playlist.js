@@ -1,6 +1,56 @@
 /**
  * Playlist panel on the public share page (stacked above shoutbox).
  */
+(function patchPlaylistQueueUi() {
+  if (typeof PlaylistQueue === 'undefined') return;
+  PlaylistQueue.ensureUiHelpers?.();
+  if (typeof PlaylistQueue.decorateQueueRow === 'function') return;
+  const TH = 90;
+  PlaylistQueue.SEEN_THRESHOLD = PlaylistQueue.SEEN_THRESHOLD || TH;
+  PlaylistQueue.isSeen = function isSeen(prog) {
+    if (!prog) return false;
+    return !!(prog.completed || prog.progress_pct >= TH);
+  };
+  PlaylistQueue.decorateQueueRow = function decorateQueueRow(row, file, idx, { currentId = null } = {}) {
+    const prog = this.getProgress(file.id);
+    row.dataset.fileId = file.id;
+    row.classList.toggle('is-active', currentId === file.id);
+    row.classList.toggle('is-seen', this.isSeen(prog));
+    row.classList.toggle('is-completed', this.isSeen(prog));
+    row.classList.toggle('is-in-progress', !this.isSeen(prog) && prog.progress_pct >= 3);
+    return prog;
+  };
+  PlaylistQueue.progressRingSvg = function progressRingSvg(prog) {
+    const seen = this.isSeen(prog);
+    const pct = seen ? 100 : Math.min(100, Math.max(0, prog?.progress_pct || 0));
+    const r = 16;
+    const c = 2 * Math.PI * r;
+    const dash = (pct / 100) * c;
+    return `<svg class="playlist-queue-ring" viewBox="0 0 36 36" aria-hidden="true">
+      <circle class="playlist-queue-ring-bg" cx="18" cy="18" r="${r}" fill="none" stroke-width="2.5"/>
+      <circle class="playlist-queue-ring-fill${seen ? ' is-complete' : ''}" cx="18" cy="18" r="${r}" fill="none" stroke-width="2.5"
+        stroke-dasharray="${dash.toFixed(2)} ${c.toFixed(2)}" stroke-linecap="round" transform="rotate(-90 18 18)"/>
+    </svg>`;
+  };
+  PlaylistQueue.appendQueueProgress = function appendQueueProgress(body, prog) {
+    if (this.isSeen(prog)) {
+      const badge = document.createElement('span');
+      badge.className = 'playlist-queue-seen-badge';
+      badge.title = 'Watched';
+      badge.setAttribute('aria-label', 'Watched');
+      badge.textContent = '✓';
+      body.appendChild(badge);
+      return;
+    }
+    if (prog.progress_pct >= 3) {
+      const bar = document.createElement('div');
+      bar.className = 'playlist-queue-progress';
+      bar.style.setProperty('--progress', `${Math.min(100, prog.progress_pct)}%`);
+      body.appendChild(bar);
+    }
+  };
+})();
+
 const SharePlaylist = {
   token: null,
   playlist: null,

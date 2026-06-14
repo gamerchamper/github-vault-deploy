@@ -275,3 +275,55 @@ const PlaylistQueue = {
     } catch { /* ignore */ }
   },
 };
+
+PlaylistQueue.VERSION = '1.0.2';
+
+/** Backfill helpers if an older cached playlist-queue.js loaded first. */
+PlaylistQueue.ensureUiHelpers = function ensureUiHelpers() {
+  if (this.decorateQueueRow) return;
+  this.SEEN_THRESHOLD = this.SEEN_THRESHOLD || 90;
+  this.isSeen = this.isSeen || function isSeen(prog) {
+    if (!prog) return false;
+    return !!(prog.completed || prog.progress_pct >= this.SEEN_THRESHOLD);
+  };
+  this.decorateQueueRow = function decorateQueueRow(row, file, idx, { currentId = null } = {}) {
+    const prog = this.getProgress(file.id);
+    row.dataset.fileId = file.id;
+    row.classList.toggle('is-active', currentId === file.id);
+    row.classList.toggle('is-seen', this.isSeen(prog));
+    row.classList.toggle('is-completed', this.isSeen(prog));
+    row.classList.toggle('is-in-progress', !this.isSeen(prog) && prog.progress_pct >= 3);
+    return prog;
+  };
+  this.progressRingSvg = this.progressRingSvg || function progressRingSvg(prog) {
+    const seen = this.isSeen(prog);
+    const pct = seen ? 100 : Math.min(100, Math.max(0, prog?.progress_pct || 0));
+    const r = 16;
+    const c = 2 * Math.PI * r;
+    const dash = (pct / 100) * c;
+    return `<svg class="playlist-queue-ring" viewBox="0 0 36 36" aria-hidden="true">
+      <circle class="playlist-queue-ring-bg" cx="18" cy="18" r="${r}" fill="none" stroke-width="2.5"/>
+      <circle class="playlist-queue-ring-fill${seen ? ' is-complete' : ''}" cx="18" cy="18" r="${r}" fill="none" stroke-width="2.5"
+        stroke-dasharray="${dash.toFixed(2)} ${c.toFixed(2)}" stroke-linecap="round" transform="rotate(-90 18 18)"/>
+    </svg>`;
+  };
+  this.appendQueueProgress = this.appendQueueProgress || function appendQueueProgress(body, prog) {
+    if (this.isSeen(prog)) {
+      const badge = document.createElement('span');
+      badge.className = 'playlist-queue-seen-badge';
+      badge.title = 'Watched';
+      badge.setAttribute('aria-label', 'Watched');
+      badge.textContent = '✓';
+      body.appendChild(badge);
+      return;
+    }
+    if (prog.progress_pct >= 3) {
+      const bar = document.createElement('div');
+      bar.className = 'playlist-queue-progress';
+      bar.style.setProperty('--progress', `${Math.min(100, prog.progress_pct)}%`);
+      body.appendChild(bar);
+    }
+  };
+};
+
+PlaylistQueue.ensureUiHelpers();
