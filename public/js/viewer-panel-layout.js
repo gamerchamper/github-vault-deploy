@@ -5,9 +5,13 @@ const ViewerPanelLayout = {
   STORAGE_KEY: 'vault-viewer-panel-layout',
   MIN_W: 380,
   MIN_H: 260,
-  STRIP: 20,
-  CORNER: 28,
-  GAP: 4,
+  STRIP: 10,
+  CORNER: 16,
+  GAP: 3,
+
+  handleOutset() {
+    return this.STRIP + this.GAP;
+  },
   viewer: null,
   panel: null,
   overlays: null,
@@ -26,6 +30,7 @@ const ViewerPanelLayout = {
   },
 
   ensureOverlays() {
+    document.querySelectorAll('.viewer-resize-overlay-ps').forEach((el) => el.remove());
     if (this.overlays) return;
     const axes = [
       { id: 'e', cursor: 'ew-resize', title: 'Resize width' },
@@ -78,14 +83,15 @@ const ViewerPanelLayout = {
   clampToViewport(layout) {
     if (!layout) return layout;
     const margin = 12;
-    const maxW = Math.max(this.MIN_W, window.innerWidth - margin * 2);
-    const maxH = Math.max(this.MIN_H, window.innerHeight - margin * 2);
+    const outset = this.handleOutset();
+    const maxW = Math.max(this.MIN_W, window.innerWidth - margin * 2 - outset);
+    const maxH = Math.max(this.MIN_H, window.innerHeight - margin * 2 - outset);
     let width = Math.min(Math.max(this.MIN_W, layout.width || this.MIN_W), maxW);
     let height = Math.min(Math.max(this.MIN_H, layout.height || this.MIN_H), maxH);
     let left = layout.left ?? Math.round((window.innerWidth - width) / 2);
     let top = layout.top ?? Math.round((window.innerHeight - height) / 2);
-    left = Math.min(Math.max(margin, left), window.innerWidth - width - margin);
-    top = Math.min(Math.max(margin, top), window.innerHeight - height - margin);
+    left = Math.min(Math.max(margin, left), window.innerWidth - width - margin - outset);
+    top = Math.min(Math.max(margin, top), window.innerHeight - height - margin - outset);
     return {
       ...layout,
       width: Math.round(width),

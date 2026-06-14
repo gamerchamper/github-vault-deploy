@@ -5,9 +5,13 @@ const ShareStageLayout = {
   STORAGE_KEY: 'vault-share-stage-layout',
   MIN_W: 320,
   MIN_H: 200,
-  STRIP: 20,
-  CORNER: 28,
-  GAP: 4,
+  STRIP: 10,
+  CORNER: 16,
+  GAP: 3,
+
+  handleOutset() {
+    return this.STRIP + this.GAP;
+  },
   panel: null,
   overlays: null,
   syncFrame: null,
@@ -24,6 +28,7 @@ const ShareStageLayout = {
   },
 
   ensureOverlays() {
+    document.querySelectorAll('.share-resize-overlay-ps').forEach((el) => el.remove());
     if (this.overlays) return;
     const axes = [
       { id: 'e', cursor: 'ew-resize', title: 'Resize width' },
@@ -78,19 +83,20 @@ const ShareStageLayout = {
   clampToViewport(layout) {
     if (!layout) return layout;
     const margin = 12;
+    const outset = this.handleOutset();
     const parent = this.panel?.parentElement?.getBoundingClientRect();
-    const maxW = Math.max(this.MIN_W, (parent?.width || window.innerWidth) - margin * 2);
-    const maxH = this.maxHeight();
+    const maxW = Math.max(this.MIN_W, (parent?.width || window.innerWidth) - margin * 2 - outset);
+    const maxH = Math.max(this.MIN_H, this.maxHeight() - outset);
     let width = Math.min(Math.max(this.MIN_W, layout.width || this.MIN_W), maxW);
     let height = Math.min(Math.max(this.MIN_H, layout.height || this.MIN_H), maxH);
     let left = layout.left ?? (parent ? parent.left + (parent.width - width) / 2 : margin);
     let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? margin;
     if (parent) {
-      left = Math.min(Math.max(parent.left + margin, left), parent.right - width - margin);
+      left = Math.min(Math.max(parent.left + margin, left), parent.right - width - margin - outset);
     } else {
-      left = Math.min(Math.max(margin, left), window.innerWidth - width - margin);
+      left = Math.min(Math.max(margin, left), window.innerWidth - width - margin - outset);
     }
-    top = Math.min(Math.max(margin, top), window.innerHeight - height - margin);
+    top = Math.min(Math.max(margin, top), window.innerHeight - height - margin - outset);
     return {
       ...layout,
       width: Math.round(width),

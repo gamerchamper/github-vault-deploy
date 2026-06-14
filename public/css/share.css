@@ -334,6 +334,7 @@ body.share-cinema-active .share-cinema-stage {
 }
 
 .share-cinema-stage.share-stage-user-sized {
+  box-sizing: border-box;
   transition: none;
 }
 
@@ -366,29 +367,34 @@ body.share-stage-resizing-active[data-share-resize-axis="se"] * {
   touch-action: none;
   pointer-events: auto;
   box-sizing: border-box;
-  background: rgba(74, 158, 255, 0.06);
+  padding: 0;
+  margin: 0;
+  background: transparent;
   transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .share-resize-overlay-e {
   cursor: ew-resize;
-  border-left: 2px solid transparent;
+  border: 0 solid transparent;
+  border-left-width: 2px;
 }
 
 .share-resize-overlay-s {
   cursor: ns-resize;
-  border-top: 2px solid transparent;
+  border: 0 solid transparent;
+  border-top-width: 2px;
 }
 
 .share-resize-overlay-se {
   cursor: nwse-resize;
+  border: 0;
 }
 
 .share-resize-overlay-e:hover,
 .share-resize-overlay-s:hover,
 .share-resize-overlay-se:hover {
-  background: rgba(74, 158, 255, 0.14);
-  box-shadow: 0 0 12px rgba(74, 158, 255, 0.35);
+  background: rgba(74, 158, 255, 0.1);
+  box-shadow: none;
 }
 
 .share-resize-overlay-e:hover {
@@ -402,13 +408,13 @@ body.share-stage-resizing-active[data-share-resize-axis="se"] * {
 .share-resize-overlay-se::after {
   content: '';
   position: absolute;
-  left: 4px;
-  top: 4px;
-  width: 10px;
-  height: 10px;
+  left: 3px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
   border-left: 2px solid rgba(255, 255, 255, 0.35);
   border-top: 2px solid rgba(255, 255, 255, 0.35);
-  border-radius: 3px 0 0 0;
+  border-radius: 2px 0 0 0;
   pointer-events: none;
 }
 

@@ -2501,6 +2501,7 @@ body::before {
 }
 
 .viewer-panel-custom {
+  box-sizing: border-box;
   box-shadow: 0 20px 56px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
@@ -2553,29 +2554,34 @@ body.viewer-panel-resizing-active[data-viewer-resize-axis="se"] * {
   touch-action: none;
   pointer-events: auto;
   box-sizing: border-box;
-  background: rgba(74, 158, 255, 0.05);
+  padding: 0;
+  margin: 0;
+  background: transparent;
   transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .viewer-resize-overlay-e {
   cursor: ew-resize;
-  border-left: 2px solid transparent;
+  border: 0 solid transparent;
+  border-left-width: 2px;
 }
 
 .viewer-resize-overlay-s {
   cursor: ns-resize;
-  border-top: 2px solid transparent;
+  border: 0 solid transparent;
+  border-top-width: 2px;
 }
 
 .viewer-resize-overlay-se {
   cursor: nwse-resize;
+  border: 0;
 }
 
 .viewer-resize-overlay-e:hover,
 .viewer-resize-overlay-s:hover,
 .viewer-resize-overlay-se:hover {
-  background: rgba(74, 158, 255, 0.12);
-  box-shadow: 0 0 12px rgba(74, 158, 255, 0.35);
+  background: rgba(74, 158, 255, 0.1);
+  box-shadow: none;
 }
 
 .viewer-resize-overlay-e:hover {
@@ -2589,13 +2595,13 @@ body.viewer-panel-resizing-active[data-viewer-resize-axis="se"] * {
 .viewer-resize-overlay-se::after {
   content: '';
   position: absolute;
-  left: 4px;
-  top: 4px;
-  width: 10px;
-  height: 10px;
+  left: 3px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
   border-left: 2px solid rgba(255, 255, 255, 0.35);
   border-top: 2px solid rgba(255, 255, 255, 0.35);
-  border-radius: 3px 0 0 0;
+  border-radius: 2px 0 0 0;
   pointer-events: none;
 }
 
@@ -2625,7 +2631,7 @@ body.viewer-panel-resizing-active[data-viewer-resize-axis="se"] * {
   display: flex;
   flex-direction: column;
   max-width: none;
-  padding: 0 12px 8px;
+  padding: 0;
 }
 
 .viewer-panel-custom .viewer-player-wrap .plyr {
