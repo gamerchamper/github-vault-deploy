@@ -161,11 +161,19 @@ app.get('/health', (req, res) => {
     const workloadGovernor = require('./services/workload-governor');
     const rateLimit = require('./services/github-rate-limit');
     const github = require('./services/github');
+    const maintenance = require('./services/maintenance');
+    const hlsStream = require('./services/hls-stream');
+    const chunkSession = require('./services/chunk-session');
+    const geoip = require('./services/geoip');
     res.json({
       ok: true,
       ...workloadGovernor.stats(),
       api_calls: rateLimit.getApiCallStats(),
       repo_cache: github.getRepoCacheStats(),
+      maintenance: maintenance.getStats(),
+      hls_sessions: hlsStream.getActiveSessionCount(),
+      chunk_sessions: chunkSession.getSessionCount(),
+      geo_cache: geoip.getCacheSize(),
     });
   } catch {
     res.json({ ok: true });
@@ -272,6 +280,13 @@ app.listen(PORT, () => {
   }, 60000);
   if (!process.env.GITHUB_CLIENT_ID) {
     console.warn('WARNING: GITHUB_CLIENT_ID not set. Copy .env.example to .env and configure OAuth.');
+  }
+
+  try {
+    const maintenance = require('./services/maintenance');
+    maintenance.startMaintenance();
+  } catch (err) {
+    console.warn('[maintenance] startup skipped:', err.message);
   }
 
   // Schedule daily audit log cleanup (runs once per 24h, first run after 1 hour)

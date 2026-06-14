@@ -84,4 +84,18 @@ module.exports = {
   getClientIp,
   lookupGeo,
   isPrivateIp,
+  pruneCache() {
+    const now = Date.now();
+    let pruned = 0;
+    for (const [ip, entry] of geoCache) {
+      if (now - entry.at > CACHE_TTL_MS) {
+        geoCache.delete(ip);
+        pruned += 1;
+      }
+    }
+    return pruned;
+  },
+  getCacheSize() {
+    return geoCache.size;
+  },
 };

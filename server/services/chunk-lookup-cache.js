@@ -317,6 +317,28 @@ function getCacheStats() {
   };
 }
 
+function pruneExpired() {
+  const now = Date.now();
+  let missingPruned = 0;
+  let repoPruned = 0;
+
+  for (const [key, entry] of missingCache) {
+    if (now > entry.until) {
+      missingCache.delete(key);
+      missingPruned += 1;
+    }
+  }
+
+  for (const [key, entry] of repoHealthCache) {
+    if (now - entry.at > REPO_HEALTH_TTL_MS) {
+      repoHealthCache.delete(key);
+      repoPruned += 1;
+    }
+  }
+
+  return { missing_pruned: missingPruned, repo_health_pruned: repoPruned };
+}
+
 module.exports = {
   blobKey,
   getFileSha,
@@ -335,5 +357,6 @@ module.exports = {
   getRepoHealth,
   setRepoHealth,
   getCacheStats,
+  pruneExpired,
   stableSha,
 };

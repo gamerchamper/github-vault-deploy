@@ -8,6 +8,7 @@ const mp4 = require('./mp4');
 const mp4Atoms = require('./mp4-atoms');
 const streaming = require('./streaming');
 const { recordBytes } = require('./bandwidth');
+const mediaCache = require('./media-cache-headers');
 const {
   getOrCreateChunkSession,
   buildChunkMap,
@@ -478,7 +479,7 @@ async function servePlaylist(req, res, userId, fileId, baseUrl, view = null) {
   const hasSegment = await waitForFirstSegment(session);
 
   res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-  res.setHeader('Cache-Control', 'no-cache');
+  mediaCache.setPlaylistCacheHeaders(res);
 
   if (!hasSegment) {
     return res.status(503).setHeader('Retry-After', '2')
@@ -523,8 +524,11 @@ async function serveSegment(req, res, userId, fileId, index, view = null) {
     return res.status(404).json({ error: 'Segment not ready' });
   }
 
+  const etag = mediaCache.etagFromPath(seg.path);
+  if (mediaCache.sendNotModifiedIfMatch(req, res, etag)) return;
+
   res.setHeader('Content-Type', 'video/mp2t');
-  res.setHeader('Cache-Control', 'private, max-age=3600');
+  mediaCache.setMediaCacheHeaders(res);
   const segSize = fs.statSync(seg.path).size;
   res.setHeader('Content-Length', segSize);
   fs.createReadStream(seg.path).pipe(res);
@@ -536,20 +540,57 @@ function getHlsStatus(userId, fileId, view = null) {
   return session ? session.getStatus() : null;
 }
 
+function destroyHlsSession(session) {
+  if (!session) return;
+  session.abort();
+  try {
+    if (session.dir && fs.existsSync(session.dir)) {
+      fs.rmSync(session.dir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.warn('[HLS] Failed to remove session dir:', err.message);
+  }
+
+  try {
+    const { hasStreamViewers, disposeStreamSession } = require('./chunk-session');
+    if (!hasStreamViewers(session.userId, session.file.id, session.view)) {
+      disposeStreamSession(session.userId, session.file.id, session.view);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function cleanupHlsSessions() {
   const now = Date.now();
+  let removed = 0;
   for (const [key, session] of hlsSessions) {
     if (now - session.lastAccess > HLS_SESSION_TTL_MS) {
+      destroyHlsSession(session);
       hlsSessions.delete(key);
+      removed += 1;
     }
   }
+  return removed;
+}
+
+function cleanupExpiredSessions() {
+  return cleanupHlsSessions();
+}
+
+function getActiveSessionDirs() {
+  return new Set([...hlsSessions.values()].map((session) => session.dir).filter(Boolean));
+}
+
+function getActiveSessionCount() {
+  return hlsSessions.size;
 }
 
 function disposeHlsSession(userId, fileId, view = null) {
   const key = hlsKey(userId, fileId, view);
   const session = hlsSessions.get(key);
   if (!session) return;
-  session.abort();
+  destroyHlsSession(session);
   hlsSessions.delete(key);
 }
 
@@ -568,7 +609,7 @@ function releaseShareStream(userId, fileId, viewerId, view = null) {
 function clearForUser(userId) {
   for (const [key, session] of hlsSessions) {
     if (String(session.userId) !== String(userId)) continue;
-    session.abort();
+    destroyHlsSession(session);
     hlsSessions.delete(key);
   }
 }
@@ -583,5 +624,8 @@ module.exports = {
   disposeHlsSession,
   releaseShareStream,
   clearForUser,
+  cleanupExpiredSessions,
+  getActiveSessionDirs,
+  getActiveSessionCount,
   hlsKey,
 };

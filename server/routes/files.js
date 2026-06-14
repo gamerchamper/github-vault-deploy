@@ -10,6 +10,7 @@ const metadata = require('../services/metadata');
 const streaming = require('../services/streaming');
 const { recordBytes } = require('../services/bandwidth');
 const hlsStream = require('../services/hls-stream');
+const mediaCache = require('../services/media-cache-headers');
 const tasks = require('../services/tasks');
 const hlsConvert = require('../services/hls-convert');
 const seamlessUpload = require('../services/seamless-upload');
@@ -154,8 +155,11 @@ router.get('/thumbnail/:id', async (req, res) => {
     }
     if (!thumb) return res.status(404).end();
 
+    const etag = mediaCache.etagFromParts(fileId, fileRec.has_thumbnail, mediaCache.etagFromBuffer(thumb));
+    if (mediaCache.sendNotModifiedIfMatch(req, res, etag)) return;
+
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'private, max-age=86400');
+    mediaCache.setMediaCacheHeaders(res, { scope: 'private' });
     res.send(thumb);
   } catch {
     res.status(404).end();

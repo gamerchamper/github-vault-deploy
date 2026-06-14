@@ -11,6 +11,7 @@ const accounts = require('../services/accounts');
 const github = require('../services/github');
 const db = require('../db/database');
 const playlists = require('../services/playlists');
+const mediaCache = require('../services/media-cache-headers');
 
 const router = express.Router();
 
@@ -194,7 +195,9 @@ router.get('/share/:token/chunk/:index', async (req, res) => {
     res.setHeader('Content-Length', buffer.length);
     res.setHeader('X-Chunk-Index', String(chunk.chunk_index));
     res.setHeader('X-Plain-Size', String(chunk.plain_size || chunk.size));
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    mediaCache.setMediaCacheHeaders(res, { scope: 'private' });
+    const etag = mediaCache.etagFromParts(req.params.token, fileId, index, chunk.sha || chunk.size);
+    if (mediaCache.sendNotModifiedIfMatch(req, res, etag)) return;
     res.send(buffer);
   } catch (err) {
     const code = err.message === 'Share not found' ? 404
@@ -259,8 +262,11 @@ router.get('/share/:token/thumbnail', async (req, res) => {
     const thumb = await storage.getShareThumbnail(file);
     if (!thumb) return res.status(404).end();
 
+    const etag = mediaCache.etagFromParts(file.id, file.updated_at || file.created_at, mediaCache.etagFromBuffer(thumb));
+    if (mediaCache.sendNotModifiedIfMatch(req, res, etag)) return;
+
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    mediaCache.setMediaCacheHeaders(res, { scope: 'public' });
     res.send(thumb);
   } catch {
     res.status(404).end();
@@ -584,8 +590,10 @@ router.get('/playlist/:token/thumbnail', async (req, res) => {
     if (!file) return res.status(404).end();
     const thumb = await storage.getShareThumbnail(file);
     if (!thumb) return res.status(404).end();
+    const etag = mediaCache.etagFromParts(file.id, file.updated_at || file.created_at, mediaCache.etagFromBuffer(thumb));
+    if (mediaCache.sendNotModifiedIfMatch(req, res, etag)) return;
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    mediaCache.setMediaCacheHeaders(res, { scope: 'public' });
     res.send(thumb);
   } catch {
     res.status(404).end();
@@ -672,7 +680,9 @@ router.get('/playlist/:token/chunk/:index', async (req, res) => {
     res.setHeader('Content-Length', buffer.length);
     res.setHeader('X-Chunk-Index', String(chunk.chunk_index));
     res.setHeader('X-Plain-Size', String(chunk.plain_size || chunk.size));
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    mediaCache.setMediaCacheHeaders(res, { scope: 'private' });
+    const etag = mediaCache.etagFromParts(req.params.token, fileId, index, chunk.sha || chunk.size);
+    if (mediaCache.sendNotModifiedIfMatch(req, res, etag)) return;
     res.send(buffer);
   } catch (err) {
     const code = err.message === 'Share not found' ? 404

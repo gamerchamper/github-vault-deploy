@@ -530,9 +530,17 @@ function getSessionStatus(userId, fileId, view = null) {
 
 function cleanupSessions() {
   const now = Date.now();
+  let removed = 0;
   for (const [key, session] of sessions) {
     if (now - session.lastAccess > SESSION_TTL_MS) {
-      if (session.downloadPool) session.downloadPool.stop();
+      if (session instanceof ChunkSession) {
+        session.abort();
+      } else if (session instanceof LegacyStreamSession) {
+        session.aborted = true;
+        if (session.downloadPool) session.downloadPool.stop();
+      } else if (session.downloadPool) {
+        session.downloadPool.stop();
+      }
       if (session.spillFd != null) {
         try { fs.closeSync(session.spillFd); } catch { /* ignore */ }
       }
@@ -543,8 +551,24 @@ function cleanupSessions() {
         try { fs.unlinkSync(session.tempPath); } catch { /* ignore */ }
       }
       sessions.delete(key);
+      removed += 1;
     }
   }
+  return removed;
+}
+
+function cleanupExpiredSessions() {
+  return cleanupSessions();
+}
+
+function hasStreamViewers(userId, fileId, view = null) {
+  const key = sessionKey(userId, fileId, view);
+  const viewers = streamViewers.get(key);
+  return !!(viewers && viewers.size > 0);
+}
+
+function getSessionCount() {
+  return sessions.size;
 }
 
 setInterval(cleanupSessions, 5 * 60 * 1000);
@@ -607,6 +631,9 @@ module.exports = {
   registerStreamViewer,
   unregisterStreamViewer,
   disposeStreamSession,
+  hasStreamViewers,
+  getSessionCount,
+  cleanupExpiredSessions,
   mapConcurrent,
   CONCURRENCY,
   sessionKey,

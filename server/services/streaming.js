@@ -6,6 +6,7 @@ const crypto = require('./crypto');
 const db = require('../db/database');
 const mp4 = require('./mp4');
 const streamCache = require('./stream-cache');
+const mediaCache = require('./media-cache-headers');
 const {
   parseRange,
   getOrCreateChunkSession,
@@ -182,7 +183,7 @@ async function streamChunked(req, res, userId, file, chunks, fileKey, user, { is
 
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
-  res.setHeader('Cache-Control', 'private, no-cache');
+  res.setHeader('Cache-Control', mediaCache.mediaCacheControl({ noCache: true }));
 
   if (hasRange || file.size > 4 * 1024 * 1024) {
     res.status(206);
@@ -317,9 +318,15 @@ function serveRange(req, res, filePath, mimeType, fileName, knownSize, onComplet
   const size = knownSize || fs.statSync(filePath).size;
   const { start, end } = parseRange(req.headers.range, size);
 
+  const etag = mediaCache.etagFromPath(filePath);
+  if (!req.headers.range && mediaCache.sendNotModifiedIfMatch(req, res, etag)) {
+    onComplete?.(0);
+    return;
+  }
+
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', mimeType || 'application/octet-stream');
-  res.setHeader('Cache-Control', 'private, max-age=3600');
+  mediaCache.setMediaCacheHeaders(res);
 
   let bytesSent;
   let responded = false;

@@ -234,6 +234,7 @@ let repoCacheApiCalls = 0;
 
 const readCache = new Map();
 const READ_CACHE_TTL = 15 * 60 * 1000;
+const REPO_INFO_TTL_MS = Number(process.env.REPO_INFO_CACHE_TTL_MS) || 6 * 60 * 60 * 1000;
 const readCachePending = new Map();
 
 function cacheGet(key) {
@@ -265,11 +266,12 @@ async function cacheGetOrFetch(key, fetcher) {
 async function getRepoInfo(octokit, owner, repo) {
   const key = `${owner}/${repo}`;
   const cached = repoInfoCache.get(key);
-  if (cached) {
+  if (cached && Date.now() - cached.ts < REPO_INFO_TTL_MS) {
     repoCacheHits++;
     if (repoCacheHits % 10 === 1) console.log(`[cache] HIT ${key} (hits=${repoCacheHits})`);
     return cached.data;
   }
+  if (cached) repoInfoCache.delete(key);
 
   repoCacheMisses++;
   const pending = repoInfoPending.get(key);
@@ -291,7 +293,35 @@ async function getRepoInfo(octokit, owner, repo) {
 }
 
 function getRepoCacheStats() {
-  return { hits: repoCacheHits, misses: repoCacheMisses, api_calls: repoCacheApiCalls };
+  return {
+    hits: repoCacheHits,
+    misses: repoCacheMisses,
+    api_calls: repoCacheApiCalls,
+    read_cache_size: readCache.size,
+    repo_info_cache_size: repoInfoCache.size,
+  };
+}
+
+function pruneCaches() {
+  const now = Date.now();
+  let readPruned = 0;
+  let repoPruned = 0;
+
+  for (const [key, entry] of readCache) {
+    if (now - entry.ts > READ_CACHE_TTL) {
+      readCache.delete(key);
+      readPruned += 1;
+    }
+  }
+
+  for (const [key, entry] of repoInfoCache) {
+    if (now - entry.ts > REPO_INFO_TTL_MS) {
+      repoInfoCache.delete(key);
+      repoPruned += 1;
+    }
+  }
+
+  return { read_pruned: readPruned, repo_pruned: repoPruned };
 }
 
 async function setRepoPublic(octokit, owner, repo) {
@@ -392,4 +422,5 @@ module.exports = {
   mergeUpstream,
   addCollaborator,
   getRepoCacheStats,
+  pruneCaches,
 };
