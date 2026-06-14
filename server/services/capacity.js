@@ -106,6 +106,73 @@ function checkUploadFits(repos, fileSize, chunkSize, convertHls = false) {
   return projectUploadStorage(repos, fileSize, chunkSize, convertHls);
 }
 
+function projectHlsStorage(repos, fileSize) {
+  const hlsBytes = estimateHlsBytes(fileSize);
+  const segmentCount = Math.max(1, Math.ceil(hlsBytes / AVG_HLS_SEGMENT_BYTES));
+  const avgSegmentBytes = Math.ceil(hlsBytes / segmentCount);
+
+  const projections = repos.map((repo) => ({
+    id: repo.id,
+    full_name: repo.full_name,
+    currentBytes: getRepoEffectiveBytes(repo),
+    projectedBytes: getRepoEffectiveBytes(repo),
+  }));
+
+  if (!projections.length) {
+    return {
+      hlsBytes,
+      segmentCount,
+      projections,
+      poolAvailableBytes: 0,
+      fits: false,
+      insufficientBytes: hlsBytes,
+      repoOverflow: [],
+    };
+  }
+
+  for (let i = 0; i < segmentCount; i++) {
+    projections[i % projections.length].projectedBytes += avgSegmentBytes;
+  }
+
+  const poolAvailableBytes = repos.reduce(
+    (sum, repo) => sum + Math.max(0, REPO_CAPACITY_BYTES - getRepoEffectiveBytes(repo)),
+    0
+  );
+  const repoOverflow = projections.filter((p) => p.projectedBytes > REPO_CAPACITY_BYTES);
+  const fits = repoOverflow.length === 0 && hlsBytes <= poolAvailableBytes;
+
+  return {
+    hlsBytes,
+    segmentCount,
+    projections,
+    poolAvailableBytes,
+    fits,
+    insufficientBytes: fits ? 0 : Math.max(0, hlsBytes - poolAvailableBytes),
+    repoOverflow,
+  };
+}
+
+function checkHlsConversionFits(repos, fileSize) {
+  return projectHlsStorage(repos, fileSize);
+}
+
+function hlsFitsError(projection) {
+  const parts = [
+    `Need ${formatBytesShort(projection.hlsBytes)} for HLS segments (~${projection.segmentCount})`,
+    `but only ${formatBytesShort(projection.poolAvailableBytes)} is free across active repos.`,
+  ];
+  if (projection.repoOverflow.length) {
+    parts.push(
+      `These repos would exceed the ${formatBytesShort(REPO_CAPACITY_BYTES)} limit: `
+      + projection.repoOverflow.slice(0, 8).map((r) => r.full_name).join(', ')
+      + (projection.repoOverflow.length > 8 ? ` (+${projection.repoOverflow.length - 8} more)` : '')
+    );
+  } else {
+    parts.push('Add storage repositories or delete files to free space.');
+  }
+  return parts.join(' ');
+}
+
 function formatBytesShort(bytes) {
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -274,6 +341,9 @@ module.exports = {
   getRepoEffectiveBytes,
   projectUploadStorage,
   checkUploadFits,
+  checkHlsConversionFits,
+  hlsFitsError,
+  projectHlsStorage,
   uploadFitsError,
   reserveHlsStorage,
   consumeHlsReserve,

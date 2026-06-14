@@ -1252,13 +1252,25 @@ async function downloadFileToPath(userId, fileId, outPath, onProgress = null, vi
     const total = chunks.length;
     const fd = fs.openSync(outPath, 'w');
     try {
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
+      let offset = 0;
+      const offsets = chunks.map((chunk) => {
+        const pos = offset;
+        offset += chunk.plain_size || chunk.size || 0;
+        return pos;
+      });
+      if (file.size > 0) {
+        try { fs.truncateSync(fd, file.size); } catch {}
+      }
+      const { mapConcurrent } = require('./chunk-session');
+      const progress = { done: 0 };
+      const concurrency = Math.min(16, Math.max(4, Math.ceil(total / 8)));
+      await mapConcurrent(chunks, concurrency, async (chunk, i) => {
         const enc = await accounts.downloadChunkForView(userId, chunk, view);
         const dec = crypto.decryptChunk(enc, fileKey, chunk.chunk_iv, chunk.chunk_tag);
-        fs.writeSync(fd, dec, 0, dec.length, null);
-        if (onProgress) onProgress(i + 1, total, 'fetching');
-      }
+        fs.writeSync(fd, dec, 0, dec.length, offsets[i]);
+        progress.done += 1;
+        if (onProgress) onProgress(progress.done, total, 'fetching');
+      });
     } finally {
       fs.closeSync(fd);
     }

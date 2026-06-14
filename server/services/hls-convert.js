@@ -404,6 +404,18 @@ function isTaskCancelled(taskId, userId) {
   return task?.phase === 'cancelled' || (task?.status === 'error' && task?.error === 'Cancelled');
 }
 
+function getHlsRepos(userId) {
+  return db.prepare(`
+    SELECT r.* FROM storage_repos r
+    LEFT JOIN linked_accounts la ON r.linked_account_id = la.id
+    WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
+      AND (r.repo_role IS NULL OR r.repo_role = 'primary')
+      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
+      AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
+    ORDER BY r.chunk_count ASC
+  `).all(userId, REPO_CAPACITY_BYTES);
+}
+
 async function convertFile(userId, fileId, onProgress, taskId = null) {
   hlsLog(`convertFile called userId=${userId} fileId=${fileId}`);
   const job = ensureJob(userId, fileId);
@@ -457,17 +469,15 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
     }
   }
 
-  const repos = db.prepare(`
-    SELECT r.* FROM storage_repos r
-    LEFT JOIN linked_accounts la ON r.linked_account_id = la.id
-    WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
-      AND (r.repo_role IS NULL OR r.repo_role = 'primary')
-      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
-      AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
-    ORDER BY r.chunk_count ASC
-  `).all(userId, REPO_CAPACITY_BYTES);
-  if (repos.length === 0) { hlsLog('No repos found'); throw new Error('No storage repositories configured'); }
+  const repos = getHlsRepos(userId);
+  if (repos.length === 0) { hlsLog('No repos found'); throw new Error('No storage repositories with free space for HLS'); }
   hlsLog(`Found ${repos.length} repos for HLS storage`);
+
+  const hlsFit = capacity.checkHlsConversionFits(repos, file.size);
+  if (!hlsFit.fits) {
+    throw new Error(capacity.hlsFitsError(hlsFit));
+  }
+  capacity.ensureHlsReserved(userId, fileId, file.size, repos);
 
   ensureDir(CONVERT_DIR);
   const workDir = path.join(CONVERT_DIR, `${userId}_${fileId}`);
@@ -794,6 +804,7 @@ module.exports = {
   cancelConversion,
   clearHlsState,
   analyzeHlsSegmentState,
+  getHlsRepos,
   getJob,
   getHlsSegments,
   getHlsSegmentCount,

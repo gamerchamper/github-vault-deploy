@@ -108,6 +108,7 @@ const TaskPanel = {
       const pauseBtn = e.target.closest('.task-btn-pause');
       const cancelBtn = e.target.closest('.task-btn-cancel');
       const restartBtn = e.target.closest('.task-btn-restart');
+      const retryHlsBtn = e.target.closest('.task-btn-hls-retry');
       const dismissBtn = e.target.closest('.task-btn-dismiss');
       const backupForceBtn = e.target.closest('.task-btn-backup-force');
       const taskItem = e.target.closest('.task-item');
@@ -119,7 +120,7 @@ const TaskPanel = {
         return;
       }
 
-      if (!resumeBtn && !pauseBtn && !cancelBtn && !restartBtn && !dismissBtn && taskItem) {
+      if (!resumeBtn && !pauseBtn && !cancelBtn && !restartBtn && !retryHlsBtn && !dismissBtn && taskItem) {
         const id = taskItem.dataset.taskId;
         this.expandedTaskId = this.expandedTaskId === id ? null : id;
         this.render();
@@ -137,6 +138,10 @@ const TaskPanel = {
       if (restartBtn) {
         e.preventDefault();
         await this.restartUpload(restartBtn.dataset.taskId);
+      }
+      if (retryHlsBtn) {
+        e.preventDefault();
+        await this.retryHlsConvert(retryHlsBtn.dataset.taskId);
       }
       if (cancelBtn) {
         e.preventDefault();
@@ -339,6 +344,29 @@ const TaskPanel = {
     }
   },
 
+  async retryHlsConvert(taskId) {
+    const task = this.tasks.get(taskId);
+    const btn = document.querySelector(`.task-btn-hls-retry[data-task-id="${taskId}"]`);
+    if (!task?.fileId) {
+      App.toast('Missing file id for HLS retry', 'error');
+      return;
+    }
+    if (btn) App.setButtonLoading(btn, true);
+    try {
+      await this.dismissTask(taskId);
+      const result = await API.files.hlsConvert(task.fileId);
+      if (result?.taskId) {
+        this.track(result.taskId);
+        this.setExpanded(true);
+      }
+      App.toast('HLS conversion restarted', 'success');
+    } catch (err) {
+      App.toast(err.message || 'HLS retry failed', 'error');
+    } finally {
+      if (btn) App.setButtonLoading(btn, false);
+    }
+  },
+
   track(taskId) {
     this.fetchOne(taskId);
     this.ensurePoll();
@@ -367,7 +395,14 @@ const TaskPanel = {
       this.onTaskDone(task);
     }
     if (prev?.status === 'processing' && task.status === 'error') {
-      App.toast(`${task.title} failed — resume from Background tasks`, 'error');
+      const errMsg = task.error && task.error !== 'Cancelled' && task.error !== 'Interrupted'
+        ? task.error
+        : null;
+      const hint = task.resumable ? 'Resume from Background tasks' : 'See Background tasks for details';
+      App.toast(
+        errMsg ? `${task.title} failed: ${errMsg}` : `${task.title} failed — ${hint}`,
+        'error'
+      );
     }
   },
 
@@ -709,6 +744,11 @@ const TaskPanel = {
       ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair' || task.type === 'verify-hls') ? `
         <div class="task-actions">
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
+        </div>
+      ` : failed && task.type === 'hls-convert' && task.fileId ? `
+        <div class="task-actions">
+          <button class="task-btn task-btn-hls-retry" data-task-id="${task.id}">Retry</button>
+          <button class="task-btn task-btn-dismiss" data-task-id="${task.id}">Dismiss</button>
         </div>
       ` : failed ? `
         <div class="task-actions">

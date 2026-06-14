@@ -844,6 +844,16 @@ router.post('/hls-convert/:id', async (req, res) => {
       return res.status(400).json({ error: 'Only video files can be converted to HLS' });
     }
 
+    const repos = hlsConvert.getHlsRepos(req.user.id);
+    if (!repos.length) {
+      return res.status(400).json({ error: 'No storage repositories with free space for HLS' });
+    }
+    const capacity = require('../services/capacity');
+    const hlsFit = capacity.checkHlsConversionFits(repos, file.size);
+    if (!hlsFit.fits) {
+      return res.status(400).json({ error: capacity.hlsFitsError(hlsFit) });
+    }
+
     const existing = db.prepare(`
       SELECT id FROM tasks
       WHERE user_id = ? AND type = 'hls-convert' AND status IN ('processing', 'pending')
