@@ -37,23 +37,60 @@ const ChunkBlocks = {
       const size = Math.min(sizeW, sizeH);
       if (size > best.size) best = { cols, size, rows };
     }
+
+    best.size = Math.floor(best.size);
+    while (best.size > 0) {
+      const totalW = padding * 2 + best.cols * best.size + gap * (best.cols - 1);
+      const totalH = padding * 2 + best.rows * best.size + gap * (best.rows - 1);
+      if (totalW <= width + 0.5 && totalH <= height + 0.5) break;
+      best.size -= 1;
+    }
     return best;
+  },
+
+  measureFillArea(instance) {
+    const wrap = instance.el;
+    const grid = instance.grid;
+    if (!wrap || !grid) return { width: 0, height: 0 };
+
+    const width = wrap.clientWidth || grid.clientWidth;
+    const header = wrap.querySelector('.chunk-blocks-header');
+    const padding = instance.gridPadding ?? 4;
+    const layout = wrap.closest('.share-cinema-layout, .share-app-frame, main');
+    const viewportBottom = window.visualViewport
+      ? window.visualViewport.offsetTop + window.visualViewport.height
+      : window.innerHeight;
+    const boundsBottom = layout?.getBoundingClientRect().bottom ?? viewportBottom;
+    const maxBottom = Math.min(boundsBottom, viewportBottom);
+    const top = header?.getBoundingClientRect().bottom ?? wrap.getBoundingClientRect().top;
+    const height = Math.max(0, maxBottom - top - padding);
+
+    return { width, height };
   },
 
   reflowGrid(instance) {
     if (!instance?.fill || !instance.grid) return;
-    const { grid, blocks, el: wrap } = instance;
+    const { grid, blocks } = instance;
     const gap = instance.gridGap ?? 2;
     const padding = instance.gridPadding ?? 4;
-    let width = grid.clientWidth;
-    let height = grid.clientHeight;
-    if (height < 8 && wrap) {
-      const header = wrap.querySelector('.chunk-blocks-header');
-      height = wrap.clientHeight - (header?.offsetHeight ?? 0);
-    }
-    const { cols, size } = this.computeSquareGrid(blocks.length, width, height, gap, padding);
+    const { width, height } = this.measureFillArea(instance);
+    if (width < 1 || height < 1) return;
+
+    const { cols, size, rows } = this.computeSquareGrid(blocks.length, width, height, gap, padding);
     if (size < 1) return;
 
+    const key = `${width}|${height}|${cols}|${size}`;
+    if (instance._lastReflowKey === key) return;
+    instance._lastReflowKey = key;
+
+    const contentH = padding * 2 + rows * size + gap * (rows - 1);
+    const gridH = Math.min(height, contentH);
+
+    grid.style.flex = '1 1 0';
+    grid.style.height = `${Math.floor(gridH)}px`;
+    grid.style.maxHeight = `${Math.floor(height)}px`;
+    grid.style.width = '100%';
+    grid.style.boxSizing = 'border-box';
     grid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
     grid.style.gridAutoRows = `${size}px`;
     grid.style.justifyContent = 'center';
@@ -64,6 +101,7 @@ const ChunkBlocks = {
     if (!instance.fill || !instance.grid) return;
     instance._reflow = () => this.reflowGrid(instance);
     instance._reflow();
+    requestAnimationFrame(() => instance._reflow());
     if (typeof ResizeObserver !== 'undefined') {
       instance._ro = new ResizeObserver(() => {
         if (instance.rafReflow) cancelAnimationFrame(instance.rafReflow);
@@ -72,8 +110,15 @@ const ChunkBlocks = {
           this.reflowGrid(instance);
         });
       });
-      instance._ro.observe(instance.grid);
-      if (instance.el) instance._ro.observe(instance.el);
+      for (const node of [
+        instance.el,
+        instance.el?.closest('#share-stats, .viewer-stats'),
+        instance.el?.closest('.share-dock-stats'),
+        instance.el?.closest('.share-cinema-dock'),
+        instance.el?.closest('.share-cinema-layout'),
+      ]) {
+        if (node) instance._ro.observe(node);
+      }
     } else {
       window.addEventListener('resize', instance._reflow);
     }

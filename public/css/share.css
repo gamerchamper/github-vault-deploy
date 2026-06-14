@@ -433,8 +433,9 @@ body.share-cinema-active .share-dock-stats .viewer-stat-bar-fill {
 }
 
 body.share-cinema-active .share-dock-stats .chunk-blocks-wrap {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  max-height: 100%;
   margin: 0;
   width: 100%;
   display: flex;
@@ -463,9 +464,9 @@ body.share-cinema-active .share-dock-stats .chunk-blocks-meta {
 }
 
 body.share-cinema-active .share-dock-stats .chunk-blocks-grid {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-  max-height: none;
+  max-height: 100%;
   gap: 2px;
   padding: 4px;
   background: var(--bg-primary);
@@ -474,6 +475,7 @@ body.share-cinema-active .share-dock-stats .chunk-blocks-grid {
   overflow: hidden;
   align-content: center;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 body.share-cinema-active .share-dock-stats .chunk-blocks-grid.chunk-blocks-grid--fill {
@@ -1488,6 +1490,23 @@ body.share-player-fullscreen .shoutbox-open-btn {
   color: var(--text-primary);
 }
 
+#share-stats.viewer-stats:has(.chunk-blocks-grid--fill),
+.share-dock-stats .viewer-stats:has(.chunk-blocks-grid--fill) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.share-dock-stats .chunk-blocks-wrap:has(.chunk-blocks-grid--fill) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .share-dock-stats .viewer-stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
@@ -1538,13 +1557,15 @@ body.share-player-fullscreen .shoutbox-open-btn {
 
 .share-dock-stats .chunk-blocks-grid.chunk-blocks-grid--fill {
   display: grid;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  max-height: 100%;
   gap: 2px;
   padding: 4px;
   overflow: hidden;
   align-content: center;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .share-dock-stats .chunk-blocks-grid.chunk-blocks-grid--fill .chunk-block {
