@@ -1,5 +1,5 @@
-const CACHE = 'vault-share-v10';
-const LEGACY_CACHES = ['vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
+const CACHE = 'vault-share-v11';
+const LEGACY_CACHES = ['vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
 
 const STATIC_ASSETS = [
   '/css/explorer.css',
@@ -70,13 +70,15 @@ self.addEventListener('fetch', (event) => {
 
   if (isCacheableAsset(url)) {
     event.respondWith(
-      caches.match(event.request).then((cached) => cached || fetch(event.request).then((res) => {
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE).then((c) => c.put(event.request, clone)).catch(() => {});
-        }
-        return res;
-      }))
+      fetch(event.request)
+        .then((res) => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then((c) => c.put(event.request, clone)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }
