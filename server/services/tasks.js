@@ -44,6 +44,7 @@ function update(taskId, userId, patch) {
     'fileId', 'parentPath', 'chunkSize', 'fileSize', 'mimeType', 'resumable', 'fileName', 'nextChunk', 'uploadMode', 'convertHls',
     'accountId', 'method', 'log', 'lastLog', 'gitBytesStaged', 'gitRepos', 'names', 'pauseReason',
     'segmentsDone', 'segmentsTotal',
+    'seamlessPartSize', 'seamlessPartsTotal', 'seamlessPartsDone', 'seamlessPartsReceived', 'hlsTaskId',
   ];
 
   for (const key of payloadKeys) {

@@ -147,8 +147,16 @@ function getFileKey(userId, file) {
   return crypto.deserializeEncryption(encryptionMeta, masterKey);
 }
 
-async function assembleFile(userId, fileId, file, workDir, onProgress) {
+async function assembleFile(userId, fileId, file, workDir, onProgress, options = {}) {
   const outPath = path.join(workDir, 'source.mp4');
+  const localSource = options.localSourcePath;
+  if (localSource && fs.existsSync(localSource)) {
+    if (onProgress) {
+      onProgress({ phase: 'assembling', percent: 5, lastLog: 'Using seamless server cache for HLS conversion...' });
+    }
+    fs.copyFileSync(localSource, outPath);
+    return outPath;
+  }
   const cached = cache.get(userId, fileId);
   if (cached?.path && fs.existsSync(cached.path)) {
     fs.copyFileSync(cached.path, outPath);
@@ -416,7 +424,7 @@ function getHlsRepos(userId) {
   `).all(userId, REPO_CAPACITY_BYTES);
 }
 
-async function convertFile(userId, fileId, onProgress, taskId = null) {
+async function convertFile(userId, fileId, onProgress, taskId = null, options = {}) {
   hlsLog(`convertFile called userId=${userId} fileId=${fileId}`);
   const job = ensureJob(userId, fileId);
   job.cancelled = false;
@@ -505,7 +513,7 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
       if (onProgress) onProgress({ phase: 'assembling', percent: 5, lastLog: 'Assembling file from chunks...' });
       hlsLog('Assembling file from chunks...');
       assertNotCancelled(job);
-      const inputPath = await assembleFile(userId, fileId, file, workDir, onProgress);
+      const inputPath = await assembleFile(userId, fileId, file, workDir, onProgress, options);
       hlsLog(`Assembled file at ${inputPath}`);
 
       if (onProgress) onProgress({ phase: 'converting', percent: 30, lastLog: 'Running FFmpeg HLS conversion...' });

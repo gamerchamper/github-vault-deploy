@@ -68,7 +68,7 @@ const UploadStore = {
       mimeType: file.type || 'application/octet-stream',
       parentPath: parentPath || '/',
       chunkSize,
-      uploadMode: uploadMode === 'git' ? 'git' : 'api',
+      uploadMode: uploadMode === 'git' ? 'git' : uploadMode === 'seamless' ? 'seamless' : 'api',
       convertHls,
       totalChunks: 0,
       chunksDone: 0,

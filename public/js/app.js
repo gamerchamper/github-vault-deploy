@@ -580,8 +580,8 @@ const App = {
       if (gitOption) {
         gitOption.disabled = !this.gitAvailable;
         if (!this.gitAvailable && uploadMode.value === 'git') {
-          uploadMode.value = 'api';
-          UploadPrefs.set('api');
+          uploadMode.value = 'seamless';
+          UploadPrefs.set('seamless');
         }
       }
     } catch {
@@ -1652,7 +1652,12 @@ const App = {
               <div><span class="plan-label">Pool free</span><span>${formatSize(plan.storageAvailableBytes)}</span></div>
             </div>` : ''}
             <p class="plan-note">GitHub Contents API limit: ${plan.githubMaxMb} MB per stored file.</p>
-            <p class="plan-note">Upload method: <strong>${selectedMode === 'git' ? 'Git clone & push' : 'API chunks (resumable)'}</strong></p>
+            <p class="plan-note">Upload method: <strong>${selectedMode === 'seamless'
+              ? 'Seamless Upload — stream to server cache, auto encrypt/upload/HLS with retry'
+              : selectedMode === 'git' ? 'Git clone & push' : 'API chunks (resumable)'}</strong></p>
+            ${selectedMode === 'seamless'
+              ? '<p class="plan-note">Seamless uses 16 MB parallel parts to the server; encryption chunk size above applies to GitHub storage.</p>'
+              : ''}
             ${plan.repoCount > 0 ? `<h4>Distribution</h4>
             <div class="plan-repos">${Object.entries(plan.perRepo).map(([r, n]) =>
               `<div class="plan-repo-row"><span>${r}</span><span>${n} chunks</span></div>`
@@ -1718,7 +1723,19 @@ const App = {
       await API.files.upload(file, explorer.currentPath, chunkSize, convertHls, (job) => {
         const pct = job.percent || 0;
         let status = 'Processing...';
-        if (job.phase === 'encrypt') status = 'Encrypting...';
+        if (job.uploadMode === 'seamless') {
+          if (job.phase === 'receiving' && job.seamlessPartsTotal) {
+            status = `Caching ${job.seamlessPartsDone || 0}/${job.seamlessPartsTotal} on server`;
+          } else if (job.phase === 'processing') {
+            status = 'Server processing (encrypt & upload)...';
+          } else if (job.phase === 'upload' && job.chunksTotal) {
+            status = `Server uploading ${job.chunksDone || 0}/${job.chunksTotal}`;
+          } else if (job.phase === 'hls-convert') {
+            status = 'Converting to HLS on server...';
+          } else if (job.phase === 'metadata' || job.phase === 'thumbnail') {
+            status = 'Finalizing...';
+          }
+        } else if (job.phase === 'encrypt') status = 'Encrypting...';
         else if (job.phase === 'git-push') status = 'Pushing via git...';
         else if (job.phase === 'upload' && job.chunksTotal) {
           status = `Chunk ${job.chunksDone}/${job.chunksTotal}`;

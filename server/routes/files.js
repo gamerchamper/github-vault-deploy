@@ -12,6 +12,7 @@ const { recordBytes } = require('../services/bandwidth');
 const hlsStream = require('../services/hls-stream');
 const tasks = require('../services/tasks');
 const hlsConvert = require('../services/hls-convert');
+const seamlessUpload = require('../services/seamless-upload');
 const { REPO_CAPACITY_BYTES } = require('../services/capacity');
 const logger = require('../lib/logger');
 const audit = require('../services/audit');
@@ -29,6 +30,7 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 * 1024 } });
 const chunkUpload = multer({ dest: uploadDir, limits: { fileSize: 100 * 1024 * 1024 } });
+const seamlessPartUpload = multer({ dest: uploadDir, limits: { fileSize: 32 * 1024 * 1024 } });
 const thumbUpload = multer({ dest: uploadDir, limits: { fileSize: 8 * 1024 * 1024, files: 50 } });
 const router = express.Router();
 
@@ -693,6 +695,155 @@ router.get('/upload/session/:fileId/chunks', (req, res) => {
     const indices = storage.getUploadedChunkIndices(req.params.fileId);
     res.json({ fileId: req.params.fileId, indices, count: indices.length });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/upload/seamless/init', async (req, res) => {
+  try {
+    const {
+      fileName, path, parentPath: parentPathField, size, mimeType, chunkSize, fileId, taskId,
+    } = req.body;
+    const parentPath = parentPathField || path || '/';
+    if (!fileName || !size) return res.status(400).json({ error: 'fileName and size required' });
+
+    const convertHls = !!(
+      req.body.convertHls
+      && (mimeType?.startsWith('video/') || /\.mp4$/i.test(fileName || ''))
+    );
+    if (convertHls) {
+      const ffmpegOk = await hlsConvert.isFfmpegAvailable();
+      if (!ffmpegOk) {
+        return res.status(400).json({ error: 'HLS conversion requires FFmpeg on the server' });
+      }
+    }
+
+    const session = await seamlessUpload.initSeamlessUpload(req.user.id, {
+      fileName,
+      parentPath,
+      size: parseInt(size, 10),
+      mimeType,
+      chunkSize: parseInt(chunkSize, 10) || storage.CHUNK_SIZE,
+      fileId,
+      convertHls,
+      taskId,
+    });
+
+    res.json({
+      ...session,
+      feedback: getStorageFeedback(req.user.id, null, tasks.get(session.jobId, req.user.id)),
+    });
+  } catch (err) {
+    logger.warn('seamless_init_failed', { userId: req.user.id, error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/upload/seamless/part', seamlessPartUpload.single('part'), async (req, res) => {
+  const taskId = req.body.taskId;
+  const fileId = req.body.fileId;
+  const partIndex = parseInt(req.body.partIndex, 10);
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No part provided' });
+    if (!fileId) return res.status(400).json({ error: 'fileId required' });
+
+    const buffer = fs.readFileSync(req.file.path);
+    fs.unlinkSync(req.file.path);
+
+    if (taskId) {
+      const existing = tasks.get(taskId, req.user.id);
+      if (existing?.status === 'paused') {
+        return res.status(409).json({ error: 'Upload is paused' });
+      }
+    }
+
+    const result = await seamlessUpload.writeSeamlessPart(
+      req.user.id,
+      fileId,
+      partIndex,
+      buffer,
+      taskId
+    );
+
+    res.json({
+      ...result,
+      feedback: getStorageFeedback(req.user.id, null, taskId ? tasks.get(taskId, req.user.id) : null),
+    });
+  } catch (err) {
+    logger.error('seamless_part_failed', {
+      userId: req.user.id, fileId, partIndex, taskId, error: err.message,
+    });
+    if (taskId) {
+      tasks.update(taskId, req.user.id, { status: 'error', error: err.message, resumable: true });
+      tasks.appendLog(taskId, req.user.id, `Part ${partIndex} failed: ${err.message}`);
+    }
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/upload/seamless/complete', async (req, res) => {
+  const { fileId, taskId } = req.body;
+  try {
+    if (!fileId) return res.status(400).json({ error: 'fileId required' });
+    const convertHls = req.body.convertHls === '1' || req.body.convertHls === true || req.body.convertHls === 'true';
+    const result = await seamlessUpload.completeSeamlessReceive(
+      req.user.id,
+      fileId,
+      taskId,
+      { convertHls }
+    );
+    res.json(result);
+  } catch (err) {
+    logger.error('seamless_complete_failed', {
+      userId: req.user.id, fileId, taskId, error: err.message,
+    });
+    if (taskId) {
+      tasks.update(taskId, req.user.id, { status: 'error', error: err.message, resumable: true });
+      tasks.appendLog(taskId, req.user.id, `Seamless complete failed: ${err.message}`);
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/upload/seamless/status/:fileId', (req, res) => {
+  try {
+    const status = seamlessUpload.getSeamlessStatus(req.user.id, req.params.fileId);
+    if (!status) return res.status(404).json({ error: 'Seamless upload not found' });
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/upload/seamless/resume', async (req, res) => {
+  const { fileId, taskId } = req.body;
+  try {
+    if (!fileId) return res.status(400).json({ error: 'fileId required' });
+    const status = seamlessUpload.getSeamlessStatus(req.user.id, fileId);
+    if (!status) return res.status(404).json({ error: 'Seamless upload not found' });
+    if (!status.stagingComplete) {
+      return res.status(400).json({
+        error: 'File not fully cached on server yet',
+        missingParts: status.missingParts,
+      });
+    }
+    const convertHls = req.body.convertHls === '1' || req.body.convertHls === true || req.body.convertHls === 'true';
+    const result = await seamlessUpload.completeSeamlessReceive(
+      req.user.id,
+      fileId,
+      taskId || status.taskId,
+      { convertHls }
+    );
+    res.json(result);
+  } catch (err) {
+    logger.error('seamless_resume_failed', {
+      userId: req.user.id, fileId, taskId, error: err.message,
+    });
+    if (taskId) {
+      tasks.update(taskId, req.user.id, { status: 'error', error: err.message, resumable: true });
+      tasks.appendLog(taskId, req.user.id, `Seamless resume failed: ${err.message}`);
+    }
     res.status(500).json({ error: err.message });
   }
 });

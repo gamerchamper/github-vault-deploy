@@ -254,7 +254,9 @@ function authHelpMessage(status, owner, repo) {
   if (status === 403) {
     return [
       `Token is valid but cannot write to ${owner}/${repo}.`,
-      '- For private repos, ensure the PAT has repo / Contents write access',
+      '- Classic PAT: enable the full "repo" scope (not read-only)',
+      '- Fine-grained PAT: grant this repository access + Contents: Read and write',
+      '- Confirm you are owner/collaborator with push permission on the deploy repo',
       '- For org-owned repos, authorize the token for SSO on the token settings page',
     ].join('\n');
   }
@@ -283,6 +285,16 @@ async function verifyDeployAccess(octokit, owner, repo) {
       `Repo ${repoInfo.full_name} (${repoInfo.private ? 'private' : 'public'})`
       + ` — default branch: ${repoInfo.default_branch || 'main'}`
     );
+    const perms = repoInfo.permissions || {};
+    if (perms.push === false && perms.admin === false) {
+      throw new Error([
+        `Token can read ${owner}/${repo} but does not have push permission.`,
+        'Create a new PAT with write access:',
+        '- Classic: check the "repo" scope (full control of private repositories)',
+        '- Fine-grained: select this repo + Contents → Read and write',
+        'Then set GITHUB_DEPLOY_TOKEN (avoid passing --token on the command line).',
+      ].join('\n'));
+    }
     return repoInfo;
   } catch (err) {
     const help = authHelpMessage(err?.status, owner, repo);

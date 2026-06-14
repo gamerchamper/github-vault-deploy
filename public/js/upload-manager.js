@@ -332,6 +332,8 @@ const UploadManager = {
         fileSize: remote.fileSize ?? session.fileSize,
         mimeType: remote.mimeType || session.mimeType,
         uploadMode: remote.uploadMode || session.uploadMode,
+        seamlessPartsDone: remote.seamlessPartsDone ?? session.seamlessPartsDone ?? 0,
+        seamlessPartsTotal: remote.seamlessPartsTotal ?? session.seamlessPartsTotal ?? 0,
       });
     }
     TaskPanel.render();

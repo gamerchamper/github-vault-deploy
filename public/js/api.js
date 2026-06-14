@@ -32,6 +32,9 @@ const API = {
   },
 
   async upload(file, path, chunkSize, convertHls, onProgress, uploadMode = 'api') {
+    if (uploadMode === 'seamless') {
+      return SeamlessUpload.start(file, path, chunkSize, convertHls, onProgress);
+    }
     return UploadManager.start(file, path, chunkSize, convertHls, onProgress, uploadMode);
   },
 
@@ -103,6 +106,37 @@ const API = {
       API.uploadChunk(fileId, chunkIndex, blob, taskId, uploadMode, signal),
     uploadComplete: (fileId, taskId, preview, uploadMode, convertHls) =>
       API.uploadComplete(fileId, taskId, preview, uploadMode, convertHls),
+    seamlessInit: (data) => API.post('/api/files/upload/seamless/init', data),
+    seamlessPart: async (fileId, partIndex, blob, taskId) => {
+      const form = new FormData();
+      form.append('part', blob, `part-${partIndex}`);
+      form.append('fileId', fileId);
+      form.append('partIndex', String(partIndex));
+      form.append('taskId', taskId);
+      const res = await fetch('/api/files/upload/seamless/part', {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Seamless part upload failed' }));
+        throw new Error(err.error || 'Seamless part upload failed');
+      }
+      return res.json();
+    },
+    seamlessComplete: (fileId, taskId, convertHls = false) =>
+      API.post('/api/files/upload/seamless/complete', {
+        fileId,
+        taskId,
+        convertHls: convertHls ? '1' : '0',
+      }),
+    seamlessStatus: (fileId) => API.get(`/api/files/upload/seamless/status/${fileId}`),
+    seamlessResume: (fileId, taskId, convertHls = false) =>
+      API.post('/api/files/upload/seamless/resume', {
+        fileId,
+        taskId,
+        convertHls: convertHls ? '1' : '0',
+      }),
     uploadCancel: (fileId, taskId) => API.post('/api/files/upload/cancel', { fileId, taskId }),
     uploadSession: (fileId) => API.get(`/api/files/upload/session/${fileId}`),
     refreshThumbnail: async (id) => {
@@ -378,10 +412,13 @@ const UploadPrefs = {
   KEY: 'vault-upload-mode',
   get() {
     const mode = localStorage.getItem(this.KEY);
-    return mode === 'git' ? 'git' : 'api';
+    if (mode === 'git') return 'git';
+    if (mode === 'api') return 'api';
+    return 'seamless';
   },
   set(mode) {
-    localStorage.setItem(this.KEY, mode === 'git' ? 'git' : 'api');
+    const stored = mode === 'git' ? 'git' : mode === 'api' ? 'api' : 'seamless';
+    localStorage.setItem(this.KEY, stored);
   },
 };
 

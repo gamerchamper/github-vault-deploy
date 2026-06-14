@@ -936,6 +936,7 @@ async function cancelUploadSession(userId, fileId) {
     'SELECT * FROM files WHERE id = ? AND user_id = ? AND upload_status IN (\'uploading\', \'failed\')'
   ).get(fileId, userId);
   if (!file) return;
+  try { require('./seamless-upload').cleanupStaging(userId, fileId); } catch {}
   require('./git-upload').cleanupWorkspace(userId, fileId);
   await deleteFile(userId, fileId);
 }
@@ -2436,6 +2437,7 @@ module.exports = {
   GB,
   MB,
   getUploadedChunkIndices,
+  getUploadedChunkCount,
   getChunkSizeForFile,
   verifyFileChunksOnGitHub,
   repairFileChunk,

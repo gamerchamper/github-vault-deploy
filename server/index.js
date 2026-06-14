@@ -227,6 +227,8 @@ app.listen(PORT, () => {
     hlsConvert.resumeInterruptedConversions();
     const stale = tasks.cleanupStaleHlsConvertTasks();
     if (stale > 0) console.log(`[HLS] Marked ${stale} interrupted conversion task(s) as cancelled`);
+    const seamless = require('./services/seamless-upload');
+    seamless.resumePendingOnStartup();
   } catch (err) {
     console.warn('HLS recovery check skipped:', err.message);
   }

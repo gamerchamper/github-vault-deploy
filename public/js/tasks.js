@@ -255,6 +255,8 @@ const TaskPanel = {
       convertHls: task.convertHls ?? session.convertHls ?? false,
       chunksDone: task.chunksDone ?? session.chunksDone ?? 0,
       totalChunks: task.chunksTotal ?? session.totalChunks ?? 0,
+      seamlessPartsDone: task.seamlessPartsDone ?? session.seamlessPartsDone ?? 0,
+      seamlessPartsTotal: task.seamlessPartsTotal ?? session.seamlessPartsTotal ?? 0,
     };
   },
 
@@ -297,6 +299,19 @@ const TaskPanel = {
       }
 
       let fileOverride = null;
+      const mode = session.uploadMode || task?.uploadMode || 'api';
+
+      if (mode === 'seamless' && session.fileId) {
+        const status = await API.files.seamlessStatus(session.fileId).catch(() => null);
+        if (status?.stagingComplete) {
+          await API.tasks.resume(taskId).catch(() => {});
+          await API.files.seamlessResume(session.fileId, taskId, !!session.convertHls);
+          App.toast(`Resuming server processing for ${task?.title || session.fileName}`, 'success');
+          TaskPanel.track(taskId);
+          return;
+        }
+      }
+
       if (!session.file) {
         const file = await UploadManager.pickFileForResume(session);
         if (!file) return;
@@ -309,7 +324,11 @@ const TaskPanel = {
 
       await UploadStore.save({ ...session, file: fileOverride || session.file });
       App.toast(`Resuming ${task?.title || session.fileName || 'upload'}`, 'success');
-      await UploadManager.resume(taskId, fileOverride, (job) => this.handleTask(job));
+      if (mode === 'seamless') {
+        await SeamlessUpload.resume(taskId, fileOverride, (job) => this.handleTask(job));
+      } else {
+        await UploadManager.resume(taskId, fileOverride, (job) => this.handleTask(job));
+      }
     } catch (err) {
       console.error('Resume upload failed:', taskId, err);
       const msg = err?.message || (err != null ? String(err) : 'Resume failed — select the same file and try again');
@@ -504,6 +523,17 @@ const TaskPanel = {
         return `${task.error || 'Interrupted'}${pos}`;
       }
       if (task.phase === 'encrypt') return 'Encrypting...';
+      if (task.uploadMode === 'seamless') {
+        if (task.phase === 'receiving' && task.seamlessPartsTotal) {
+          return `Caching on server ${task.seamlessPartsDone || 0}/${task.seamlessPartsTotal}`;
+        }
+        if (task.phase === 'processing') return 'Server processing from cache...';
+        if (task.phase === 'upload' && task.chunksTotal) {
+          return `Server uploading ${task.chunksDone || 0}/${task.chunksTotal}`;
+        }
+        if (task.phase === 'hls-convert') return 'Converting to HLS on server...';
+        if (task.pauseReason) return task.pauseReason;
+      }
       if (task.phase === 'upload' && task.chunksTotal) {
         if (task.uploadMode === 'git') {
           let status = `Staging locally ${task.chunksDone}/${task.chunksTotal} (git push at end)`;
@@ -614,7 +644,12 @@ const TaskPanel = {
       ['Updated', this.formatTime(task.updated_at)],
     ];
     if (task.type === 'upload') {
-      rows.push(['Mode', task.uploadMode === 'git' ? 'Git (local staging)' : 'GitHub API']);
+      rows.push(['Mode', task.uploadMode === 'seamless'
+        ? 'Seamless (server cache)'
+        : task.uploadMode === 'git' ? 'Git (local staging)' : 'GitHub API']);
+      if (task.uploadMode === 'seamless' && task.seamlessPartsTotal) {
+        rows.push(['Server cache', `${task.seamlessPartsDone || 0} / ${task.seamlessPartsTotal} parts`]);
+      }
       if (task.chunksTotal) rows.push(['Chunks', `${task.chunksDone || 0} / ${task.chunksTotal}`]);
       if (task.currentRepo) rows.push(['Repo', task.currentRepo]);
       if (task.uploadMode === 'git' && task.gitBytesStaged) {
