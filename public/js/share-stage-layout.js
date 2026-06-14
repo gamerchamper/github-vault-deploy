@@ -91,30 +91,41 @@ const ShareStageLayout = {
       ?? this.getViewport().width;
   },
 
-  getShellContentWidth() {
-    const shell = document.querySelector('.share-shell');
-    if (shell?.clientWidth > 0) return shell.clientWidth;
-    const frameW = this.getAppFrameWidth();
-    if (this.isRailOpen() && !document.body.classList.contains('share-rail-stack')) {
-      return Math.max(this.minWidth(), frameW - this.getRailWidth());
-    }
-    return frameW;
-  },
-
   getSideBySideMaxStageWidth() {
-    return Math.max(this.minWidth(), this.getShellContentWidth());
+    const minW = this.minWidth();
+    const layout = this.panel?.parentElement;
+    const railW = this.isRailOpen() ? this.getRailWidth() : 0;
+    const margin = 8;
+
+    // When stacked, measure the old side-by-side limit (not the expanded full-width column).
+    if (document.body.classList.contains('share-rail-stack') && railW > 0) {
+      return Math.max(minW, this.getAppFrameWidth() - railW - margin);
+    }
+
+    if (layout?.clientWidth > 0) {
+      return Math.max(minW, layout.clientWidth);
+    }
+
+    if (railW > 0) {
+      return Math.max(minW, this.getAppFrameWidth() - railW - margin);
+    }
+
+    return Math.max(minW, this.getAppFrameWidth() - margin);
   },
 
-  shouldStackRail(stageWidth) {
+  shouldStackRail(stageWidth, layout = null) {
     if (!this.panel?.classList.contains('share-stage-user-sized')) return false;
     if (!this.isRailOpen()) return false;
 
-    // Shell already reserves side-rail space — stack only when the stage is wider than that column.
     const maxSideBySideStage = this.getSideBySideMaxStageWidth();
+    const widthSized = layout?.widthSized ?? this.read()?.widthSized;
 
     if (this._stackMode) {
       return stageWidth > maxSideBySideStage - this.STACK_HYSTERESIS;
     }
+
+    // Vertical-only resize keeps the stage at column width — don't stack unless widened horizontally.
+    if (!widthSized && stageWidth <= maxSideBySideStage + 1) return false;
     return stageWidth > maxSideBySideStage;
   },
 
@@ -239,7 +250,7 @@ const ShareStageLayout = {
     let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? offsetTop + margin;
 
     let maxW = Math.max(minW, viewRight - offsetLeft - margin * 2 - outset);
-    if (this.isRailOpen() && layout.userSized !== false && !this.shouldStackRail(width)) {
+    if (this.isRailOpen() && layout.userSized !== false && !this.shouldStackRail(width, layout)) {
       maxW = Math.min(maxW, this.getSideBySideMaxStageWidth());
     }
     const maxH = Math.max(minH, viewBottom - top - margin - outset);
@@ -256,6 +267,8 @@ const ShareStageLayout = {
       left: Math.round(left),
       top: Math.round(top),
       userSized: true,
+      widthSized: layout.widthSized ?? this.read()?.widthSized ?? false,
+      heightSized: layout.heightSized ?? this.read()?.heightSized ?? false,
     };
   },
 
@@ -275,7 +288,7 @@ const ShareStageLayout = {
       return;
     }
 
-    this._stackMode = this.shouldStackRail(width);
+    this._stackMode = this.shouldStackRail(width, clamped);
     this._stackColumn = this.shouldStackRailColumn(width);
 
     document.body.classList.toggle('share-rail-stack', this._stackMode);
