@@ -228,7 +228,13 @@ const ShareStageLayout = {
     let left = layout.left ?? (parent?.left ?? offsetLeft) + margin;
     let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? offsetTop + margin;
 
-    const maxW = Math.max(minW, viewRight - offsetLeft - margin * 2 - outset);
+    let maxW = Math.max(minW, viewRight - offsetLeft - margin * 2 - outset);
+    if (this.isRailOpen() && layout.userSized !== false) {
+      const sideBySideLimit = this.getAppFrameWidth() - this.getRailWidth() - 12 - margin;
+      if (!this.shouldStackRail(width)) {
+        maxW = Math.min(maxW, Math.max(minW, sideBySideLimit));
+      }
+    }
     const maxH = Math.max(minH, viewBottom - top - margin - outset);
     width = Math.min(width, maxW);
     height = Math.min(height, maxH);

@@ -287,6 +287,10 @@ body.share-cinema-active.share-rail-stack .share-app-frame {
 body.share-cinema-active.share-shoutbox-open .share-shell,
 body.share-cinema-active.share-playlist-active .share-shell {
   padding-right: 0 !important;
+}
+
+body.share-cinema-active.share-rail-stack.share-shoutbox-open .share-shell,
+body.share-cinema-active.share-rail-stack.share-playlist-active .share-shell {
   margin-right: 0 !important;
 }
 
@@ -1504,6 +1508,11 @@ body.share-playlist-active .share-playlist-panel .playlist-panel-list {
   body.share-playlist-active .share-shell {
     margin-right: var(--share-right-rail-width);
     transition: margin-right 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  body.share-cinema-active.share-shoutbox-open:not(.share-rail-stack) .share-shell,
+  body.share-cinema-active.share-playlist-active:not(.share-rail-stack) .share-shell {
+    margin-right: var(--share-right-rail-width);
   }
 
   body.share-rail-stack.share-shoutbox-open .share-shell,
