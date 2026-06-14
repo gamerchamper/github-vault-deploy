@@ -58,13 +58,42 @@ const MediaPlayer = {
     return v;
   },
 
-  syncBoostVolumeUi(input, level) {
+  syncBoostVolumeUi(input, level, tooltip) {
     if (!input) return;
     const pct = Math.round(level * 100);
     input.value = String(level);
     input.style.setProperty('--value', `${(level / this.VOLUME_MAX) * 100}%`);
     input.setAttribute('aria-valuenow', String(pct));
     input.setAttribute('aria-valuetext', `${pct}%`);
+    if (tooltip) {
+      tooltip.textContent = `${pct}%`;
+      this.positionVolumeTooltip(input, tooltip, level);
+    }
+  },
+
+  ensureVolumeTooltip(input) {
+    const wrap = input?.closest('.plyr__volume');
+    if (!wrap) return null;
+    let tooltip = wrap.querySelector('.vault-volume-tooltip');
+    if (!tooltip) {
+      tooltip = document.createElement('span');
+      tooltip.className = 'plyr__tooltip vault-volume-tooltip';
+      tooltip.setAttribute('role', 'tooltip');
+      wrap.appendChild(tooltip);
+    }
+    wrap.classList.add('vault-volume-boost');
+    return tooltip;
+  },
+
+  positionVolumeTooltip(input, tooltip, level) {
+    if (!input || !tooltip) return;
+    const wrap = input.closest('.plyr__volume');
+    if (!wrap) return;
+    const rect = input.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, level / this.VOLUME_MAX));
+    const x = rect.left - wrapRect.left + ratio * rect.width;
+    tooltip.style.left = `${x}px`;
   },
 
   enableVolumeBoost(plyr) {
@@ -78,40 +107,81 @@ const MediaPlayer = {
       input.step = '0.01';
 
       const graph = this.ensureVolumeGraph(media);
+      const tooltip = this.ensureVolumeTooltip(input);
       let level = this.readStoredVolume();
+      let dragging = false;
 
-      const setVolume = (value, { persist = true } = {}) => {
+      const showTooltip = () => {
+        if (!tooltip) return;
+        this.syncBoostVolumeUi(input, level, tooltip);
+        tooltip.classList.add('plyr__tooltip--visible');
+      };
+
+      const hideTooltip = () => {
+        if (dragging) return;
+        tooltip?.classList.remove('plyr__tooltip--visible');
+      };
+
+      const setVolume = (value, { persist = true, showTip = false } = {}) => {
         level = this.applyBoostVolume(media, graph, value);
-        this.syncBoostVolumeUi(input, level);
+        this.syncBoostVolumeUi(input, level, tooltip);
         if (persist) this.writeStoredVolume(level);
+        if (showTip) showTooltip();
       };
 
       setVolume(level, { persist: false });
 
       input.addEventListener('input', (e) => {
         e.stopImmediatePropagation();
-        setVolume(parseFloat(input.value));
+        setVolume(parseFloat(input.value), { showTip: true });
       }, true);
 
       input.addEventListener('change', (e) => {
         e.stopImmediatePropagation();
-        setVolume(parseFloat(input.value));
+        setVolume(parseFloat(input.value), { showTip: true });
       }, true);
 
+      input.addEventListener('pointerdown', () => {
+        dragging = true;
+        showTooltip();
+      });
+      input.addEventListener('pointerup', () => {
+        dragging = false;
+        hideTooltip();
+      });
+      input.addEventListener('pointercancel', () => {
+        dragging = false;
+        hideTooltip();
+      });
+      input.addEventListener('mouseenter', showTooltip);
+      input.addEventListener('mousemove', showTooltip);
+      input.addEventListener('mouseleave', hideTooltip);
+      input.addEventListener('focus', showTooltip);
+      input.addEventListener('blur', () => {
+        dragging = false;
+        hideTooltip();
+      });
+
       plyr.on('volumechange', () => {
-        if (media.muted) {
-          if (graph) graph.gain.gain.value = 0;
-          return;
-        }
-        const fromSlider = parseFloat(input.value);
-        if (Number.isFinite(fromSlider) && Math.abs(fromSlider - level) > 0.001) {
-          setVolume(fromSlider);
-          return;
-        }
-        setVolume(level, { persist: false });
+        requestAnimationFrame(() => {
+          if (media.muted) {
+            if (graph) graph.gain.gain.value = 0;
+            if (tooltip?.classList.contains('plyr__tooltip--visible')) {
+              tooltip.textContent = '0%';
+            }
+            return;
+          }
+          const fromSlider = parseFloat(input.value);
+          if (Number.isFinite(fromSlider) && Math.abs(fromSlider - level) > 0.001) {
+            setVolume(fromSlider, { persist: false });
+            return;
+          }
+          setVolume(level, { persist: false });
+        });
       });
 
       plyr.on('destroy', () => {
+        tooltip?.remove();
         this.getVolumeGraphs().delete(media);
         graph?.ctx?.close?.().catch(() => {});
       });

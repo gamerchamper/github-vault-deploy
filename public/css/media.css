@@ -98,6 +98,37 @@
   box-shadow: var(--shadow-xl);
 }
 
+/* Boosted volume tooltip (vault viewer + share page via explorer.css) */
+.plyr__volume.vault-volume-boost {
+  overflow: visible;
+}
+
+.plyr__volume .vault-volume-tooltip {
+  bottom: calc(100% + 10px);
+  display: none;
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, 6px) scale(0.8);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+  z-index: 30;
+}
+
+.plyr__volume .vault-volume-tooltip.plyr__tooltip--visible {
+  display: block;
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+body.share-cinema-active .share-video-player .plyr__controls,
+body.share-cinema-active .share-audio-player .plyr__controls,
+.share-video-player .plyr__controls,
+.share-audio-player .plyr__controls {
+  overflow: visible;
+}
+
 .viewer-player-wrap video {
   max-height: calc(100vh - 220px);
 }
