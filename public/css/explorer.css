@@ -2559,13 +2559,12 @@ body.viewer-panel-resizing-active[data-viewer-resize-axis="se"] * {
 
 .viewer-resize-overlay-e {
   cursor: ew-resize;
-  border-right: 2px solid transparent;
+  border-left: 2px solid transparent;
 }
 
-.viewer-resize-overlay-s,
-.viewer-resize-overlay-ps {
+.viewer-resize-overlay-s {
   cursor: ns-resize;
-  border-bottom: 2px solid transparent;
+  border-top: 2px solid transparent;
 }
 
 .viewer-resize-overlay-se {
@@ -2574,31 +2573,29 @@ body.viewer-panel-resizing-active[data-viewer-resize-axis="se"] * {
 
 .viewer-resize-overlay-e:hover,
 .viewer-resize-overlay-s:hover,
-.viewer-resize-overlay-ps:hover,
 .viewer-resize-overlay-se:hover {
   background: rgba(74, 158, 255, 0.12);
   box-shadow: 0 0 12px rgba(74, 158, 255, 0.35);
 }
 
 .viewer-resize-overlay-e:hover {
-  border-right-color: rgba(74, 158, 255, 0.85);
+  border-left-color: rgba(74, 158, 255, 0.85);
 }
 
-.viewer-resize-overlay-s:hover,
-.viewer-resize-overlay-ps:hover {
-  border-bottom-color: rgba(74, 158, 255, 0.85);
+.viewer-resize-overlay-s:hover {
+  border-top-color: rgba(74, 158, 255, 0.85);
 }
 
 .viewer-resize-overlay-se::after {
   content: '';
   position: absolute;
-  right: 4px;
-  bottom: 4px;
+  left: 4px;
+  top: 4px;
   width: 10px;
   height: 10px;
-  border-right: 2px solid rgba(255, 255, 255, 0.35);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.35);
-  border-radius: 0 0 3px 0;
+  border-left: 2px solid rgba(255, 255, 255, 0.35);
+  border-top: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 3px 0 0 0;
   pointer-events: none;
 }
 

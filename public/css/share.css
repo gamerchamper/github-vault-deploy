@@ -372,13 +372,12 @@ body.share-stage-resizing-active[data-share-resize-axis="se"] * {
 
 .share-resize-overlay-e {
   cursor: ew-resize;
-  border-right: 2px solid transparent;
+  border-left: 2px solid transparent;
 }
 
-.share-resize-overlay-s,
-.share-resize-overlay-ps {
+.share-resize-overlay-s {
   cursor: ns-resize;
-  border-bottom: 2px solid transparent;
+  border-top: 2px solid transparent;
 }
 
 .share-resize-overlay-se {
@@ -387,31 +386,29 @@ body.share-stage-resizing-active[data-share-resize-axis="se"] * {
 
 .share-resize-overlay-e:hover,
 .share-resize-overlay-s:hover,
-.share-resize-overlay-ps:hover,
 .share-resize-overlay-se:hover {
   background: rgba(74, 158, 255, 0.14);
   box-shadow: 0 0 12px rgba(74, 158, 255, 0.35);
 }
 
 .share-resize-overlay-e:hover {
-  border-right-color: rgba(74, 158, 255, 0.85);
+  border-left-color: rgba(74, 158, 255, 0.85);
 }
 
-.share-resize-overlay-s:hover,
-.share-resize-overlay-ps:hover {
-  border-bottom-color: rgba(74, 158, 255, 0.85);
+.share-resize-overlay-s:hover {
+  border-top-color: rgba(74, 158, 255, 0.85);
 }
 
 .share-resize-overlay-se::after {
   content: '';
   position: absolute;
-  right: 4px;
-  bottom: 4px;
+  left: 4px;
+  top: 4px;
   width: 10px;
   height: 10px;
-  border-right: 2px solid rgba(255, 255, 255, 0.35);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.35);
-  border-radius: 0 0 3px 0;
+  border-left: 2px solid rgba(255, 255, 255, 0.35);
+  border-top: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 3px 0 0 0;
   pointer-events: none;
 }
 

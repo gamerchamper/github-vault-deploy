@@ -7,6 +7,7 @@ const ViewerPanelLayout = {
   MIN_H: 260,
   STRIP: 20,
   CORNER: 28,
+  GAP: 4,
   viewer: null,
   panel: null,
   overlays: null,
@@ -29,7 +30,6 @@ const ViewerPanelLayout = {
     const axes = [
       { id: 'e', cursor: 'ew-resize', title: 'Resize width' },
       { id: 's', cursor: 'ns-resize', title: 'Resize height' },
-      { id: 'ps', cursor: 'ns-resize', title: 'Resize height' },
       { id: 'se', cursor: 'nwse-resize', title: 'Resize · double-click to reset' },
     ];
     this.overlays = {};
@@ -38,7 +38,7 @@ const ViewerPanelLayout = {
       el.className = `viewer-resize-overlay viewer-resize-overlay-${id}`;
       el.style.cursor = cursor;
       el.title = title;
-      el.dataset.axis = id === 'ps' ? 's' : (id === 'se' ? 'se' : id);
+      el.dataset.axis = id === 'se' ? 'se' : id;
       el.addEventListener('pointerdown', (e) => this.onOverlayPointerDown(e, el.dataset.axis));
       if (id === 'se') {
         el.addEventListener('dblclick', (e) => {
@@ -166,41 +166,13 @@ const ViewerPanelLayout = {
     for (const el of Object.values(this.overlays)) el.style.display = 'none';
   },
 
-  getPlyrControlsRect() {
-    const wrap = document.getElementById('viewer-video-wrap')?.classList.contains('hidden')
-      ? document.getElementById('viewer-audio-wrap')
-      : document.getElementById('viewer-video-wrap');
-    if (!wrap || wrap.classList.contains('hidden')) return null;
-    const plyr = wrap.querySelector('.plyr');
-    if (!plyr || plyr.classList.contains('plyr--hide-controls')) return null;
-    const controls = plyr.querySelector('.plyr__controls');
-    if (!controls) return null;
-    const rect = controls.getBoundingClientRect();
-    if (rect.width < 8 || rect.height < 8) return null;
-    return rect;
-  },
-
-  rectsOverlap(a, b) {
-    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-  },
-
-  shouldBlockOverlayPointer(left, top, width, height) {
-    if (this.activeAxis) return false;
-    const controls = this.getPlyrControlsRect();
-    if (!controls) return false;
-    return this.rectsOverlap(
-      { left, top, right: left + width, bottom: top + height },
-      controls
-    );
-  },
-
   placeOverlay(el, left, top, width, height) {
     el.style.display = 'block';
     el.style.left = `${Math.round(left)}px`;
     el.style.top = `${Math.round(top)}px`;
     el.style.width = `${Math.max(1, Math.round(width))}px`;
     el.style.height = `${Math.max(1, Math.round(height))}px`;
-    el.style.pointerEvents = this.shouldBlockOverlayPointer(left, top, width, height) ? 'none' : 'auto';
+    el.style.pointerEvents = 'auto';
   },
 
   syncOverlays() {
@@ -215,26 +187,11 @@ const ViewerPanelLayout = {
 
     const strip = this.STRIP;
     const corner = this.CORNER;
+    const gap = this.GAP;
 
-    this.placeOverlay(this.overlays.e, r.right - strip, r.top, strip, r.height);
-    this.placeOverlay(this.overlays.s, r.left, r.bottom - strip, r.width, strip);
-    this.placeOverlay(this.overlays.se, r.right - corner, r.bottom - corner, corner, corner);
-
-    const videoWrap = document.getElementById('viewer-video-wrap');
-    const audioWrap = document.getElementById('viewer-audio-wrap');
-    const playerWrap = videoWrap && !videoWrap.classList.contains('hidden')
-      ? videoWrap
-      : (audioWrap && !audioWrap.classList.contains('hidden') ? audioWrap : null);
-    if (playerWrap) {
-      const pr = playerWrap.getBoundingClientRect();
-      if (pr.width > 10) {
-        this.placeOverlay(this.overlays.ps, pr.left, pr.bottom - strip, pr.width, strip);
-      } else {
-        this.overlays.ps.style.display = 'none';
-      }
-    } else {
-      this.overlays.ps.style.display = 'none';
-    }
+    this.placeOverlay(this.overlays.e, r.right + gap, r.top, strip, r.height);
+    this.placeOverlay(this.overlays.s, r.left, r.bottom + gap, r.width, strip);
+    this.placeOverlay(this.overlays.se, r.right + gap, r.bottom + gap, corner, corner);
   },
 
   startSyncLoop() {
