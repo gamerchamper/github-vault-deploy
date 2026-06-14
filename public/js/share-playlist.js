@@ -188,10 +188,9 @@ const SharePlaylist = {
       }
     }
 
+    ShareStageLayout?.syncLayoutMode?.();
     ShareViewer?.refitCinemaStage?.();
   },
-
-  getFilteredItems() {
     if (!this.searchQuery) return PlaylistQueue.items;
     return PlaylistQueue.items.filter((f) => PlaylistQueue.itemSearchText(f).includes(this.searchQuery));
   },
@@ -354,6 +353,7 @@ const SharePlaylist = {
     this.panelEl?.classList.add('hidden');
     document.body.classList.remove('share-playlist-active');
     document.getElementById('share-right-rail')?.classList.remove('share-right-rail-open');
+    ShareStageLayout?.syncLayoutMode?.();
     PlaylistQueue.reset();
   },
 };

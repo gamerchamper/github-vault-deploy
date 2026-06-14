@@ -280,6 +280,7 @@ const ShareShoutbox = {
         window.scrollTo(0, scrollY);
       }
       window.scrollTo(0, scrollY);
+      ShareStageLayout?.syncLayoutMode?.();
       ShareViewer?.refitCinemaStage?.();
     }, 360);
   },
@@ -297,6 +298,7 @@ const ShareShoutbox = {
     }
     setTimeout(() => {
       if (!this.open) this.shoutboxEl.classList.add('hidden');
+      ShareStageLayout?.syncLayoutMode?.();
       ShareViewer?.refitCinemaStage?.();
     }, 320);
   },
