@@ -1430,6 +1430,10 @@ class Explorer {
     dlItem.style.display = file.is_folder ? 'none' : '';
     detailsItem.style.display = file.is_folder ? 'none' : '';
     shareItem.style.display = file.is_folder ? 'none' : '';
+    const actionTargets = this.getActionTargets(file);
+    const fileTargets = actionTargets.filter((f) => !f.is_folder);
+    const hlsTargets = actionTargets.filter((f) => this.isHlsEligible(f));
+    const videoTargets = actionTargets.filter((f) => this.isVideoEligibleForHls(f));
     if (thumbItem) thumbItem.style.display = file.is_folder ? 'none' : '';
     if (uploadThumbItem) uploadThumbItem.style.display = file.is_folder ? 'none' : '';
     if (thumbItem && fileTargets.length > 1) {
@@ -1443,10 +1447,6 @@ class Explorer {
       uploadThumbItem.textContent = 'Set custom thumbnail...';
     }
     if (verifyItem) verifyItem.style.display = file.is_folder ? 'none' : '';
-    const actionTargets = this.getActionTargets(file);
-    const fileTargets = actionTargets.filter((f) => !f.is_folder);
-    const hlsTargets = actionTargets.filter((f) => this.isHlsEligible(f));
-    const videoTargets = actionTargets.filter((f) => this.isVideoEligibleForHls(f));
     if (verifyHlsItem) {
       const showVerifyHls = !file.is_folder && hlsTargets.length > 0;
       verifyHlsItem.style.display = showVerifyHls ? '' : 'none';
