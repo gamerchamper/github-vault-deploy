@@ -113,12 +113,21 @@ const ShareStageLayout = {
     return Math.max(minW, this.getAppFrameWidth() - margin);
   },
 
+  getTheaterMaxStageWidth() {
+    const { margin, outset, minW, vw, offsetLeft } = this.getBounds();
+    const viewRight = offsetLeft + vw;
+    return Math.round(Math.max(minW, viewRight - offsetLeft - margin * 2 - outset));
+  },
+
   shouldStackRail(stageWidth, layout = null) {
     if (!this.panel?.classList.contains('share-stage-user-sized')) return false;
     if (!this.isRailOpen()) return false;
 
     const maxSideBySideStage = this.getSideBySideMaxStageWidth();
     const widthSized = layout?.widthSized ?? this.read()?.widthSized;
+    const theaterMode = layout?.theaterMode ?? this.read()?.theaterMode;
+
+    if (theaterMode && this.isRailOpen()) return true;
 
     if (this._stackMode) {
       return stageWidth > maxSideBySideStage - this.STACK_HYSTERESIS;
@@ -175,8 +184,10 @@ const ShareStageLayout = {
 
   isTheaterWidth(width = this.panel?.getBoundingClientRect().width ?? 0) {
     if (!this.panel?.classList.contains('share-stage-user-sized')) return false;
-    const max = this.getSideBySideMaxStageWidth();
-    return Math.abs(width - max) <= 2;
+    const max = this.getTheaterMaxStageWidth();
+    if (Math.abs(width - max) > 2) return false;
+    if (!this.isRailOpen()) return true;
+    return document.body.classList.contains('share-rail-stack');
   },
 
   applyTheaterMode({ persist = true } = {}) {
@@ -184,14 +195,14 @@ const ShareStageLayout = {
 
     const rect = this.panel.getBoundingClientRect();
     const saved = this.read();
+    const { margin, offsetLeft } = this.getBounds();
     const parent = this.panel.parentElement?.getBoundingClientRect();
-    const { margin } = this.getBounds();
-    const width = this.getSideBySideMaxStageWidth();
+    const width = this.getTheaterMaxStageWidth();
     const height = saved?.height || rect.height;
     const top = saved?.top ?? rect.top;
     const left = parent
-      ? parent.left + margin
-      : (saved?.left ?? rect.left);
+      ? Math.max(parent.left + margin, offsetLeft + margin)
+      : (saved?.left ?? offsetLeft + margin);
 
     const layout = this.apply({
       width,
@@ -199,7 +210,7 @@ const ShareStageLayout = {
       left,
       top,
       userSized: true,
-      widthSized: false,
+      widthSized: true,
       heightSized: saved?.heightSized ?? false,
       theaterMode: true,
     }, { reflow: true });
@@ -228,7 +239,7 @@ const ShareStageLayout = {
     if (!wrap) return;
     const show = this.isActive() && this.hasResizableMedia();
     wrap.classList.toggle('hidden', !show);
-    const theaterActive = this.isTheaterWidth() || !!this.read()?.theaterMode;
+    const theaterActive = !!this.read()?.theaterMode && this.isTheaterWidth();
     if (theaterBtn) {
       theaterBtn.disabled = theaterActive;
       theaterBtn.classList.toggle('is-active', theaterActive);
@@ -579,10 +590,11 @@ const ShareStageLayout = {
     this.cancelDragState();
 
     const finalLayout = this.captureCurrent();
-    if (finalLayout.widthSized || !this.isTheaterWidth(finalLayout.width)) {
-      finalLayout.theaterMode = false;
-    } else if (this.read()?.theaterMode) {
+    if (this.read()?.theaterMode && this.isTheaterWidth(finalLayout.width)) {
       finalLayout.theaterMode = true;
+      finalLayout.widthSized = true;
+    } else {
+      finalLayout.theaterMode = false;
     }
     this.save(finalLayout);
     this.syncOverlays();
