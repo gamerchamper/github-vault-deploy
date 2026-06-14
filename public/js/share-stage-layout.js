@@ -42,9 +42,7 @@ const ShareStageLayout = {
         el.addEventListener('dblclick', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          this.resetLayout();
-          if (typeof ShareViewer !== 'undefined') ShareViewer.refitCinemaStage?.();
-          this.syncOverlays();
+          this.resetToDefault();
         });
       }
       document.body.appendChild(el);
@@ -139,7 +137,8 @@ const ShareStageLayout = {
 
   clearInlineLayout() {
     if (!this.panel) return;
-    this.panel.classList.remove('share-stage-user-sized');
+    this.panel.classList.remove('share-stage-user-sized', 'share-stage-fitted', 'share-stage-capped', 'share-stage-resizing');
+    this.panel.style.removeProperty('--share-stage-height');
     this.panel.style.width = '';
     this.panel.style.height = '';
     this.panel.style.minHeight = '';
@@ -152,8 +151,22 @@ const ShareStageLayout = {
   },
 
   resetLayout() {
-    this.clearInlineLayout();
     try { localStorage.removeItem(this.STORAGE_KEY); } catch { /* ignore */ }
+    this.clearInlineLayout();
+  },
+
+  resetToDefault() {
+    this._resetting = true;
+    this.resetLayout();
+    const video = document.querySelector('#share-viewer .share-video-el');
+    if (typeof ShareViewer !== 'undefined') {
+      if (video) ShareViewer.fitCinemaStage(video, { force: true });
+      else ShareViewer.refitCinemaStage();
+    }
+    requestAnimationFrame(() => {
+      this._resetting = false;
+      this.syncOverlays();
+    });
   },
 
   isActive() {
@@ -262,6 +275,13 @@ const ShareStageLayout = {
   },
 
   onOverlayPointerDown(e, axis) {
+    if (this._resetting) return;
+    if (axis === 'se' && e.detail >= 2) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.resetToDefault();
+      return;
+    }
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     e.preventDefault();
     e.stopPropagation();

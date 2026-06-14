@@ -383,9 +383,9 @@ const ShareViewer = {
     this._stageResizeObs = null;
   },
 
-  fitCinemaStage(video) {
+  fitCinemaStage(video, { force = false } = {}) {
     if (!video || !document.body.classList.contains('share-cinema-active')) return;
-    if (typeof ShareStageLayout !== 'undefined' && ShareStageLayout.isUserSized()) {
+    if (!force && typeof ShareStageLayout !== 'undefined' && ShareStageLayout.isUserSized()) {
       ShareStageLayout.applySaved();
       return;
     }
@@ -451,7 +451,7 @@ const ShareViewer = {
   },
 
   refitCinemaStage() {
-    if (this._fitVideoEl) this.fitCinemaStage(this._fitVideoEl);
+    if (this._fitVideoEl) this.fitCinemaStage(this._fitVideoEl, { force: !ShareStageLayout?.isUserSized?.() });
   },
 
   mountStats(info) {

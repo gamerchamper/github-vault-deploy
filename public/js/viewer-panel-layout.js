@@ -44,12 +44,7 @@ const ViewerPanelLayout = {
         el.addEventListener('dblclick', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          this.resetLayout();
-          if (typeof Viewer !== 'undefined' && Viewer.currentMediaType === 'video') {
-            const video = document.getElementById('viewer-video');
-            if (video) Viewer.fitModalToVideo(video);
-          }
-          this.syncOverlays();
+          this.resetToDefault();
         });
       }
       document.body.appendChild(el);
@@ -145,8 +140,21 @@ const ViewerPanelLayout = {
   },
 
   resetLayout() {
-    this.clearInlineLayout();
     try { localStorage.removeItem(this.STORAGE_KEY); } catch { /* ignore */ }
+    this.clearInlineLayout();
+  },
+
+  resetToDefault() {
+    this._resetting = true;
+    this.resetLayout();
+    const video = document.getElementById('viewer-video');
+    if (typeof Viewer !== 'undefined' && Viewer.currentMediaType === 'video' && video?.videoWidth) {
+      Viewer.fitModalToVideo(video);
+    }
+    requestAnimationFrame(() => {
+      this._resetting = false;
+      this.syncOverlays();
+    });
   },
 
   isViewerOpen() {
@@ -254,6 +262,13 @@ const ViewerPanelLayout = {
   },
 
   onOverlayPointerDown(e, axis) {
+    if (this._resetting) return;
+    if (axis === 'se' && e.detail >= 2) {
+      e.preventDefault();
+      e.stopPropagation();
+      this.resetToDefault();
+      return;
+    }
     if (e.button !== 0 && e.pointerType === 'mouse') return;
     e.preventDefault();
     e.stopPropagation();
