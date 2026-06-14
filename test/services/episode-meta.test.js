@@ -18,8 +18,9 @@ describe('episode-meta', function () {
 
   it('parses episode-only patterns', function () {
     const meta = episodeMeta.parseEpisodeMeta('Documentary Ep 7.mp4');
+    expect(meta.season).to.equal(1);
     expect(meta.episode).to.equal(7);
-    expect(meta.label).to.equal('Ep 7');
+    expect(meta.label).to.equal('S01E07');
   });
 
   it('heuristic for 101-style codes', function () {
@@ -68,5 +69,28 @@ describe('episode-meta', function () {
     const names = ['Show S03E01', 'Show S02E01', 'Show S01E01'];
     const sorted = [...names].sort(episodeMeta.compareEpisodeTitles);
     expect(sorted).to.deep.equal(['Show S01E01', 'Show S02E01', 'Show S03E01']);
+  });
+
+  it('treats episode-only titles as season 1', function () {
+    const meta = episodeMeta.parseEpisodeMeta('Game Of Thrones EP.1 Reactionnn.mp4');
+    expect(meta.season).to.equal(1);
+    expect(meta.episode).to.equal(1);
+    expect(meta.label).to.equal('S01E01');
+  });
+
+  it('sorts GOT-style reaction filenames in watch order', function () {
+    const items = [
+      { name: 'Game Of Thrones S2 EP.1.mp4' },
+      { name: 'Game Of Thrones S3 EP.1 Reactionnn.mp4' },
+      { name: 'Game Of Thrones EP.1 Reactionnn.mp4' },
+      { name: 'Game Of Thrones EP.2 Reactionn.mp4' },
+    ];
+    const sorted = episodeMeta.sortItemsByEpisodeMeta(items);
+    expect(sorted.map((i) => i.name)).to.deep.equal([
+      'Game Of Thrones EP.1 Reactionnn.mp4',
+      'Game Of Thrones EP.2 Reactionn.mp4',
+      'Game Of Thrones S2 EP.1.mp4',
+      'Game Of Thrones S3 EP.1 Reactionnn.mp4',
+    ]);
   });
 });

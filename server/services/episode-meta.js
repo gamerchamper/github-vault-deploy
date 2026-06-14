@@ -84,6 +84,11 @@ function parseEpisodeMeta(rawTitle, parentPath = '') {
     }
   }
 
+  // Titles like "Show EP.1" with no season marker are treated as season 1.
+  if (season == null && episode != null && match) {
+    season = 1;
+  }
+
   const sortSeason = season == null ? 9999 : season;
   const sortEpisode = episode == null ? 9999 : episode;
   let label = null;

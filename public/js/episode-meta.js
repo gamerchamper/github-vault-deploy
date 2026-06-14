@@ -85,6 +85,10 @@ const EpisodeMeta = {
       }
     }
 
+    if (season == null && episode != null && match) {
+      season = 1;
+    }
+
     let label = null;
     if (match) {
       if (season != null && episode != null) {
