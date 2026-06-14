@@ -22,12 +22,87 @@ const ChunkBlocks = {
     return 'chunk-block chunk-block--pending';
   },
 
+  computeSquareGrid(count, width, height, gap = 2, padding = 4) {
+    const availW = Math.max(0, width - padding * 2);
+    const availH = Math.max(0, height - padding * 2);
+    if (availW < 1 || availH < 1 || count < 1) {
+      return { cols: 1, size: 4, rows: count };
+    }
+
+    let best = { cols: 1, size: 0, rows: count };
+    for (let cols = 1; cols <= count; cols += 1) {
+      const rows = Math.ceil(count / cols);
+      const sizeW = (availW - gap * (cols - 1)) / cols;
+      const sizeH = (availH - gap * (rows - 1)) / rows;
+      const size = Math.min(sizeW, sizeH);
+      if (size > best.size) best = { cols, size, rows };
+    }
+    return best;
+  },
+
+  reflowGrid(instance) {
+    if (!instance?.fill || !instance.grid) return;
+    const { grid, blocks, el: wrap } = instance;
+    const gap = instance.gridGap ?? 2;
+    const padding = instance.gridPadding ?? 4;
+    let width = grid.clientWidth;
+    let height = grid.clientHeight;
+    if (height < 8 && wrap) {
+      const header = wrap.querySelector('.chunk-blocks-header');
+      height = wrap.clientHeight - (header?.offsetHeight ?? 0);
+    }
+    const { cols, size } = this.computeSquareGrid(blocks.length, width, height, gap, padding);
+    if (size < 1) return;
+
+    grid.style.gridTemplateColumns = `repeat(${cols}, ${size}px)`;
+    grid.style.gridAutoRows = `${size}px`;
+    grid.style.justifyContent = 'center';
+    grid.style.alignContent = 'center';
+  },
+
+  bindGridReflow(instance) {
+    if (!instance.fill || !instance.grid) return;
+    instance._reflow = () => this.reflowGrid(instance);
+    instance._reflow();
+    if (typeof ResizeObserver !== 'undefined') {
+      instance._ro = new ResizeObserver(() => {
+        if (instance.rafReflow) cancelAnimationFrame(instance.rafReflow);
+        instance.rafReflow = requestAnimationFrame(() => {
+          instance.rafReflow = null;
+          this.reflowGrid(instance);
+        });
+      });
+      instance._ro.observe(instance.grid);
+      if (instance.el) instance._ro.observe(instance.el);
+    } else {
+      window.addEventListener('resize', instance._reflow);
+    }
+  },
+
+  unbindGridReflow(instance) {
+    if (!instance) return;
+    instance._ro?.disconnect();
+    instance._ro = null;
+    if (instance._reflow) {
+      window.removeEventListener('resize', instance._reflow);
+      instance._reflow = null;
+    }
+    if (instance.rafReflow) {
+      cancelAnimationFrame(instance.rafReflow);
+      instance.rafReflow = null;
+    }
+  },
+
   mount(container, options = {}) {
     const el = typeof container === 'string' ? document.getElementById(container) : container;
     if (!el) return null;
 
     const { total = 1, label = 'Blocks' } = options;
     const layout = this.computeLayout(total);
+
+    const fill = options.fill ?? !!el.closest('.share-dock-stats');
+    const gridGap = options.gridGap ?? 2;
+    const gridPadding = options.gridPadding ?? 4;
 
     el.innerHTML = `
       <div class="chunk-blocks-header">
@@ -38,6 +113,7 @@ const ChunkBlocks = {
     `;
 
     const grid = el.querySelector('.chunk-blocks-grid');
+    if (fill) grid.classList.add('chunk-blocks-grid--fill');
     const fragment = document.createDocumentFragment();
     const blocks = [];
 
@@ -62,8 +138,12 @@ const ChunkBlocks = {
       lastMeta: '',
       raf: null,
       pendingState: null,
+      fill,
+      gridGap,
+      gridPadding,
     };
 
+    if (fill) this.bindGridReflow(instance);
     this.updateInstance(instance, { completed: 0, total, stage: 'starting' });
     return instance;
   },
@@ -174,6 +254,7 @@ const ChunkBlocks = {
 
   destroy(instance) {
     if (!instance) return;
+    this.unbindGridReflow(instance);
     if (instance.raf) {
       cancelAnimationFrame(instance.raf);
       instance.raf = null;
