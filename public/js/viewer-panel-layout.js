@@ -166,12 +166,41 @@ const ViewerPanelLayout = {
     for (const el of Object.values(this.overlays)) el.style.display = 'none';
   },
 
+  getPlyrControlsRect() {
+    const wrap = document.getElementById('viewer-video-wrap')?.classList.contains('hidden')
+      ? document.getElementById('viewer-audio-wrap')
+      : document.getElementById('viewer-video-wrap');
+    if (!wrap || wrap.classList.contains('hidden')) return null;
+    const plyr = wrap.querySelector('.plyr');
+    if (!plyr || plyr.classList.contains('plyr--hide-controls')) return null;
+    const controls = plyr.querySelector('.plyr__controls');
+    if (!controls) return null;
+    const rect = controls.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) return null;
+    return rect;
+  },
+
+  rectsOverlap(a, b) {
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  },
+
+  shouldBlockOverlayPointer(left, top, width, height) {
+    if (this.activeAxis) return false;
+    const controls = this.getPlyrControlsRect();
+    if (!controls) return false;
+    return this.rectsOverlap(
+      { left, top, right: left + width, bottom: top + height },
+      controls
+    );
+  },
+
   placeOverlay(el, left, top, width, height) {
     el.style.display = 'block';
     el.style.left = `${Math.round(left)}px`;
     el.style.top = `${Math.round(top)}px`;
     el.style.width = `${Math.max(1, Math.round(width))}px`;
     el.style.height = `${Math.max(1, Math.round(height))}px`;
+    el.style.pointerEvents = this.shouldBlockOverlayPointer(left, top, width, height) ? 'none' : 'auto';
   },
 
   syncOverlays() {
@@ -191,9 +220,12 @@ const ViewerPanelLayout = {
     this.placeOverlay(this.overlays.s, r.left, r.bottom - strip, r.width, strip);
     this.placeOverlay(this.overlays.se, r.right - corner, r.bottom - corner, corner, corner);
 
-    const playerWrap = document.getElementById('viewer-video-wrap');
-    const playerVisible = playerWrap && !playerWrap.classList.contains('hidden');
-    if (playerVisible) {
+    const videoWrap = document.getElementById('viewer-video-wrap');
+    const audioWrap = document.getElementById('viewer-audio-wrap');
+    const playerWrap = videoWrap && !videoWrap.classList.contains('hidden')
+      ? videoWrap
+      : (audioWrap && !audioWrap.classList.contains('hidden') ? audioWrap : null);
+    if (playerWrap) {
       const pr = playerWrap.getBoundingClientRect();
       if (pr.width > 10) {
         this.placeOverlay(this.overlays.ps, pr.left, pr.bottom - strip, pr.width, strip);
