@@ -178,7 +178,7 @@
   min-height: 0;
 }
 
-.viewer-has-playlist .viewer-panel {
+.viewer-has-playlist .viewer-panel:not(.viewer-panel-custom) {
   max-width: none;
   width: 100%;
 }

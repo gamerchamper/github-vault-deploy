@@ -311,6 +311,7 @@ const Viewer = {
       : file.name;
     document.getElementById('viewer-title').textContent = title;
     modal.classList.remove('hidden');
+    if (typeof ViewerPanelLayout !== 'undefined') ViewerPanelLayout.onViewerOpen();
     loading.classList.remove('hidden');
     this.hidePanels();
     img.removeAttribute('src');
@@ -475,7 +476,13 @@ const Viewer = {
       el.onended = () => this.handleQueueEnded(el);
     }
     this.startPlaybackStats(el);
-    if (this.currentMediaType === 'video') this.fitModalToVideo(el);
+    if (this.currentMediaType === 'video') {
+      if (typeof ViewerPanelLayout !== 'undefined' && ViewerPanelLayout.shouldSkipAutoFit()) {
+        ViewerPanelLayout.applySaved();
+      } else {
+        this.fitModalToVideo(el);
+      }
+    }
     if (PlaylistQueue?.playlistId && this.currentFile?.id) {
       PlaylistPlayer?.render?.();
     }
@@ -502,6 +509,10 @@ const Viewer = {
   },
 
   fitModalToVideo(video) {
+    if (typeof ViewerPanelLayout !== 'undefined' && ViewerPanelLayout.shouldSkipAutoFit()) {
+      ViewerPanelLayout.applySaved();
+      return;
+    }
     if (!video.videoWidth || !video.videoHeight) { setTimeout(() => this.fitModalToVideo(video), 200); return; }
     const panel = document.querySelector('.viewer-panel');
     if (!panel) return;
@@ -913,6 +924,7 @@ const Viewer = {
   },
 
   bindEvents() {
+    if (typeof ViewerPanelLayout !== 'undefined') ViewerPanelLayout.init();
     document.getElementById('viewer-close').addEventListener('click', () => this.close());
     document.querySelector('.viewer-backdrop').addEventListener('click', () => this.close());
     document.getElementById('viewer-download').addEventListener('click', () => {
