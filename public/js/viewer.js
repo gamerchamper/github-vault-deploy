@@ -531,6 +531,7 @@ const Viewer = {
     panel.style.maxWidth = 'none';
     panel.style.height = Math.min(totalH, Math.round(maxPanelH)) + 'px';
     panel.style.maxHeight = 'none';
+    if (typeof ViewerPanelLayout !== 'undefined') ViewerPanelLayout.syncOverlays();
   },
 
   stopAudioViz() {

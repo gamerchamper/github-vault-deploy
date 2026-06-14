@@ -1,39 +1,60 @@
 /**
- * Window-style resize for the media viewer panel (right + bottom edges).
- * Persists size/position across media switches via localStorage.
+ * Window-style resize for the media viewer — fixed overlay strips track the panel edges.
  */
 const ViewerPanelLayout = {
   STORAGE_KEY: 'vault-viewer-panel-layout',
   MIN_W: 380,
   MIN_H: 260,
-  EDGE_PX: 14,
+  STRIP: 20,
+  CORNER: 28,
   viewer: null,
   panel: null,
+  overlays: null,
+  syncFrame: null,
   activeAxis: null,
-  boundDocMove: null,
-  boundDocDown: null,
-  listenersAttached: false,
 
   init() {
-    this.boundDocMove = (e) => this.onDocumentMove(e);
-    this.boundDocDown = (e) => this.onDocumentDown(e);
-
     this.viewer = document.getElementById('media-viewer');
     this.panel = this.viewer?.querySelector('.viewer-panel');
-    if (!this.panel || this.panel.dataset.layoutReady) return;
-    this.panel.dataset.layoutReady = '1';
-
-    this.panel.querySelector('.viewer-resize-se')?.addEventListener('dblclick', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.resetLayout();
-      if (typeof Viewer !== 'undefined' && Viewer.currentMediaType === 'video') {
-        const video = document.getElementById('viewer-video');
-        if (video) Viewer.fitModalToVideo(video);
-      }
+    if (!this.panel) return;
+    this.ensureOverlays();
+    window.addEventListener('resize', () => {
+      this.syncOverlays();
+      this.onWindowResize();
     });
+  },
 
-    window.addEventListener('resize', () => this.onWindowResize());
+  ensureOverlays() {
+    if (this.overlays) return;
+    const axes = [
+      { id: 'e', cursor: 'ew-resize', title: 'Resize width' },
+      { id: 's', cursor: 'ns-resize', title: 'Resize height' },
+      { id: 'ps', cursor: 'ns-resize', title: 'Resize height' },
+      { id: 'se', cursor: 'nwse-resize', title: 'Resize · double-click to reset' },
+    ];
+    this.overlays = {};
+    for (const { id, cursor, title } of axes) {
+      const el = document.createElement('div');
+      el.className = `viewer-resize-overlay viewer-resize-overlay-${id}`;
+      el.style.cursor = cursor;
+      el.title = title;
+      el.dataset.axis = id === 'ps' ? 's' : (id === 'se' ? 'se' : id);
+      el.addEventListener('pointerdown', (e) => this.onOverlayPointerDown(e, el.dataset.axis));
+      if (id === 'se') {
+        el.addEventListener('dblclick', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.resetLayout();
+          if (typeof Viewer !== 'undefined' && Viewer.currentMediaType === 'video') {
+            const video = document.getElementById('viewer-video');
+            if (video) Viewer.fitModalToVideo(video);
+          }
+          this.syncOverlays();
+        });
+      }
+      document.body.appendChild(el);
+      this.overlays[id] = el;
+    }
   },
 
   read() {
@@ -92,7 +113,7 @@ const ViewerPanelLayout = {
   },
 
   apply(layout) {
-    if (!this.panel || !layout) return;
+    if (!this.panel || !layout) return null;
     const clamped = this.clampToViewport(layout);
     this.panel.classList.add('viewer-panel-custom');
     this.viewer?.classList.add('viewer-layout-custom');
@@ -104,6 +125,7 @@ const ViewerPanelLayout = {
     this.panel.style.maxWidth = 'none';
     this.panel.style.maxHeight = 'none';
     this.panel.style.margin = '0';
+    this.syncOverlays();
     return clamped;
   },
 
@@ -119,6 +141,7 @@ const ViewerPanelLayout = {
     this.panel.style.maxWidth = '';
     this.panel.style.maxHeight = '';
     this.panel.style.margin = '';
+    this.syncOverlays();
   },
 
   resetLayout() {
@@ -126,16 +149,79 @@ const ViewerPanelLayout = {
     try { localStorage.removeItem(this.STORAGE_KEY); } catch { /* ignore */ }
   },
 
-  onViewerOpen() {
-    if (!this.boundDocMove) this.init();
-    if (!this.panel) this.init();
-    if (!this.panel || !this.boundDocMove) return;
-    this.viewer?.classList.add('viewer-resize-enabled');
-    if (!this.listenersAttached) {
-      document.addEventListener('mousemove', this.boundDocMove);
-      document.addEventListener('mousedown', this.boundDocDown);
-      this.listenersAttached = true;
+  isViewerOpen() {
+    return this.viewer && !this.viewer.classList.contains('hidden');
+  },
+
+  hideOverlays() {
+    if (!this.overlays) return;
+    for (const el of Object.values(this.overlays)) el.style.display = 'none';
+  },
+
+  placeOverlay(el, left, top, width, height) {
+    el.style.display = 'block';
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+    el.style.width = `${Math.max(1, Math.round(width))}px`;
+    el.style.height = `${Math.max(1, Math.round(height))}px`;
+  },
+
+  syncOverlays() {
+    if (!this.overlays || !this.panel) return;
+    if (!this.isViewerOpen()) {
+      this.hideOverlays();
+      return;
     }
+
+    const r = this.panel.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10) return;
+
+    const strip = this.STRIP;
+    const corner = this.CORNER;
+
+    this.placeOverlay(this.overlays.e, r.right - strip, r.top, strip, r.height);
+    this.placeOverlay(this.overlays.s, r.left, r.bottom - strip, r.width, strip);
+    this.placeOverlay(this.overlays.se, r.right - corner, r.bottom - corner, corner, corner);
+
+    const playerWrap = document.getElementById('viewer-video-wrap');
+    const playerVisible = playerWrap && !playerWrap.classList.contains('hidden');
+    if (playerVisible) {
+      const pr = playerWrap.getBoundingClientRect();
+      if (pr.width > 10) {
+        this.placeOverlay(this.overlays.ps, pr.left, pr.bottom - strip, pr.width, strip);
+      } else {
+        this.overlays.ps.style.display = 'none';
+      }
+    } else {
+      this.overlays.ps.style.display = 'none';
+    }
+  },
+
+  startSyncLoop() {
+    this.stopSyncLoop();
+    const tick = () => {
+      if (!this.isViewerOpen()) {
+        this.hideOverlays();
+        this.syncFrame = null;
+        return;
+      }
+      this.syncOverlays();
+      this.syncFrame = requestAnimationFrame(tick);
+    };
+    this.syncFrame = requestAnimationFrame(tick);
+  },
+
+  stopSyncLoop() {
+    if (this.syncFrame) {
+      cancelAnimationFrame(this.syncFrame);
+      this.syncFrame = null;
+    }
+  },
+
+  onViewerOpen() {
+    if (!this.panel) this.init();
+    if (!this.panel) return;
+    this.ensureOverlays();
 
     const saved = this.read();
     if (saved?.userSized) {
@@ -143,21 +229,22 @@ const ViewerPanelLayout = {
     } else {
       this.clearInlineLayout();
     }
+
+    this.startSyncLoop();
   },
 
   onViewerClose() {
-    this.viewer?.classList.remove('viewer-resize-enabled');
-    if (this.listenersAttached) {
-      document.removeEventListener('mousemove', this.boundDocMove);
-      document.removeEventListener('mousedown', this.boundDocDown);
-      this.listenersAttached = false;
-    }
-    this.clearCursor();
+    this.stopSyncLoop();
+    this.hideOverlays();
+    this.activeAxis = null;
+    document.body.classList.remove('viewer-panel-resizing-active');
+    delete document.body.dataset.viewerResizeAxis;
   },
 
   applySaved() {
     const saved = this.read();
     if (saved?.userSized) this.apply(saved);
+    else this.syncOverlays();
   },
 
   onWindowResize() {
@@ -166,89 +253,14 @@ const ViewerPanelLayout = {
     if (next) this.save(next);
   },
 
-  isViewerOpen() {
-    return this.viewer && !this.viewer.classList.contains('hidden');
-  },
-
-  hitTest(e) {
-    if (!this.panel) return null;
-    const panelRect = this.panel.getBoundingClientRect();
-    const edge = this.EDGE_PX;
-    const x = e.clientX;
-    const y = e.clientY;
-
-    if (x < panelRect.left - 2 || x > panelRect.right + 2 || y < panelRect.top || y > panelRect.bottom + 2) {
-      return null;
-    }
-
-    const nearRight = x >= panelRect.right - edge;
-    let nearBottom = y >= panelRect.bottom - edge;
-
-    const playerWrap = this.panel.querySelector('.viewer-player-wrap:not(.hidden)');
-    if (playerWrap) {
-      const playerRect = playerWrap.getBoundingClientRect();
-      if (y >= playerRect.bottom - 10 && y <= playerRect.bottom + 8
-        && x >= playerRect.left && x <= playerRect.right) {
-        nearBottom = true;
-      }
-    }
-
-    const mainColumn = this.panel.querySelector('.viewer-main-column');
-    if (!nearBottom && mainColumn) {
-      const mainRect = mainColumn.getBoundingClientRect();
-      if (y >= mainRect.bottom - edge && y <= mainRect.bottom + 4
-        && x >= mainRect.left && x <= mainRect.right) {
-        nearBottom = true;
-      }
-    }
-
-    if (nearRight && nearBottom) return 'se';
-    if (nearRight) return 'e';
-    if (nearBottom) return 's';
-    return null;
-  },
-
-  cursorForAxis(axis) {
-    if (axis === 'e') return 'ew-resize';
-    if (axis === 's') return 'ns-resize';
-    if (axis === 'se') return 'nwse-resize';
-    return '';
-  },
-
-  setCursor(axis) {
-    document.body.classList.remove('viewer-cursor-ew', 'viewer-cursor-ns', 'viewer-cursor-nwse');
-    if (axis === 'e') document.body.classList.add('viewer-cursor-ew');
-    else if (axis === 's') document.body.classList.add('viewer-cursor-ns');
-    else if (axis === 'se') document.body.classList.add('viewer-cursor-nwse');
-    this.panel?.classList.toggle('viewer-panel-edge-e', axis === 'e' || axis === 'se');
-    this.panel?.classList.toggle('viewer-panel-edge-s', axis === 's' || axis === 'se');
-    this.panel?.classList.toggle('viewer-panel-edge-se', axis === 'se');
-  },
-
-  clearCursor() {
-    if (this.activeAxis) return;
-    document.body.classList.remove('viewer-cursor-ew', 'viewer-cursor-ns', 'viewer-cursor-nwse');
-    this.panel?.classList.remove('viewer-panel-edge-e', 'viewer-panel-edge-s', 'viewer-panel-edge-se');
-  },
-
-  onDocumentMove(e) {
-    if (!this.isViewerOpen() || this.activeAxis) return;
-    const axis = this.hitTest(e);
-    if (axis) this.setCursor(axis);
-    else this.clearCursor();
-  },
-
-  onDocumentDown(e) {
-    if (!this.isViewerOpen() || e.button !== 0 || this.activeAxis) return;
-    const axis = this.hitTest(e);
-    if (!axis) return;
-
+  onOverlayPointerDown(e, axis) {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
     e.preventDefault();
     e.stopPropagation();
-    this.startResize(e, axis);
-  },
 
-  startResize(e, axis) {
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+
     let layout = this.read()?.userSized ? this.read() : this.captureCurrent();
     layout = this.apply(layout);
 
@@ -258,20 +270,20 @@ const ViewerPanelLayout = {
     const startH = layout.height;
     const startL = layout.left;
     const startT = layout.top;
+    const resizeAxis = axis;
 
-    this.activeAxis = axis;
+    this.activeAxis = resizeAxis;
     this.panel.classList.add('viewer-panel-resizing');
     document.body.classList.add('viewer-panel-resizing-active');
-    document.body.dataset.viewerResizeAxis = axis;
-    this.setCursor(axis);
+    document.body.dataset.viewerResizeAxis = resizeAxis;
 
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
       let width = startW;
       let height = startH;
-      if (axis === 'e' || axis === 'se') width = startW + dx;
-      if (axis === 's' || axis === 'se') height = startH + dy;
+      if (resizeAxis === 'e' || resizeAxis === 'se') width = startW + dx;
+      if (resizeAxis === 's' || resizeAxis === 'se') height = startH + dy;
       this.apply({
         width,
         height,
@@ -281,20 +293,23 @@ const ViewerPanelLayout = {
       });
     };
 
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+    const onUp = (ev) => {
+      target.releasePointerCapture(ev.pointerId);
+      target.removeEventListener('pointermove', onMove);
+      target.removeEventListener('pointerup', onUp);
+      target.removeEventListener('pointercancel', onUp);
       this.activeAxis = null;
       this.panel.classList.remove('viewer-panel-resizing');
       document.body.classList.remove('viewer-panel-resizing-active');
       delete document.body.dataset.viewerResizeAxis;
-      this.clearCursor();
       const finalLayout = this.captureCurrent();
       this.save(finalLayout);
+      this.syncOverlays();
     };
 
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    target.addEventListener('pointermove', onMove);
+    target.addEventListener('pointerup', onUp);
+    target.addEventListener('pointercancel', onUp);
   },
 };
 
