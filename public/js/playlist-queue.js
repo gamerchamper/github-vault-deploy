@@ -30,7 +30,55 @@ const PlaylistQueue = {
       const fileId = k.slice(prefix.length);
       const data = PlaybackMemory.normalizeProgress(PlaybackMemory.read(k));
       if (data.progress_pct > 0 || data.completed) {
-        this.progressMap.set(fileId, data);
+        this.progressMap.set(fileId, this.mergeProgressEntry(this.getProgress(fileId), data));
+      }
+    }
+  },
+
+  mergeProgressEntry(a, b) {
+    const base = { progress_pct: 0, completed: false, position_seconds: 0, ...a };
+    const other = { progress_pct: 0, completed: false, position_seconds: 0, ...b };
+    if (this.isSeen(other) && !this.isSeen(base)) {
+      return { ...other, progress_pct: Math.max(other.progress_pct, 100) };
+    }
+    if (this.isSeen(base) && !this.isSeen(other)) return base;
+    if ((other.progress_pct || 0) > (base.progress_pct || 0)) {
+      return { ...base, ...other, progress_pct: other.progress_pct };
+    }
+    if ((other.progress_pct || 0) === (base.progress_pct || 0)
+      && (other.position_seconds || 0) > (base.position_seconds || 0)) {
+      return { ...base, position_seconds: other.position_seconds };
+    }
+    return base;
+  },
+
+  readStoredProgressForItem(fileId) {
+    if (typeof PlaybackMemory === 'undefined') {
+      return { progress_pct: 0, completed: false, position_seconds: 0 };
+    }
+    const sources = [];
+    if (this.playlistId) {
+      sources.push(PlaybackMemory.read(PlaybackMemory.storageKey(fileId, this.playlistId)));
+    }
+    if (this.isPublic && this.publicToken) {
+      sources.push(PlaybackMemory.read(PlaybackMemory.publicKey(this.publicToken, fileId)));
+    }
+    sources.push(PlaybackMemory.read(PlaybackMemory.storageKey(fileId)));
+    let best = { progress_pct: 0, completed: false, position_seconds: 0 };
+    for (const raw of sources) {
+      const norm = PlaybackMemory.normalizeProgress(raw);
+      if (norm.progress_pct > 0 || norm.completed) {
+        best = this.mergeProgressEntry(best, norm);
+      }
+    }
+    return best;
+  },
+
+  loadStoredProgress() {
+    for (const item of this.items) {
+      const stored = this.readStoredProgressForItem(item.id);
+      if (stored.progress_pct > 0 || stored.completed) {
+        this.progressMap.set(item.id, this.mergeProgressEntry(this.getProgress(item.id), stored));
       }
     }
   },
@@ -71,22 +119,32 @@ const PlaylistQueue = {
       : 0;
     if (this.index < 0) this.index = 0;
     this.shuffledOrder = this.items.map((_, i) => i);
-    if (isPublic && publicToken) this.loadPublicProgress(publicToken);
+    this.loadStoredProgress();
   },
 
   applyProgress(progressList) {
     if (!Array.isArray(progressList)) return;
     for (const p of progressList) {
-      this.progressMap.set(p.file_id, {
+      this.progressMap.set(p.file_id, this.mergeProgressEntry(this.getProgress(p.file_id), {
         progress_pct: p.progress_pct || 0,
         completed: !!p.completed,
         position_seconds: p.position_seconds || 0,
-      });
+      }));
     }
   },
 
   getProgress(fileId) {
-    return this.progressMap.get(fileId) || { progress_pct: 0, completed: false, position_seconds: 0 };
+    const cached = this.progressMap.get(fileId);
+    if (cached && (cached.progress_pct > 0 || cached.completed)) return cached;
+    if (typeof PlaybackMemory !== 'undefined') {
+      const stored = this.readStoredProgressForItem(fileId);
+      if (stored.progress_pct > 0 || stored.completed) {
+        const merged = this.mergeProgressEntry(cached || {}, stored);
+        this.progressMap.set(fileId, merged);
+        return merged;
+      }
+    }
+    return cached || { progress_pct: 0, completed: false, position_seconds: 0 };
   },
 
   itemLabel(file) {
@@ -276,7 +334,7 @@ const PlaylistQueue = {
   },
 };
 
-PlaylistQueue.VERSION = '1.0.2';
+PlaylistQueue.VERSION = '1.0.3';
 
 /** Backfill helpers if an older cached playlist-queue.js loaded first. */
 PlaylistQueue.ensureUiHelpers = function ensureUiHelpers() {

@@ -32,4 +32,32 @@ describe('playlist-queue progress', function () {
     expect(prog.completed).to.be.true;
     expect(prog.progress_pct).to.equal(100);
   });
+
+  it('should merge stored progress for all playlist items', function () {
+    const store = {};
+    global.localStorage = {
+      getItem(k) { return store[k] ?? null; },
+      setItem(k, v) { store[k] = v; },
+      removeItem(k) { delete store[k]; },
+      key(i) { return Object.keys(store)[i] ?? null; },
+      get length() { return Object.keys(store).length; },
+    };
+
+    PlaylistQueue.reset();
+    PlaylistQueue.setFromPlaylist({
+      id: 'pl1',
+      title: 'Test',
+      items: [
+        { id: 'a', name: 'A.mp4' },
+        { id: 'b', name: 'B.mp4' },
+      ],
+    }, null);
+
+    PlaybackMemory.write(PlaybackMemory.storageKey('a', 'pl1'), { pos: 120, pct: 40, completed: false });
+    PlaybackMemory.write(PlaybackMemory.storageKey('b', 'pl1'), { pos: 0, pct: 100, completed: true, seen: true });
+
+    PlaylistQueue.loadStoredProgress();
+    expect(PlaylistQueue.getProgress('a').progress_pct).to.equal(40);
+    expect(PlaylistQueue.getProgress('b').completed).to.be.true;
+  });
 });

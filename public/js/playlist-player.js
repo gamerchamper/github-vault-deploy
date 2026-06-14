@@ -101,6 +101,18 @@ const PlaylistPlayer = {
     document.getElementById('media-viewer')?.classList.add('viewer-has-playlist');
     this.render();
     this.updateRepeatBtn(PlaylistQueue.repeat);
+    this.hydrateProgressFromServer();
+  },
+
+  async hydrateProgressFromServer() {
+    if (!PlaylistQueue.playlistId || PlaylistQueue.isPublic) return;
+    try {
+      const { progress } = await API.playlists.getProgress(PlaylistQueue.playlistId);
+      if (Array.isArray(progress) && progress.length) {
+        PlaylistQueue.applyProgress(progress);
+        this.render();
+      }
+    } catch { /* ignore */ }
   },
 
   hide() {
