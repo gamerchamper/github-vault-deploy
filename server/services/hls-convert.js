@@ -529,26 +529,36 @@ function parsePlaylistSegments(content) {
   return { extinfCount, urls, hasEndList };
 }
 
-function extractRepoPathFromRawUrl(url, repo) {
-  const prefix = `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/`;
-  if (url.startsWith(prefix)) return decodeURIComponent(url.slice(prefix.length));
-  const match = url.match(/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/(.+)$/);
-  return match ? decodeURIComponent(match[1]) : null;
+async function rawUrlExists(url) {
+  try {
+    let resp = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(10000) });
+    if (resp.ok) return true;
+    if (resp.status === 404) return false;
+    resp = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-0' },
+      signal: AbortSignal.timeout(10000),
+    });
+    return resp.ok || resp.status === 206;
+  } catch {
+    return false;
+  }
 }
 
-async function checkHlsBlobOnGitHub(userId, repo, repoPath) {
+async function fetchRawText(url) {
+  const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+  if (!resp.ok) throw new Error(`Fetch failed (${resp.status})`);
+  return resp.text();
+}
+
+function hlsRawUrl(repo, repoPath) {
+  return storage.githubRawUrl(repo.full_name, repo.default_branch, repoPath);
+}
+
+async function checkHlsBlobViaRaw(repo, repoPath) {
   if (!repo?.is_active) return { present: false };
-  const [owner, repoName] = repo.full_name.split('/');
-  const octokit = accounts.createClientForRepo(userId, repo);
-  try {
-    const sha = await github.getFileSha(
-      octokit, owner, repoName, repoPath, repo.default_branch,
-      { subsystem: 'verify-hls', bypassMissing: true }
-    );
-    return { present: !!sha, sha: sha || null };
-  } catch {
-    return { present: false };
-  }
+  const present = await rawUrlExists(hlsRawUrl(repo, repoPath));
+  return { present };
 }
 
 async function verifyHlsOnGitHub(userId, fileId, onProgress = null) {
@@ -575,9 +585,9 @@ async function verifyHlsOnGitHub(userId, fileId, onProgress = null) {
   const segmentTotal = Math.max(dbSegments.length, 1);
 
   const segmentResults = dbSegments.length
-    ? await mapConcurrent(dbSegments, 16, async (seg) => {
+    ? await mapConcurrent(dbSegments, 32, async (seg) => {
       const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(seg.repo_id);
-      const result = await checkHlsBlobOnGitHub(userId, repo, seg.repo_path);
+      const result = await checkHlsBlobViaRaw(repo, seg.repo_path);
       checked += 1;
       if (onProgress) {
         onProgress({
@@ -586,10 +596,6 @@ async function verifyHlsOnGitHub(userId, fileId, onProgress = null) {
           percent: Math.min(85, Math.round((checked / segmentTotal) * 85)),
           phase: 'segments',
         });
-      }
-      if (result.sha && result.sha !== seg.sha && seg.sha && seg.sha !== 'pending') {
-        db.prepare('UPDATE hls_segments SET sha = ? WHERE file_id = ? AND segment_index = ?')
-          .run(result.sha, fileId, seg.segment_index);
       }
       return { segmentIndex: seg.segment_index, present: result.present };
     })
@@ -619,17 +625,12 @@ async function verifyHlsOnGitHub(userId, fileId, onProgress = null) {
   if (file.hls_playlist_path && file.hls_playlist_repo_id) {
     const playlistRepo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(file.hls_playlist_repo_id);
     if (playlistRepo) {
-      const plCheck = await checkHlsBlobOnGitHub(userId, playlistRepo, file.hls_playlist_path);
+      const plCheck = await checkHlsBlobViaRaw(playlistRepo, file.hls_playlist_path);
       playlistPresent = plCheck.present;
 
       if (playlistPresent) {
         try {
-          const [owner, repoName] = playlistRepo.full_name.split('/');
-          const octokit = accounts.createClientForRepo(userId, playlistRepo);
-          const content = await github.downloadChunk(
-            octokit, owner, repoName, file.hls_playlist_path, playlistRepo.default_branch,
-            { subsystem: 'verify-hls' }
-          );
+          const content = await fetchRawText(hlsRawUrl(playlistRepo, file.hls_playlist_path));
           const parsed = parsePlaylistSegments(content);
           playlistHasEndList = parsed.hasEndList;
           playlistSegmentCount = parsed.extinfCount;
@@ -639,17 +640,25 @@ async function verifyHlsOnGitHub(userId, fileId, onProgress = null) {
           }
 
           if (!dbSegments.length && parsed.urls.length) {
-            const urlResults = await mapConcurrent(parsed.urls, 16, async (url, idx) => {
-              const repoPath = extractRepoPathFromRawUrl(url, playlistRepo);
-              if (!repoPath) return { index: idx, present: false };
-              const blob = await checkHlsBlobOnGitHub(userId, playlistRepo, repoPath);
-              return { index: idx, present: blob.present };
+            const urlResults = await mapConcurrent(parsed.urls, 32, async (url, idx) => {
+              const present = await rawUrlExists(url);
+              return { index: idx, present };
             });
             playlistOnlyMissing = urlResults
               .filter((r) => !r.present)
               .map((r) => r.index);
             if (playlistOnlyMissing.length) {
               playlistMismatch = true;
+            }
+          } else if (dbSegments.length > 0 && parsed.urls.length) {
+            const urlResults = await mapConcurrent(parsed.urls, 32, async (url, idx) => {
+              const present = await rawUrlExists(url);
+              return { index: idx, present };
+            });
+            const missingFromPlaylist = urlResults.filter((r) => !r.present).map((r) => r.index);
+            if (missingFromPlaylist.length) {
+              playlistMismatch = true;
+              playlistOnlyMissing = missingFromPlaylist;
             }
           }
         } catch (err) {
