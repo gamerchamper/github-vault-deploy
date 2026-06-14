@@ -51,7 +51,7 @@ const DetailsPreview = {
     if (type === 'video') {
       this.mount.innerHTML = `
         <div class="details-preview-media vault-video-enhanced-wrap">
-          <video class="details-preview-video vault-video-enhanced" controls playsinline preload="metadata"
+          <video class="details-preview-video vault-video-enhanced" controls controlslist="nodownload" playsinline preload="metadata"
             x-webkit-airplay="allow"
             src="${API.files.stream(file.id, view)}"></video>
         </div>`;

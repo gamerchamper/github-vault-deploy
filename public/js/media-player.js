@@ -12,6 +12,11 @@ const MediaPlayer = {
     video.setAttribute('x-webkit-airplay', 'allow');
     video.disableRemotePlayback = false;
     if (!video.getAttribute('preload')) video.setAttribute('preload', 'auto');
+    // Edge/Chrome attach hover quick actions (Enhance, PiP, etc.) to controlled videos.
+    video.setAttribute('controls', '');
+    if (!video.getAttribute('controlslist')) {
+      video.setAttribute('controlslist', 'nodownload');
+    }
     video.classList.add('vault-video-enhanced');
 
     if ('disablePictureInPicture' in video) {
@@ -26,6 +31,29 @@ const MediaPlayer = {
     return video;
   },
 
+  /** Keep native controls enabled for Edge quick actions while Plyr supplies the visible UI. */
+  enableBrowserVideoActions(plyr) {
+    const video = plyr?.media;
+    if (!video || video.tagName !== 'VIDEO') return;
+
+    this.configureVideoElement(video);
+
+    const keepNativeControls = () => {
+      if (!video.isConnected) return;
+      if (!video.hasAttribute('controls')) video.setAttribute('controls', '');
+    };
+
+    keepNativeControls();
+    plyr.on('ready', keepNativeControls);
+    plyr.on('loadedmetadata', keepNativeControls);
+
+    if (typeof MutationObserver !== 'undefined') {
+      const obs = new MutationObserver(keepNativeControls);
+      obs.observe(video, { attributes: true, attributeFilter: ['controls'] });
+      plyr.on('destroy', () => obs.disconnect());
+    }
+  },
+
   plyrOptions(isAudio) {
     const options = {
       controls: isAudio ? this.CONTROLS_AUDIO : this.CONTROLS_VIDEO,
@@ -34,6 +62,7 @@ const MediaPlayer = {
     };
     if (!isAudio) {
       options.playsinline = true;
+      options.disableContextMenu = false;
       options.fullscreen = { enabled: true, iosNative: true, fallback: true };
     }
     return options;
@@ -44,8 +73,7 @@ const MediaPlayer = {
     if (!isAudio) this.configureVideoElement(el);
     const plyr = new Plyr(el, this.plyrOptions(isAudio));
     if (!isAudio) {
-      const media = plyr.media || el;
-      if (media && media !== el) this.configureVideoElement(media);
+      this.enableBrowserVideoActions(plyr);
       const wrapper = plyr.elements?.container?.querySelector?.('.plyr__video-wrapper');
       if (wrapper) wrapper.classList.add('vault-video-enhanced-wrap');
     }
@@ -232,7 +260,7 @@ const MediaPlayer = {
   buildVideoPlayerHtml() {
     return `
       <div class="viewer-player-wrap share-video-player vault-video-enhanced-wrap">
-        <video class="share-video-el vault-video-enhanced" playsinline webkit-playsinline preload="auto" x-webkit-airplay="allow"></video>
+        <video class="share-video-el vault-video-enhanced" controls playsinline webkit-playsinline preload="auto" x-webkit-airplay="allow" controlslist="nodownload"></video>
       </div>
     `;
   },

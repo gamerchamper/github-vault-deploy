@@ -51,6 +51,8 @@ describe('media-player client', function () {
       expect(video.getAttribute('webkit-playsinline')).to.equal('');
       expect(video.getAttribute('x-webkit-airplay')).to.equal('allow');
       expect(video.getAttribute('preload')).to.equal('auto');
+      expect(video.getAttribute('controls')).to.equal('');
+      expect(video.getAttribute('controlslist')).to.equal('nodownload');
       expect(video._classes.has('vault-video-enhanced')).to.be.true;
     });
   });
@@ -60,6 +62,7 @@ describe('media-player client', function () {
       const opts = MediaPlayer.plyrOptions(false);
       expect(opts.controls).to.include('airplay');
       expect(opts.playsinline).to.be.true;
+      expect(opts.disableContextMenu).to.be.false;
     });
 
     it('should not include airplay for audio', function () {
@@ -75,6 +78,8 @@ describe('media-player client', function () {
       expect(html).to.include('vault-video-enhanced-wrap');
       expect(html).to.include('vault-video-enhanced');
       expect(html).to.include('x-webkit-airplay="allow"');
+      expect(html).to.include('controls');
+      expect(html).to.include('controlslist="nodownload"');
     });
   });
 });

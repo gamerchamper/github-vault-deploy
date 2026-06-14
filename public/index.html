@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.7">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.8">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.0">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -652,7 +652,7 @@
           </div>
           <img id="viewer-image" class="viewer-media hidden" alt="">
           <div id="viewer-video-wrap" class="viewer-player-wrap vault-video-enhanced-wrap hidden">
-            <video id="viewer-video" class="vault-video-enhanced" playsinline webkit-playsinline preload="auto" x-webkit-airplay="allow"></video>
+            <video id="viewer-video" class="vault-video-enhanced" controls playsinline webkit-playsinline preload="auto" x-webkit-airplay="allow" controlslist="nodownload"></video>
           </div>
           <div id="viewer-audio-wrap" class="viewer-player-wrap viewer-audio-player hidden">
             <div class="audio-visual-stage">
@@ -1085,7 +1085,7 @@
   <script src="/js/hls.min.js?v=1.0.0"></script>
 
   <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
-  <script src="/js/media-player.js?v=1.0.1"></script>
+  <script src="/js/media-player.js?v=1.0.2"></script>
   <script src="/js/api.js?v=1.0.6"></script>
   <script src="/js/playback-memory.js?v=1.0.0"></script>
   <script src="/js/pdf-viewer.js?v=1.0.0"></script>

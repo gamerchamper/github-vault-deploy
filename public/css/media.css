@@ -122,6 +122,31 @@
 .vault-video-enhanced-wrap .plyr__video-wrapper video {
   transform: none !important;
   filter: none !important;
+  pointer-events: auto;
+}
+
+/* Hide duplicate native bar; keep controls attribute for Edge hover quick actions */
+.vault-video-enhanced-wrap video.vault-video-enhanced[controls]::-webkit-media-controls-enclosure {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  overflow: hidden;
+}
+
+.vault-video-enhanced-wrap video.vault-video-enhanced[controls]::-webkit-media-controls {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  overflow: hidden;
+}
+
+/* Let hover reach the video surface (Edge quick actions); Plyr click-to-play still works */
+.vault-video-enhanced-wrap .plyr--paused .plyr__control--overlaid {
+  pointer-events: none;
+}
+
+.vault-video-enhanced-wrap .plyr__poster {
+  pointer-events: none;
 }
 
 .viewer-audio-player {

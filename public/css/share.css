@@ -627,6 +627,29 @@ body.share-cinema-active .share-video-player .share-video-el {
   transform: none;
 }
 
+.vault-video-enhanced-wrap video.vault-video-enhanced[controls]::-webkit-media-controls-enclosure,
+.vault-video-enhanced-wrap video.vault-video-enhanced[controls]::-webkit-media-controls {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  overflow: hidden;
+}
+
+.vault-video-enhanced-wrap .plyr--paused .plyr__control--overlaid,
+.share-video-player.vault-video-enhanced-wrap .plyr--paused .plyr__control--overlaid {
+  pointer-events: none;
+}
+
+.vault-video-enhanced-wrap .plyr__poster,
+.share-video-player.vault-video-enhanced-wrap .plyr__poster {
+  pointer-events: none;
+}
+
+.vault-video-enhanced-wrap .plyr__video-wrapper video,
+.share-video-player.vault-video-enhanced-wrap .plyr__video-wrapper video {
+  pointer-events: auto;
+}
+
 .share-video-player .plyr--video { max-height: none; width: 100%; }
 .share-video-player .plyr__video-wrapper {
   height: auto !important;
