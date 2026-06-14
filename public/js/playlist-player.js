@@ -92,16 +92,14 @@ const PlaylistPlayer = {
     const fragment = document.createDocumentFragment();
     for (const file of items) {
       const idx = PlaylistQueue.items.findIndex((f) => f.id === file.id);
-      const prog = PlaylistQueue.getProgress(file.id);
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'playlist-queue-item';
-      if (current?.id === file.id) row.classList.add('is-active');
-      if (prog.completed) row.classList.add('is-completed');
-      else if (prog.progress_pct > 5) row.classList.add('is-in-progress');
+      const prog = PlaylistQueue.decorateQueueRow(row, file, idx, { currentId: current?.id });
 
       const thumb = document.createElement('div');
       thumb.className = 'playlist-queue-thumb';
+      thumb.insertAdjacentHTML('beforeend', PlaylistQueue.progressRingSvg(prog));
       if (file.has_thumbnail) {
         const img = document.createElement('img');
         img.src = API.files.thumbnail(file.id, file.thumbVersion);
@@ -109,7 +107,10 @@ const PlaylistPlayer = {
         img.loading = 'lazy';
         thumb.appendChild(img);
       } else {
-        thumb.textContent = this.typeIcon(file);
+        const icon = document.createElement('span');
+        icon.className = 'playlist-queue-thumb-icon';
+        icon.textContent = this.typeIcon(file);
+        thumb.appendChild(icon);
       }
 
       const body = document.createElement('div');
@@ -120,21 +121,46 @@ const PlaylistPlayer = {
         || (typeof DisplayNames !== 'undefined' ? DisplayNames.get(file.id, file.name) : file.name);
       const meta = document.createElement('span');
       meta.className = 'playlist-queue-meta';
-      meta.textContent = `${idx + 1} · ${formatSize(file.size)}`;
+      const metaParts = PlaylistQueue.itemMetaParts(file, idx);
+      if (PlaylistQueue.isSeen(prog)) metaParts.push('Watched');
+      else if (prog.progress_pct >= 3) metaParts.push(`${Math.round(prog.progress_pct)}%`);
+      meta.textContent = metaParts.join(' · ');
       body.append(name, meta);
-
-      if (prog.progress_pct > 0 && !prog.completed) {
-        const bar = document.createElement('div');
-        bar.className = 'playlist-queue-progress';
-        bar.style.setProperty('--progress', `${Math.min(100, prog.progress_pct)}%`);
-        body.appendChild(bar);
-      }
+      PlaylistQueue.appendQueueProgress(body, prog);
 
       row.append(thumb, body);
       row.addEventListener('click', () => this.playItem(file.id));
       fragment.appendChild(row);
     }
     this.listEl.appendChild(fragment);
+  },
+
+  onProgressUpdate(fileId) {
+    if (!this.listEl) return;
+    const row = this.listEl.querySelector(`[data-file-id="${fileId}"]`);
+    if (!row) {
+      this.render();
+      return;
+    }
+    const file = PlaylistQueue.items.find((f) => f.id === fileId);
+    if (!file) return;
+    const idx = PlaylistQueue.items.findIndex((f) => f.id === fileId);
+    const prog = PlaylistQueue.decorateQueueRow(row, file, idx, { currentId: PlaylistQueue.current()?.id });
+    const meta = row.querySelector('.playlist-queue-meta');
+    if (meta) {
+      const metaParts = PlaylistQueue.itemMetaParts(file, idx);
+      if (PlaylistQueue.isSeen(prog)) metaParts.push('Watched');
+      else if (prog.progress_pct >= 3) metaParts.push(`${Math.round(prog.progress_pct)}%`);
+      meta.textContent = metaParts.join(' · ');
+    }
+    const ring = row.querySelector('.playlist-queue-ring');
+    if (ring) ring.outerHTML = PlaylistQueue.progressRingSvg(prog);
+    const oldBar = row.querySelector('.playlist-queue-progress');
+    const oldBadge = row.querySelector('.playlist-queue-seen-badge');
+    oldBar?.remove();
+    oldBadge?.remove();
+    const body = row.querySelector('.playlist-queue-body');
+    if (body) PlaylistQueue.appendQueueProgress(body, prog);
   },
 
   typeIcon(file) {
@@ -165,18 +191,5 @@ const PlaylistPlayer = {
     }
     const next = PlaylistQueue.next();
     if (next) Viewer.openFromPlaylist(next);
-  },
-
-  onTimeUpdate(fileId, currentTime, duration) {
-    if (!PlaylistQueue.playlistId || !duration) return;
-    const pct = (currentTime / duration) * 100;
-    const completed = pct >= 95;
-    PlaylistQueue.persistProgress(fileId, {
-      position_seconds: currentTime,
-      progress_pct: pct,
-      completed,
-    });
-    const row = this.listEl?.querySelector(`[data-file-id="${fileId}"]`);
-    if (row && completed) row.classList.add('is-completed');
   },
 };

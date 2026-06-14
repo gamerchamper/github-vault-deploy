@@ -14,6 +14,26 @@ const PlaylistQueue = {
   isPublic: false,
   publicToken: null,
   progressMap: new Map(),
+  SEEN_THRESHOLD: 90,
+
+  isSeen(prog) {
+    if (!prog) return false;
+    return !!(prog.completed || (prog.progress_pct >= this.SEEN_THRESHOLD));
+  },
+
+  loadPublicProgress(token) {
+    if (!token || typeof PlaybackMemory === 'undefined') return;
+    const prefix = PlaybackMemory.publicPrefix + token + ':';
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(prefix)) continue;
+      const fileId = k.slice(prefix.length);
+      const data = PlaybackMemory.normalizeProgress(PlaybackMemory.read(k));
+      if (data.progress_pct > 0 || data.completed) {
+        this.progressMap.set(fileId, data);
+      }
+    }
+  },
 
   reset() {
     this.items = [];
@@ -51,6 +71,7 @@ const PlaylistQueue = {
       : 0;
     if (this.index < 0) this.index = 0;
     this.shuffledOrder = this.items.map((_, i) => i);
+    if (isPublic && publicToken) this.loadPublicProgress(publicToken);
   },
 
   applyProgress(progressList) {
@@ -109,7 +130,53 @@ const PlaylistQueue = {
   },
 
   setProgress(fileId, data) {
-    this.progressMap.set(fileId, { ...this.getProgress(fileId), ...data });
+    const merged = { ...this.getProgress(fileId), ...data };
+    if (merged.completed || merged.progress_pct >= this.SEEN_THRESHOLD) {
+      merged.completed = true;
+      merged.progress_pct = Math.max(merged.progress_pct, 100);
+    }
+    this.progressMap.set(fileId, merged);
+  },
+
+  progressRingSvg(prog) {
+    const seen = this.isSeen(prog);
+    const pct = seen ? 100 : Math.min(100, Math.max(0, prog.progress_pct || 0));
+    const r = 16;
+    const c = 2 * Math.PI * r;
+    const dash = (pct / 100) * c;
+    return `<svg class="playlist-queue-ring" viewBox="0 0 36 36" aria-hidden="true">
+      <circle class="playlist-queue-ring-bg" cx="18" cy="18" r="${r}" fill="none" stroke-width="2.5"/>
+      <circle class="playlist-queue-ring-fill${seen ? ' is-complete' : ''}" cx="18" cy="18" r="${r}" fill="none" stroke-width="2.5"
+        stroke-dasharray="${dash.toFixed(2)} ${c.toFixed(2)}" stroke-linecap="round" transform="rotate(-90 18 18)"/>
+    </svg>`;
+  },
+
+  decorateQueueRow(row, file, idx, { currentId = null } = {}) {
+    const prog = this.getProgress(file.id);
+    row.dataset.fileId = file.id;
+    row.classList.toggle('is-active', currentId === file.id);
+    row.classList.toggle('is-seen', this.isSeen(prog));
+    row.classList.toggle('is-completed', this.isSeen(prog));
+    row.classList.toggle('is-in-progress', !this.isSeen(prog) && prog.progress_pct >= 3);
+    return prog;
+  },
+
+  appendQueueProgress(body, prog) {
+    if (this.isSeen(prog)) {
+      const badge = document.createElement('span');
+      badge.className = 'playlist-queue-seen-badge';
+      badge.title = 'Watched';
+      badge.setAttribute('aria-label', 'Watched');
+      badge.textContent = '✓';
+      body.appendChild(badge);
+      return;
+    }
+    if (prog.progress_pct >= 3) {
+      const bar = document.createElement('div');
+      bar.className = 'playlist-queue-progress';
+      bar.style.setProperty('--progress', `${Math.min(100, prog.progress_pct)}%`);
+      body.appendChild(bar);
+    }
   },
 
   current() {
@@ -185,14 +252,25 @@ const PlaylistQueue = {
   },
 
   async persistProgress(fileId, { position_seconds, progress_pct, completed }) {
-    if (!this.playlistId || this.isPublic) return;
-    this.setProgress(fileId, { position_seconds, progress_pct, completed });
+    const seen = completed || progress_pct >= this.SEEN_THRESHOLD;
+    const payload = {
+      position_seconds: seen ? 0 : position_seconds,
+      progress_pct: seen ? 100 : progress_pct,
+      completed: seen,
+    };
+    this.setProgress(fileId, payload);
+
+    if (this.isPublic && this.publicToken && typeof PlaybackMemory !== 'undefined') {
+      PlaybackMemory.write(PlaybackMemory.publicKey(this.publicToken, fileId), payload);
+      return;
+    }
+    if (!this.playlistId) return;
     try {
       await API.playlists.saveProgress(this.playlistId, {
         file_id: fileId,
-        position_seconds,
-        progress_pct,
-        completed: completed ? 1 : 0,
+        position_seconds: payload.position_seconds,
+        progress_pct: payload.progress_pct,
+        completed: payload.completed ? 1 : 0,
       });
     } catch { /* ignore */ }
   },

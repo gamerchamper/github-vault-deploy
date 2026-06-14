@@ -767,7 +767,7 @@ function getContinueWatching(userId, limit = 20) {
     FROM playlist_progress pp
     JOIN playlists p ON p.id = pp.playlist_id AND p.user_id = ?
     JOIN files f ON f.id = pp.file_id AND f.is_deleted = 0
-    WHERE pp.user_id = ? AND pp.completed = 0 AND pp.progress_pct > 0 AND pp.progress_pct < 95
+    WHERE pp.user_id = ? AND pp.completed = 0 AND pp.progress_pct > 0 AND pp.progress_pct < 90
     ORDER BY pp.updated_at DESC LIMIT ?
   `).all(userId, userId, limit);
 }

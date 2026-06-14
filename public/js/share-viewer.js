@@ -89,6 +89,7 @@ const ShareViewer = {
     const viewer = document.getElementById('share-viewer');
     if (!viewer) return;
     viewer.querySelectorAll('video, audio').forEach((el) => {
+      PlaybackMemory?.detach?.(el);
       el.pause();
       el.removeAttribute('src');
       el.load();
@@ -837,6 +838,18 @@ const ShareViewer = {
     }
 
     this.startPlaybackStats(el);
+
+    if (this.currentFile?.id && (this.currentMediaType === 'video' || this.currentMediaType === 'audio')) {
+      PlaybackMemory.detach(el);
+      PlaybackMemory.track(el, this.currentFile, {
+        status: this.lastServerStatus,
+        onProgressUpdate: (fileId) => {
+          if (this.playlistMode && typeof SharePlaylist !== 'undefined') {
+            SharePlaylist.onProgressUpdate(fileId);
+          }
+        },
+      });
+    }
 
     if (this.currentMediaType === 'video') {
       this.fitCinemaStage(el);

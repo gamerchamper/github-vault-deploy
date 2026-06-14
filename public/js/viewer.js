@@ -461,7 +461,10 @@ const Viewer = {
     }
     if (this.currentFile?.id && (this.currentMediaType === 'video' || this.currentMediaType === 'audio')) {
       PlaybackMemory.detach(el);
-      PlaybackMemory.apply(el, this.currentFile.id);
+      PlaybackMemory.track(el, this.currentFile, {
+        status: this.lastServerStatus,
+        onProgressUpdate: (fileId) => PlaylistPlayer?.onProgressUpdate?.(fileId),
+      });
     }
     if (this.currentMediaType === 'audio') {
       if (!this.audioViz) this.audioViz = MediaPlayer.createAudioVizState();

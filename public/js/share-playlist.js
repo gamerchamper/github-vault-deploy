@@ -186,13 +186,12 @@ const SharePlaylist = {
       row.type = 'button';
       row.className = 'playlist-queue-item';
       row.dataset.fileId = file.id;
-      if (current?.id === file.id) {
-        row.classList.add('is-active');
-        activeRow = row;
-      }
+      const prog = PlaylistQueue.decorateQueueRow(row, file, idx, { currentId: current?.id });
+      if (current?.id === file.id) activeRow = row;
 
       const thumb = document.createElement('div');
       thumb.className = 'playlist-queue-thumb';
+      thumb.insertAdjacentHTML('beforeend', PlaylistQueue.progressRingSvg(prog));
       if (file.has_thumbnail) {
         const img = document.createElement('img');
         img.src = this.thumbnailUrl(file.id);
@@ -200,7 +199,10 @@ const SharePlaylist = {
         img.loading = 'lazy';
         thumb.appendChild(img);
       } else {
-        thumb.textContent = this.typeIcon(file);
+        const icon = document.createElement('span');
+        icon.className = 'playlist-queue-thumb-icon';
+        icon.textContent = this.typeIcon(file);
+        thumb.appendChild(icon);
       }
 
       const body = document.createElement('div');
@@ -210,8 +212,12 @@ const SharePlaylist = {
       name.textContent = PlaylistQueue.itemLabel(file);
       const meta = document.createElement('span');
       meta.className = 'playlist-queue-meta';
-      meta.textContent = PlaylistQueue.itemMetaParts(file, idx).join(' · ');
+      const metaParts = PlaylistQueue.itemMetaParts(file, idx);
+      if (PlaylistQueue.isSeen(prog)) metaParts.push('Watched');
+      else if (prog.progress_pct >= 3) metaParts.push(`${Math.round(prog.progress_pct)}%`);
+      meta.textContent = metaParts.join(' · ');
       body.append(name, meta);
+      PlaylistQueue.appendQueueProgress(body, prog);
 
       if (file.display_name?.trim() && file.display_name.trim() !== file.name) {
         const orig = document.createElement('span');
@@ -262,6 +268,32 @@ const SharePlaylist = {
     }
     const next = PlaylistQueue.next();
     if (next) this.playItem(next.id);
+  },
+
+  onProgressUpdate(fileId) {
+    if (!this.listEl) return;
+    const row = this.listEl.querySelector(`[data-file-id="${fileId}"]`);
+    if (!row) {
+      this.render();
+      return;
+    }
+    const file = PlaylistQueue.items.find((f) => f.id === fileId);
+    if (!file) return;
+    const idx = PlaylistQueue.items.findIndex((f) => f.id === fileId);
+    const prog = PlaylistQueue.decorateQueueRow(row, file, idx, { currentId: PlaylistQueue.current()?.id });
+    const meta = row.querySelector('.playlist-queue-meta');
+    if (meta) {
+      const metaParts = PlaylistQueue.itemMetaParts(file, idx);
+      if (PlaylistQueue.isSeen(prog)) metaParts.push('Watched');
+      else if (prog.progress_pct >= 3) metaParts.push(`${Math.round(prog.progress_pct)}%`);
+      meta.textContent = metaParts.join(' · ');
+    }
+    const ring = row.querySelector('.playlist-queue-ring');
+    if (ring) ring.outerHTML = PlaylistQueue.progressRingSvg(prog);
+    row.querySelector('.playlist-queue-progress')?.remove();
+    row.querySelector('.playlist-queue-seen-badge')?.remove();
+    const body = row.querySelector('.playlist-queue-body');
+    if (body) PlaylistQueue.appendQueueProgress(body, prog);
   },
 
   destroy() {
