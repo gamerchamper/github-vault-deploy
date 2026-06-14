@@ -60,6 +60,8 @@ function isTransientError(err) {
     'invalid chunk index',
     'chunk blob is',
     'a file with this name already exists',
+    'upload session was removed',
+    'already in progress on the server',
   ];
   return !permanent.some((p) => msg.includes(p));
 }
@@ -592,6 +594,10 @@ function getSeamlessStatus(userId, fileId) {
   };
 }
 
+function isProcessing(userId, fileId) {
+  return processing.has(`${userId}:${fileId}`);
+}
+
 function resumePendingOnStartup() {
   if (!fs.existsSync(SEAMLESS_DIR)) return 0;
   let resumed = 0;
@@ -660,6 +666,7 @@ module.exports = {
   processPipeline,
   getSeamlessStatus,
   resumePendingOnStartup,
+  isProcessing,
   partCount,
   findNextPart,
 };

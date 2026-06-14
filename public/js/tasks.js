@@ -414,7 +414,14 @@ const TaskPanel = {
       this.onTaskDone(task);
     }
     if (prev?.status === 'processing' && task.status === 'error') {
+      if (task.phase === 'cancelled') {
+        if (task.type === 'upload') void this.cleanupUploadTask(task.id);
+        this.removeLocal(task.id);
+        return;
+      }
       const errMsg = task.error && task.error !== 'Cancelled' && task.error !== 'Interrupted'
+        && task.error !== 'Superseded'
+        && task.error !== 'Upload session removed — start a new upload'
         ? task.error
         : null;
       const hint = task.resumable ? 'Resume from Background tasks' : 'See Background tasks for details';

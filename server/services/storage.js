@@ -93,6 +93,16 @@ function insertChunkRow({
     );
   } catch (err) {
     if (/FOREIGN KEY constraint failed/i.test(String(err.message))) {
+      if (!db.prepare('SELECT id FROM files WHERE id = ?').get(fileId)) {
+        throw new Error(
+          'Upload session was removed during processing — use Resume in Background tasks or start a new upload.'
+        );
+      }
+      if (!storageRepoExists(repoId)) {
+        throw new Error(
+          'Storage repository changed during upload — click Resume to continue on an available repo.'
+        );
+      }
       throw new Error(
         'Could not save chunk — the upload session or storage repo changed mid-upload. Click Resume to continue.'
       );
@@ -110,9 +120,6 @@ async function recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath) {
   const sha = await github.uploadChunk(
     octokit, owner, repoName, repoPath, encrypted, repo.default_branch
   );
-  db.prepare(
-    'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
-  ).run(encrypted.length, repo.id);
   return { repo, sha };
 }
 
@@ -450,6 +457,28 @@ function findBestUploadSession(userId, fileName, parentPath, size) {
   `).get(userId, normalizedParent, fileName, size);
 }
 
+function uploadSessionInUse(userId, fileId) {
+  let seamlessUpload;
+  try {
+    seamlessUpload = require('./seamless-upload');
+    if (seamlessUpload.isProcessing(userId, fileId)) return true;
+  } catch {
+    // seamless-upload may be unavailable in tests
+  }
+
+  const row = db.prepare(`
+    SELECT status, updated_at FROM tasks
+    WHERE user_id = ? AND type = 'upload'
+      AND status IN ('processing', 'pending', 'paused')
+      AND payload LIKE ?
+    ORDER BY updated_at DESC LIMIT 1
+  `).get(userId, `%"fileId":"${fileId}"%`);
+  if (!row) return false;
+  if (row.status === 'paused') return true;
+  const updatedMs = new Date(row.updated_at).getTime();
+  return Number.isFinite(updatedMs) && Date.now() - updatedMs < 30 * 60 * 1000;
+}
+
 async function abandonStaleUploadSessions(userId, fileName, parentPath, size) {
   const normalizedParent = normalizeParentPath(parentPath);
   const stale = db.prepare(`
@@ -459,6 +488,12 @@ async function abandonStaleUploadSessions(userId, fileName, parentPath, size) {
   `).all(userId, normalizedParent, fileName, size);
 
   for (const { id } of stale) {
+    if (uploadSessionInUse(userId, id)) {
+      throw new Error(
+        `An upload of "${fileName}" is already in progress on the server. `
+        + 'Wait for it to finish or cancel it in Background tasks before starting another.'
+      );
+    }
     await purgeUploadSessionLocal(userId, id);
   }
 }
@@ -467,6 +502,7 @@ async function purgeUploadSessionLocal(userId, fileId) {
   const file = db.prepare('SELECT id FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file) return;
 
+  if (uploadSessionInUse(userId, fileId)) return;
   capacity.releaseHlsReserve(userId, fileId);
   require('./git-upload').cleanupWorkspace(userId, fileId);
   db.prepare(`
@@ -512,7 +548,8 @@ function invalidateUploadTasksForFile(userId, fileId) {
     if (payload.fileId !== fileId) continue;
     tasks.update(row.id, userId, {
       status: 'error',
-      error: 'Upload session removed — start a new upload',
+      phase: 'cancelled',
+      error: 'Superseded',
       resumable: false,
     });
   }
@@ -783,23 +820,37 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
       throw new Error('Storage repository was removed during upload. Click Resume to continue.');
     }
     ({ repo, sha } = await recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath));
-  } else if (uploadMode !== 'git') {
-    db.prepare(
-      'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
-    ).run(encrypted.length, repo.id);
   }
 
-  insertChunkRow({
-    fileId,
-    chunkIdx,
-    repoId: repo.id,
-    repoPath,
-    sha,
-    encSize: encrypted.length,
-    iv,
-    authTag,
-    plainSize: buffer.length,
-  });
+  const persistChunk = () => {
+    insertChunkRow({
+      fileId,
+      chunkIdx,
+      repoId: repo.id,
+      repoPath,
+      sha,
+      encSize: encrypted.length,
+      iv,
+      authTag,
+      plainSize: buffer.length,
+    });
+    if (uploadMode !== 'git') {
+      db.prepare(
+        'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
+      ).run(encrypted.length, repo.id);
+    }
+  };
+
+  try {
+    persistChunk();
+  } catch (err) {
+    if (uploadMode !== 'git' && /storage repository changed/i.test(err.message)) {
+      ({ repo, sha } = await recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath));
+      persistChunk();
+    } else {
+      throw err;
+    }
+  }
 
   const sessionFile = db.prepare('SELECT upload_status FROM files WHERE id = ?').get(fileId);
   if (sessionFile?.upload_status === 'failed') {
