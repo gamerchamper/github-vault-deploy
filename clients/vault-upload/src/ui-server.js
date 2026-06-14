@@ -84,10 +84,18 @@ async function saveAndCheckConfig(config) {
     config.serverHistory = configStore.addToServerHistory(config);
   }
   configStore.save(config);
-  const ok = await new VaultApi(config.serverUrl, { cookie: config.cookie, apiKey: config.apiKey })
-    .checkAuth()
-    .catch(() => false);
-  return { config, authenticated: ok };
+  const api = new VaultApi(config.serverUrl, { cookie: config.cookie, apiKey: config.apiKey });
+  const ok = await api.checkAuth().catch(() => false);
+  let localUpload = null;
+  if (ok) {
+    try {
+      const stats = await api.stats();
+      localUpload = stats.localUpload || null;
+    } catch {
+      // optional
+    }
+  }
+  return { config, authenticated: ok, localUpload };
 }
 
 function getApi() {
@@ -247,6 +255,11 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .details-block .details-body{padding:0 8px 8px;display:grid;gap:8px}
 .feedback-box{border:1px solid var(--border);background:var(--bg-primary);border-radius:6px;padding:8px;color:var(--text-muted);font-size:10px}
 .feedback-box strong{color:var(--text-primary);font-size:11px}
+.local-upload-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:600;line-height:1.2}
+.local-upload-badge.hidden{display:none}
+.local-upload-badge.on{color:#0d7a3f;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.35)}
+.local-upload-badge.suggest{color:var(--text-muted);background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.22);font-weight:500}
+.local-upload-badge.suggest a{color:var(--accent);text-decoration:none}
 .plan-summary{display:grid;gap:4px;font-size:11px}
 .plan-summary div{display:flex;justify-content:space-between;gap:8px}
 .file-picker-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
@@ -305,6 +318,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <section class="panel">
 <div class="panel-hd"><h2>Upload</h2></div>
 <div class="panel-bd stack">
+<div class="local-upload-badge hidden" id="localUploadBadge"></div>
 <label><span class="label">Files</span>
 <div class="file-picker-row"><input id="filePath" placeholder="C:\\path\\to\\file"><button class="btn-secondary btn-sm desktop-only" id="browseBtnSide" type="button">Browse</button></div>
 </label>
@@ -382,8 +396,9 @@ async function loadServerHistory(){try{const [servers,cfg]=await Promise.all([ap
 async function useSelectedServer(){const id=decodeServerId($('serverHistory').value);if(!id)return;setState('Connecting…','busy');try{const r=await api('/api/servers/select',{method:'POST',body:JSON.stringify({id})});await loadConfig();setState(r.authenticated?'Connected':'Auth failed',r.authenticated?'good':'bad')}catch(e){setState(e.message,'bad')}finally{updateButtons()}}
 async function removeSelectedServer(){const id=decodeServerId($('serverHistory').value);if(!id)return;if(!confirm('Remove this server from history?'))return;const data=await api('/api/servers/'+encodeURIComponent(id),{method:'DELETE'});renderServerHistory(data.servers||[],'');await loadConfig()}
 function renderFeedback(feedback){const box=$('feedbackBox');const storage=feedback&&feedback.storage;if(!storage){box.classList.add('hidden');return}const warnings=(storage.warnings||[]).map(w=>'<div>⚠ '+esc(w)+'</div>').join('');box.innerHTML='<strong>Storage</strong><div>'+bytes(storage.availableBytes)+' free · '+storage.availableRepoCount+'/'+storage.activeRepoCount+' repos · '+storage.usedPercent+'% used</div>'+warnings;box.classList.remove('hidden')}
+function renderLocalUpload(localUpload){const el=$('localUploadBadge');if(!el)return;if(!localUpload){el.className='local-upload-badge hidden';el.textContent='';return}if(localUpload.active){const ip=localUpload.serverIpv4&&localUpload.serverIpv4[0];el.className='local-upload-badge on';el.textContent=ip?'⚡ Local upload: ON ('+ip+')':'⚡ Local upload: ON';el.title='Connected to the server over the local network.';return}if(localUpload.onLan&&localUpload.localUrl){el.className='local-upload-badge suggest';el.innerHTML='⚡ Faster: <a href="'+esc(localUpload.localUrl)+'">'+esc(localUpload.localUrl.replace(/^https?:\\/\\//,''))+'</a>';el.title='Use the local server address for LAN-speed uploads.';return}el.className='local-upload-badge hidden';el.textContent=''}
 function renderPlan(plan){renderFeedback(plan.feedback);if(plan.plans&&plan.plans.length>1){$('planOut').innerHTML='<div class="plan-summary"><div><span>Files</span><strong>'+plan.totalFiles+'</strong></div><div><span>Total</span><strong>'+bytes(plan.totalSize)+'</strong></div><div><span>Chunks</span><strong>'+plan.totalChunks+'</strong></div></div>';return}const p=plan.plans?plan.plans[0]:plan;const chunkMb=p.chunkSize?(p.chunkSize/1048576).toFixed(2)+' MB':bytes(p.chunkSize);$('planOut').innerHTML='<div class="plan-summary"><div><span>Chunks</span><strong>'+p.totalChunks+'</strong></div><div><span>Chunk size</span><strong>'+chunkMb+'</strong></div><div><span>ETA</span><strong>'+esc(p.estimatedTime||'--')+'</strong></div></div>'}
-async function loadConfig(){const c=await api('/api/config');$('serverUrl').value=c.serverUrl||'';$('apiKey').value=c.apiKey||'';$('cookie').value=c.cookie||'';renderServerHistory(c.serverHistory||[],c.activeServerId||'');const label=c.hasApiKey?c.apiKeyPreview:(c.cookiePreview||'');setAuth((c.hasApiKey||c.hasCookie)&&c.serverUrl,'Connected · '+label);updateButtons();if(state.configured)loadFolders()}
+async function loadConfig(){const c=await api('/api/config');$('serverUrl').value=c.serverUrl||'';$('apiKey').value=c.apiKey||'';$('cookie').value=c.cookie||'';renderServerHistory(c.serverHistory||[],c.activeServerId||'');renderLocalUpload(c.localUpload||null);const label=c.hasApiKey?c.apiKeyPreview:(c.cookiePreview||'');setAuth((c.hasApiKey||c.hasCookie)&&c.serverUrl,'Connected · '+label);updateButtons();if(state.configured)loadFolders()}
 async function loadFolders(){try{const f=await api('/api/folders');const sel=$('parentPath');if(!sel||!f.folders)return;const cur=sel.value;sel.innerHTML=f.folders.map(p=>'<option value="'+esc(p)+'"'+(p===cur?' selected':'')+'>'+esc(p||'/')+'</option>').join('');if(!sel.value)sel.value=cur||'/'}catch{}}
 async function refreshSessions(){const data=await api('/api/sessions');$('sessions').innerHTML=data.sessions.map(s=>'<div class="item"><strong>'+esc(s.fileName)+'</strong><div class="muted">'+esc(s.status)+' · '+(s.chunksDone||0)+'/'+(s.totalChunks||0)+'</div><div class="muted">'+esc(s.taskId)+'</div><div class="actions"><button class="btn-secondary btn-sm" data-resume="'+esc(s.taskId)+'">Resume</button></div></div>').join('')||'<p class="muted">No sessions.</p>';document.querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>startUpload(b.dataset.resume));}
 async function refreshRemote(){try{const data=await api('/api/remote-tasks');$('remote').innerHTML=(data.tasks||[]).map(t=>'<div class="item"><strong>'+esc((t.title||t.id)||'task')+'</strong><div class="muted">'+esc(t.status||'')+' · '+esc(t.phase||'')+' · '+(t.percent??0)+'%</div><div class="actions"><button class="btn-secondary btn-sm" data-pause="'+esc(t.id)+'">Pause</button><button class="btn-secondary btn-sm" data-resume-task="'+esc(t.id)+'">Resume</button><button class="btn-danger btn-sm" data-cancel="'+esc(t.id)+'">Cancel</button></div></div>').join('')||'<p class="muted">No remote tasks.</p>';document.querySelectorAll('[data-pause]').forEach(b=>b.onclick=()=>taskAction('pause',b.dataset.pause));document.querySelectorAll('[data-resume-task]').forEach(b=>b.onclick=()=>taskAction('resume',b.dataset.resumeTask));document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>taskAction('cancel',b.dataset.cancel));}catch(e){$('remote').innerHTML='<p class="muted">'+esc(e.message)+'</p>'}}
@@ -393,7 +408,7 @@ function updateJobUi(j){const queueLabel=uploadQueue&&uploadQueue.total>1?' · '
 function waitForJob(taskId){return new Promise(resolve=>{const tick=async()=>{try{const j=await api('/api/jobs/'+encodeURIComponent(taskId));updateJobUi(j);if(['done','error','paused'].includes(j.status))resolve(j);else setTimeout(tick,500)}catch(e){setState('Waiting…','busy');setTimeout(tick,1200)}};tick()})}
 async function startUpload(resumeTaskId){validateUpload();const btn=$('uploadBtn');const paths=resumeTaskId?[$('filePath').value.trim()]:getUploadPaths();if(!paths.length)throw new Error('Choose a file first');setBusy(btn,true,'Starting');uploadQueue=paths.length>1&&!resumeTaskId?{total:paths.length,done:0,index:0}:null;try{const runOne=async(filePath,i)=>{if(uploadQueue)uploadQueue.index=i;{try{const base=getUploadBody();const body={...base,filePath};if(paths.length>1)body.concurrency=Math.min(parseInt(base.concurrency,10)||5,3);if(resumeTaskId&&i===0)body.resumeTaskId=resumeTaskId;const r=await api('/api/upload',{method:'POST',body:JSON.stringify(body)});return await waitForJob(r.taskId)}finally{if(uploadQueue)uploadQueue.done++}}};const limit=resumeTaskId?1:Math.min(MAX_PARALLEL_FILES,paths.length);const results=await runPool(paths,limit,runOne);const done=results.filter(j=>j&&j.status==='done').length;const failed=results.filter(j=>j&&j.status==='error');const paused=results.filter(j=>j&&j.status==='paused');if(!done&&!paused.length&&failed.length)throw new Error(failed[0].error||'Upload failed');if(paused.length&&!done){setState('Paused');return}if(failed.length)setState(done+' done, '+failed.length+' failed',done?'good':'bad');else setState(paths.length>1?done+'/'+paths.length+' complete':'Done','good');if(!failed.length&&paths.length>1){selectedFiles=[];renderSelectedFiles()}}catch(e){setState(e.message,'bad');$('logs').textContent=e.stack||e.message}finally{uploadQueue=null;setBusy(btn,false);refreshSessions();refreshRemote()}}
 async function chooseFiles(){if(!window.vaultDesktop){setState('Desktop picker only','bad');return}const pick=window.vaultDesktop.selectFiles||window.vaultDesktop.selectFile;const result=await pick();const filePaths=result&&(result.filePaths||[]).length?result.filePaths:(result&&result.filePath?[result.filePath]:[]);if(result&&!result.canceled&&filePaths.length){selectedFiles=filePaths;renderSelectedFiles();setState(filePaths.length+' file(s)','good')}}
-async function saveConfig(){const btn=$('saveConfig');setBusy(btn,true,'Checking');setState('Checking…','busy');try{const r=await api('/api/config',{method:'POST',body:JSON.stringify({serverUrl:$('serverUrl').value.trim(),apiKey:$('apiKey').value.trim(),cookie:$('cookie').value.trim()})});renderServerHistory(r.serverHistory||[],r.activeServerId||'');$('serverUrl').value=r.serverUrl||'';$('apiKey').value=r.apiKey||'';$('cookie').value=r.cookie||'';const label=r.hasApiKey?r.apiKeyPreview:(r.cookiePreview||'');setAuth((r.hasApiKey||r.hasCookie)&&r.serverUrl,'Connected · '+label);updateButtons();if(state.configured)loadFolders();const saved=(r.serverHistory||[]).length;setState(r.authenticated?(saved?'Connected · saved to history':'Connected'):'Saved, but auth failed',r.authenticated?'good':'bad')}catch(e){setState(e.message,'bad')}finally{setBusy(btn,false)}}
+async function saveConfig(){const btn=$('saveConfig');setBusy(btn,true,'Checking');setState('Checking…','busy');try{const r=await api('/api/config',{method:'POST',body:JSON.stringify({serverUrl:$('serverUrl').value.trim(),apiKey:$('apiKey').value.trim(),cookie:$('cookie').value.trim()})});renderServerHistory(r.serverHistory||[],r.activeServerId||'');$('serverUrl').value=r.serverUrl||'';$('apiKey').value=r.apiKey||'';$('cookie').value=r.cookie||'';renderLocalUpload(r.localUpload||null);const label=r.hasApiKey?r.apiKeyPreview:(r.cookiePreview||'');setAuth((r.hasApiKey||r.hasCookie)&&r.serverUrl,'Connected · '+label);updateButtons();if(state.configured)loadFolders();const saved=(r.serverHistory||[]).length;const localNote=r.localUpload&&r.localUpload.active?' · Local upload ON':'';setState(r.authenticated?((saved?'Connected · saved to history':'Connected')+localNote):'Saved, but auth failed',r.authenticated?'good':'bad')}catch(e){setState(e.message,'bad')}finally{setBusy(btn,false)}}
 async function planUpload(){validateUpload();const btn=$('planBtn');const paths=getUploadPaths();setBusy(btn,true,'Planning');setState('Planning…','busy');try{const body={chunkSize:chunkSizeFromMbInput()};if(paths.length>1)body.filePaths=paths;else body.filePath=paths[0];const r=await api('/api/plan',{method:'POST',body:JSON.stringify(body)});renderPlan(r);setState('Plan ready','good')}catch(e){setState(e.message,'bad');$('planOut').textContent=e.message}finally{setBusy(btn,false)}}
 async function tryAutoConnect(){try{const defaults=[window.location.origin,'http://localhost:3000','http://127.0.0.1:3000'];for(const url of defaults){try{const r=await api('/api/probe-server',{method:'POST',body:JSON.stringify({url})});if(r&&r.key){await api('/api/config',{method:'POST',body:JSON.stringify({serverUrl:r.serverUrl||url,apiKey:r.key,cookie:''})});setState('Auto-connected','good');return true}}catch{}}return false}catch{return false}}
 async function initDesktopMode(){if(window.vaultDesktop){document.body.classList.add('is-desktop');$('desktopStatus').textContent='Desktop';$('desktopStatus').classList.add('good')}else{$('desktopStatus').textContent='Browser'}}
@@ -422,8 +437,8 @@ function createServer() {
         if (!config.apiKey && !config.cookie) {
           return json(res, 400, { error: 'API key or session cookie is required' });
         }
-        const { authenticated } = await saveAndCheckConfig(config);
-        return json(res, 200, { ...safeConfig(config, true), authenticated });
+        const { authenticated, localUpload } = await saveAndCheckConfig(config);
+        return json(res, 200, { ...safeConfig(config, true), authenticated, localUpload });
       }
       if (req.method === 'GET' && url.pathname === '/api/servers') {
         const config = configStore.load();

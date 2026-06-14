@@ -117,6 +117,10 @@ class VaultApi {
     });
   }
 
+  async stats() {
+    return this._fetch('GET', '/api/files/stats');
+  }
+
   async uploadInit({ fileName, parentPath, size, mimeType, chunkSize, fileId, taskId, uploadMode, convertHls }) {
     return this._fetch('POST', '/api/files/upload/init', {
       headers: { 'Content-Type': 'application/json' },

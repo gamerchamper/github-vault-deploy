@@ -1486,6 +1486,44 @@ body::before {
 
 .status-right { margin-left: auto; }
 
+.local-upload-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.local-upload-status.hidden {
+  display: none;
+}
+
+.local-upload-status.local-upload-on {
+  color: #0d7a3f;
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.local-upload-status.local-upload-suggest {
+  color: var(--text-secondary);
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  font-weight: 500;
+}
+
+.local-upload-status.local-upload-suggest a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.local-upload-status.local-upload-suggest a:hover {
+  text-decoration: underline;
+}
+
 /* Background task panel — see consolidated styles at end of file */
 
 .task-clear-failed {

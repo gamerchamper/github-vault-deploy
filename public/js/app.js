@@ -13,6 +13,8 @@ const App = {
   storageReposExpanded: false,
   metadataReposExpanded: false,
   apiKeysLoaded: false,
+  localUploadToastShown: false,
+  lastLocalUpload: null,
 
   toast(message, type = '') {
     if (type === 'error') {
@@ -575,6 +577,8 @@ const App = {
       }
 
       this.gitAvailable = !!stats.gitAvailable;
+      this.lastLocalUpload = stats.localUpload || null;
+      this.renderLocalUploadStatus(this.lastLocalUpload);
       const uploadMode = document.getElementById('upload-mode');
       const gitOption = uploadMode?.querySelector('option[value="git"]');
       if (gitOption) {
@@ -587,6 +591,40 @@ const App = {
     } catch {
       // stats are optional
     }
+  },
+
+  renderLocalUploadStatus(localUpload) {
+    const el = document.getElementById('local-upload-status');
+    if (!el) return;
+
+    if (!localUpload) {
+      el.className = 'local-upload-status hidden';
+      el.textContent = '';
+      return;
+    }
+
+    if (localUpload.active) {
+      const ip = localUpload.serverIpv4?.[0];
+      el.className = 'local-upload-status local-upload-on';
+      el.textContent = ip ? `⚡ Local upload: ON (${ip})` : '⚡ Local upload: ON';
+      el.title = 'Your browser is on the same local network as the server — uploads use LAN speed, not the public internet.';
+      if (!this.localUploadToastShown) {
+        this.localUploadToastShown = true;
+        this.toast('Local upload path is active — you are on the server LAN (faster uploads)', 'success');
+      }
+      return;
+    }
+
+    if (localUpload.onLan && localUpload.localUrl) {
+      const label = localUpload.localUrl.replace(/^https?:\/\//, '');
+      el.className = 'local-upload-status local-upload-suggest';
+      el.innerHTML = `⚡ Faster uploads: <a href="${localUpload.localUrl}">${label}</a>`;
+      el.title = 'You are on the same network as the server. Open the local address for LAN-speed uploads.';
+      return;
+    }
+
+    el.className = 'local-upload-status hidden';
+    el.textContent = '';
   },
 
   hideCacheContextMenu() {
@@ -1652,6 +1690,11 @@ const App = {
               <div><span class="plan-label">Pool free</span><span>${formatSize(plan.storageAvailableBytes)}</span></div>
             </div>` : ''}
             <p class="plan-note">GitHub Contents API limit: ${plan.githubMaxMb} MB per stored file.</p>
+            ${App.lastLocalUpload?.active
+              ? '<p class="plan-note plan-local-on">⚡ Local upload is ON — this file will stream to the server over your LAN.</p>'
+              : App.lastLocalUpload?.onLan && App.lastLocalUpload?.localUrl
+                ? `<p class="plan-note">⚡ For faster uploads, open <a href="${App.lastLocalUpload.localUrl}">${App.lastLocalUpload.localUrl.replace(/^https?:\/\//, '')}</a> on this device.</p>`
+                : ''}
             <p class="plan-note">Upload method: <strong>${selectedMode === 'seamless'
               ? 'Seamless Upload — stream to server cache, auto encrypt/upload/HLS with retry'
               : selectedMode === 'git' ? 'Git clone & push' : 'API chunks (resumable)'}</strong></p>

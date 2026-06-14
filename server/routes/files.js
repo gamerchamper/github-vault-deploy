@@ -1633,7 +1633,12 @@ router.post('/move', async (req, res) => {
 
 router.get('/stats', async (req, res) => {
   try {
-    res.json(await storage.getStorageStats(req.user.id));
+    const localNetwork = require('../services/local-network');
+    const stats = await storage.getStorageStats(req.user.id);
+    res.json({
+      ...stats,
+      localUpload: localNetwork.getLocalUploadStatus(req),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
