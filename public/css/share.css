@@ -974,10 +974,23 @@ body.share-cinema-active .share-viewer-stage {
   flex-wrap: wrap;
 }
 
+.share-stage-controls-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
 .share-stage-ctrl-btn {
   flex-shrink: 0;
   font-size: 13px;
   padding: 6px 14px;
+}
+
+.share-stage-ctrl-btn.is-active {
+  color: var(--accent);
+  background: var(--accent-glow);
+  border-color: var(--accent);
 }
 
 .share-stage-ctrl-btn:disabled {

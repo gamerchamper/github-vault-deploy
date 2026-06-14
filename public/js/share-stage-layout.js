@@ -162,11 +162,51 @@ const ShareStageLayout = {
 
   initStageControls() {
     if (this._controlsBound) return;
+    document.getElementById('share-stage-theater')?.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      this.applyTheaterMode();
+    });
     document.getElementById('share-stage-reset')?.addEventListener('click', (ev) => {
       ev.preventDefault();
       this.resetToDefault();
     });
     this._controlsBound = true;
+  },
+
+  isTheaterWidth(width = this.panel?.getBoundingClientRect().width ?? 0) {
+    if (!this.panel?.classList.contains('share-stage-user-sized')) return false;
+    const max = this.getSideBySideMaxStageWidth();
+    return Math.abs(width - max) <= 2;
+  },
+
+  applyTheaterMode({ persist = true } = {}) {
+    if (!this.panel || !this.isActive()) return null;
+
+    const rect = this.panel.getBoundingClientRect();
+    const saved = this.read();
+    const parent = this.panel.parentElement?.getBoundingClientRect();
+    const { margin } = this.getBounds();
+    const width = this.getSideBySideMaxStageWidth();
+    const height = saved?.height || rect.height;
+    const top = saved?.top ?? rect.top;
+    const left = parent
+      ? parent.left + margin
+      : (saved?.left ?? rect.left);
+
+    const layout = this.apply({
+      width,
+      height,
+      left,
+      top,
+      userSized: true,
+      widthSized: false,
+      heightSized: saved?.heightSized ?? false,
+      theaterMode: true,
+    }, { reflow: true });
+
+    if (layout && persist) this.save(layout);
+    this.updateStageControls();
+    return layout;
   },
 
   hasResizableMedia() {
@@ -184,9 +224,15 @@ const ShareStageLayout = {
   updateStageControls() {
     const wrap = document.getElementById('share-stage-controls');
     const resetBtn = document.getElementById('share-stage-reset');
+    const theaterBtn = document.getElementById('share-stage-theater');
     if (!wrap) return;
     const show = this.isActive() && this.hasResizableMedia();
     wrap.classList.toggle('hidden', !show);
+    const theaterActive = this.isTheaterWidth() || !!this.read()?.theaterMode;
+    if (theaterBtn) {
+      theaterBtn.disabled = theaterActive;
+      theaterBtn.classList.toggle('is-active', theaterActive);
+    }
     if (resetBtn) resetBtn.disabled = !this.isCustomSized();
   },
 
@@ -269,6 +315,7 @@ const ShareStageLayout = {
       userSized: true,
       widthSized: layout.widthSized ?? this.read()?.widthSized ?? false,
       heightSized: layout.heightSized ?? this.read()?.heightSized ?? false,
+      theaterMode: layout.theaterMode ?? this.read()?.theaterMode ?? false,
     };
   },
 
@@ -488,7 +535,8 @@ const ShareStageLayout = {
 
     const saved = this.read();
     if (saved?.userSized) {
-      this.apply(saved, { reflow: true });
+      if (saved.theaterMode) this.applyTheaterMode();
+      else this.apply(saved, { reflow: true });
     } else {
       this.clearInlineLayout();
     }
@@ -507,14 +555,21 @@ const ShareStageLayout = {
   applySaved() {
     if (this.isResizing()) return;
     const saved = this.read();
-    if (saved?.userSized) this.apply(saved, { reflow: true });
-    else this.syncOverlays();
+    if (saved?.userSized) {
+      if (saved.theaterMode) this.applyTheaterMode();
+      else this.apply(saved, { reflow: true });
+    } else this.syncOverlays();
   },
 
   onWindowResize() {
     if (this.activeAxis) return;
     if (!this.isUserSized() || !this.panel?.classList.contains('share-stage-user-sized')) return;
-    const next = this.apply(this.read(), { reflow: true });
+    const saved = this.read();
+    if (saved?.theaterMode) {
+      this.applyTheaterMode();
+      return;
+    }
+    const next = this.apply(saved, { reflow: true });
     if (next) this.save(next);
   },
 
@@ -524,6 +579,11 @@ const ShareStageLayout = {
     this.cancelDragState();
 
     const finalLayout = this.captureCurrent();
+    if (finalLayout.widthSized || !this.isTheaterWidth(finalLayout.width)) {
+      finalLayout.theaterMode = false;
+    } else if (this.read()?.theaterMode) {
+      finalLayout.theaterMode = true;
+    }
     this.save(finalLayout);
     this.syncOverlays();
     this.updateLayoutMode(finalLayout);
