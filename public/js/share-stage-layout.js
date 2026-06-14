@@ -128,6 +128,7 @@ const ShareStageLayout = {
     this.panel = document.getElementById('share-cinema-stage');
     if (!this.panel) return;
     this.ensureOverlays();
+    this.initStageControls();
     window.addEventListener('resize', () => {
       this.syncOverlays();
       this.onWindowResize();
@@ -136,6 +137,36 @@ const ShareStageLayout = {
       this.syncOverlays();
       this.onWindowResize();
     });
+  },
+
+  initStageControls() {
+    if (this._controlsBound) return;
+    document.getElementById('share-stage-reset')?.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      this.resetToDefault();
+    });
+    this._controlsBound = true;
+  },
+
+  hasResizableMedia() {
+    return !!document.querySelector('#share-viewer video, #share-viewer audio, #share-viewer .share-video-el');
+  },
+
+  isCustomSized() {
+    return !!(
+      this.isUserSized()
+      || this.panel?.classList.contains('share-stage-user-sized')
+      || this.panel?.style.width
+    );
+  },
+
+  updateStageControls() {
+    const wrap = document.getElementById('share-stage-controls');
+    const resetBtn = document.getElementById('share-stage-reset');
+    if (!wrap) return;
+    const show = this.isActive() && this.hasResizableMedia();
+    wrap.classList.toggle('hidden', !show);
+    if (resetBtn) resetBtn.disabled = !this.isCustomSized();
   },
 
   ensureOverlays() {
@@ -322,17 +353,34 @@ const ShareStageLayout = {
     this.clearInlineLayout();
   },
 
+  cancelDragState() {
+    this.activeAxis = null;
+    this.activePointerId = null;
+    this.panel?.classList.remove('share-stage-resizing');
+    document.body.classList.remove('share-stage-resizing-active');
+    delete document.body.dataset.shareResizeAxis;
+    if (this.overlays) {
+      for (const el of Object.values(this.overlays)) {
+        el.style.pointerEvents = 'auto';
+      }
+    }
+  },
+
   resetToDefault() {
     this._resetting = true;
+    this.cancelDragState();
     this.resetLayout();
-    const video = document.querySelector('#share-viewer .share-video-el');
+    this.clearRailLayoutClasses();
+    document.documentElement.style.removeProperty('--share-user-stage-width');
+
     if (typeof ShareViewer !== 'undefined') {
-      if (video) ShareViewer.fitCinemaStage(video, { force: true });
-      else ShareViewer.refitCinemaStage();
+      ShareViewer.refitCinemaStage({ force: true });
     }
+
     requestAnimationFrame(() => {
       this._resetting = false;
       this.syncOverlays();
+      this.updateStageControls();
     });
   },
 
@@ -420,15 +468,14 @@ const ShareStageLayout = {
     }
 
     this.startSyncLoop();
+    this.updateStageControls();
   },
 
   onClose() {
     this.stopSyncLoop();
     this.hideOverlays();
-    this.activeAxis = null;
-    this.activePointerId = null;
-    document.body.classList.remove('share-stage-resizing-active');
-    delete document.body.dataset.shareResizeAxis;
+    this.cancelDragState();
+    this.updateStageControls();
   },
 
   applySaved() {
@@ -448,60 +495,68 @@ const ShareStageLayout = {
   finishDrag(pointerId) {
     if (this.activePointerId != null && pointerId != null && this.activePointerId !== pointerId) return;
 
-    this.activeAxis = null;
-    this.activePointerId = null;
-    this.panel?.classList.remove('share-stage-resizing');
-    document.body.classList.remove('share-stage-resizing-active');
-    delete document.body.dataset.shareResizeAxis;
-
-    if (this.overlays) {
-      for (const el of Object.values(this.overlays)) {
-        el.style.pointerEvents = 'auto';
-      }
-    }
+    this.cancelDragState();
 
     const finalLayout = this.captureCurrent();
     this.save(finalLayout);
     this.syncOverlays();
     this.updateLayoutMode(finalLayout);
+    this.updateStageControls();
     this.scheduleReflow();
   },
 
   onOverlayPointerDown(e, axis) {
     if (this._resetting || this.activeAxis) return;
-    if (axis === 'se' && e.detail >= 2) {
-      e.preventDefault();
-      e.stopPropagation();
-      this.resetToDefault();
-      return;
-    }
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
 
-    const saved = this.read();
-    let layout = saved?.userSized ? saved : this.captureCurrent();
-    layout = this.apply(layout);
-
-    this.activeAxis = axis;
-    this.activePointerId = e.pointerId;
-    this.panel.classList.add('share-stage-resizing');
-    document.body.classList.add('share-stage-resizing-active');
-    document.body.dataset.shareResizeAxis = axis;
-
+    const pointerId = e.pointerId;
     const startX = e.clientX;
     const startY = e.clientY;
-    const startW = layout.width;
-    const startH = layout.height;
-    const startL = layout.left;
-    const startT = layout.top;
-    const pointerId = e.pointerId;
+    let dragStarted = false;
+    let startW = 0;
+    let startH = 0;
+    let startL = 0;
+    let startT = 0;
+
+    const beginDrag = () => {
+      if (dragStarted) return;
+      dragStarted = true;
+      const saved = this.read();
+      let layout = saved?.userSized ? saved : this.captureCurrent();
+      layout = this.apply(layout);
+      startW = layout.width;
+      startH = layout.height;
+      startL = layout.left;
+      startT = layout.top;
+
+      this.activeAxis = axis;
+      this.activePointerId = pointerId;
+      this.panel.classList.add('share-stage-resizing');
+      document.body.classList.add('share-stage-resizing-active');
+      document.body.dataset.shareResizeAxis = axis;
+    };
+
+    const cleanup = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onBlur);
+    };
 
     const onMove = (ev) => {
       if (ev.pointerId !== pointerId) return;
-      ev.preventDefault();
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
+      if (!dragStarted) {
+        if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        ev.preventDefault();
+        beginDrag();
+      } else {
+        ev.preventDefault();
+      }
+      if (!dragStarted) return;
       let width = startW;
       let height = startH;
       if (axis === 'e' || axis === 'se') width = startW + dx;
@@ -517,19 +572,13 @@ const ShareStageLayout = {
 
     const onUp = (ev) => {
       if (ev.pointerId !== pointerId) return;
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      document.removeEventListener('pointercancel', onUp);
-      window.removeEventListener('blur', onBlur);
-      this.finishDrag(pointerId);
+      cleanup();
+      if (dragStarted) this.finishDrag(pointerId);
     };
 
     const onBlur = () => {
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      document.removeEventListener('pointercancel', onUp);
-      window.removeEventListener('blur', onBlur);
-      this.finishDrag(pointerId);
+      cleanup();
+      if (dragStarted) this.finishDrag(pointerId);
     };
 
     document.addEventListener('pointermove', onMove);

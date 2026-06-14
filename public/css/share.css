@@ -650,6 +650,39 @@ body.share-cinema-active .share-viewer-stage {
   margin-bottom: var(--space-sm);
 }
 
+.share-stage-controls {
+  width: min(1100px, 100%);
+  margin-bottom: var(--space-sm);
+}
+
+.share-stage-controls.hidden {
+  display: none;
+}
+
+.share-stage-controls-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.share-stage-ctrl-btn {
+  flex-shrink: 0;
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+.share-stage-ctrl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.share-stage-ctrl-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 .share-dock-stats:empty {
   display: none;
 }

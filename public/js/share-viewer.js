@@ -426,7 +426,10 @@ const ShareViewer = {
       stage.style.setProperty('--share-stage-height', `${Math.round(h)}px`);
       stage.classList.toggle('share-stage-capped', capped);
       stage.classList.add('share-stage-fitted');
-      if (typeof ShareStageLayout !== 'undefined') ShareStageLayout.syncOverlays();
+      if (typeof ShareStageLayout !== 'undefined') {
+        ShareStageLayout.syncOverlays();
+        ShareStageLayout.updateStageControls?.();
+      }
     };
 
     const runFit = () => apply();
@@ -452,8 +455,33 @@ const ShareViewer = {
     }
   },
 
-  refitCinemaStage() {
-    if (this._fitVideoEl) this.fitCinemaStage(this._fitVideoEl, { force: !ShareStageLayout?.isUserSized?.() });
+  refitCinemaStage({ force = false } = {}) {
+    const shouldForce = force || !ShareStageLayout?.isUserSized?.();
+    const video = this._fitVideoEl
+      || document.querySelector('#share-viewer .share-video-el')
+      || document.querySelector('#share-viewer video');
+    if (video) {
+      this.fitCinemaStage(video, { force: shouldForce });
+      return;
+    }
+    if (shouldForce) this.clearCinemaStageSizing();
+  },
+
+  clearCinemaStageSizing() {
+    const stage = document.getElementById('share-cinema-stage');
+    if (!stage) return;
+    stage.classList.remove('share-stage-user-sized', 'share-stage-capped');
+    stage.style.width = '';
+    stage.style.height = '';
+    stage.style.minHeight = '';
+    stage.style.maxHeight = '';
+    stage.style.marginLeft = '';
+    stage.style.marginRight = '';
+    stage.style.flex = '';
+    stage.style.alignSelf = '';
+    ShareStageLayout?.syncLayoutMode?.();
+    ShareStageLayout?.syncOverlays?.();
+    ShareStageLayout?.updateStageControls?.();
   },
 
   mountStats(info) {
@@ -868,6 +896,8 @@ const ShareViewer = {
       this.fitCinemaStage(el);
       el.addEventListener('loadedmetadata', () => this.fitCinemaStage(el));
     }
+
+    ShareStageLayout?.updateStageControls?.();
   },
 
   resetMetrics(file) {

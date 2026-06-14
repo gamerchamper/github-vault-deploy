@@ -6,7 +6,7 @@
   <title><!-- SHARE_PAGE_TITLE --> — GitHub Vault</title>
   <!-- SHARE_EMBED_META -->
   <link rel="stylesheet" href="/css/explorer.css?v=1.0.17">
-  <link rel="stylesheet" href="/css/share.css?v=1.0.8">
+  <link rel="stylesheet" href="/css/share.css?v=1.0.9">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.2">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <!-- SHARE_EMBED_BOOT -->
@@ -82,6 +82,12 @@
           </div>
         </div>
         <p class="share-meta share-dock-meta hidden" id="share-meta"></p>
+        <div id="share-stage-controls" class="share-stage-controls hidden" aria-label="Player size">
+          <div class="share-stage-controls-inner">
+            <button type="button" id="share-stage-reset" class="btn-secondary share-stage-ctrl-btn" disabled>Reset size</button>
+            <span class="share-stage-ctrl-hint">Drag player edges to resize · double-click corner to reset</span>
+          </div>
+        </div>
         <div id="share-dock-stats" class="share-dock-stats"></div>
         <div id="download-panel" class="download-panel hidden">
           <div class="download-panel-header">
@@ -154,8 +160,8 @@
   <script src="/js/playlist-queue.js?v=1.0.3"></script>
   <script src="/js/chunk-blocks.js?v=1.0.0"></script>
   <script src="/js/download-manager.js?v=1.0.0"></script>
-  <script src="/js/share-stage-layout.js?v=1.0.9"></script>
-  <script src="/js/share-viewer.js?v=1.0.5"></script>
+  <script src="/js/share-stage-layout.js?v=1.1.0"></script>
+  <script src="/js/share-viewer.js?v=1.0.6"></script>
   <script src="/js/share-presence.js?v=1.0.0"></script>
   <script src="/js/share-shoutbox.js?v=1.0.1"></script>
   <script src="/js/share-playlist.js?v=1.0.6"></script>
