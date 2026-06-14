@@ -4,8 +4,12 @@ const fs = require('fs');
 const fetch = require('node-fetch');
 const { VaultApi } = require('./api');
 const { UploadEngine, DEFAULT_CONCURRENCY } = require('./upload-engine');
+const { SeamlessUploadEngine } = require('./seamless-upload');
 const { SessionStore } = require('./session-store');
 const configStore = require('./config');
+const pkg = require('../package.json');
+
+const UI_BUILD = 'seamless-panel-1';
 
 const jobs = new Map();
 
@@ -117,6 +121,8 @@ function serializeSession(session) {
     chunkSize: session.chunkSize,
     uploadMode: session.uploadMode,
     convertHls: session.convertHls,
+    totalParts: session.totalParts,
+    partSize: session.partSize,
     totalChunks: session.totalChunks,
     chunksDone: session.chunksDone,
     status: session.status,
@@ -150,6 +156,39 @@ async function startUpload(body) {
   const filePath = path.resolve(String(body.filePath || ''));
   if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
 
+  const isSeamless = body.mode === 'seamless';
+  const taskId = body.resumeTaskId || SessionStore.generateTaskId();
+
+  if (isSeamless) {
+    const engine = new SeamlessUploadEngine(api, {
+      concurrency: parseInt(body.concurrency, 10) || undefined,
+      chunkSize: parseInt(body.chunkSize, 10) || 0,
+      convertHls: !!body.convertHls,
+    });
+    const job = createJob(taskId, engine, filePath);
+
+    Promise.resolve().then(async () => {
+      try {
+        job.status = 'initializing';
+        if (body.resumeTaskId) {
+          await engine.resumeSession(body.resumeTaskId);
+        } else {
+          await engine.initSession(filePath, body.parentPath || '/', taskId);
+        }
+        job.status = 'uploading';
+        job.progress = { ...job.progress, phase: 'receiving' };
+        const result = await engine.uploadAll();
+        job.result = result;
+        job.status = 'done';
+      } catch (err) {
+        job.status = 'error';
+        job.error = err.message;
+      }
+    });
+
+    return { taskId, job };
+  }
+
   const engine = new UploadEngine(api, {
     concurrency: parseInt(body.concurrency, 10) || DEFAULT_CONCURRENCY,
     chunkSize: parseInt(body.chunkSize, 10) || 0,
@@ -157,7 +196,6 @@ async function startUpload(body) {
     convertHls: !!body.convertHls,
   });
 
-  const taskId = body.resumeTaskId || SessionStore.generateTaskId();
   const job = createJob(taskId, engine, filePath);
 
   Promise.resolve().then(async () => {
@@ -211,6 +249,8 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .ribbon{display:flex;align-items:center;gap:4px;padding:6px 10px;background:var(--glass-bg);border-bottom:1px solid var(--glass-border);flex-wrap:wrap}
 .ribbon-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;background:none;border:1px solid transparent;border-radius:var(--radius);cursor:pointer;font-size:11px;color:var(--text-primary);font-family:var(--font)}
 .ribbon-btn:hover:not(:disabled){background:var(--bg-hover);border-color:var(--border)}
+.ribbon-btn-seamless{color:var(--accent);border-color:rgba(91,140,247,.45);background:rgba(91,140,247,.08)}
+.ribbon-btn-seamless:hover:not(:disabled){border-color:rgba(91,140,247,.65);background:rgba(91,140,247,.14)}
 .ribbon-btn:disabled{opacity:.45;cursor:not-allowed}
 .ribbon-sep{width:1px;height:22px;background:var(--border);margin:0 4px}
 .layout{display:grid;grid-template-columns:300px 1fr;gap:10px;padding:10px;flex:1;align-items:start}
@@ -265,6 +305,10 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .file-picker-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
 .desktop-only{display:none}.is-desktop .desktop-only{display:inline-flex}
 .hidden{display:none!important}
+.seamless-panel{border:1px solid rgba(91,140,247,.4);background:rgba(91,140,247,.1);border-radius:8px;padding:10px;display:grid;gap:6px}
+.btn-seamless-wide{width:100%;padding:9px 12px;font-weight:600;background:linear-gradient(90deg,var(--accent),#42e6a0);color:#071018;border:none}
+.btn-seamless-wide:hover:not(:disabled){filter:brightness(1.08)}
+.upload-split-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-top:2px}
 .button-spinner::after{content:'';display:inline-block;width:10px;height:10px;margin-left:6px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .75s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.layout,.split,.metric-grid,.row{grid-template-columns:1fr}}
@@ -276,6 +320,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <div class="title-bar-left">
 <svg class="app-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
 <span>Vault Upload</span>
+<span class="chip" id="uiVersion" title="Client UI build">${pkg.version} · ${UI_BUILD}</span>
 <span class="dot" id="authDot"></span>
 <span class="auth-label" id="authText">Checking…</span>
 </div>
@@ -285,7 +330,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </div>
 </header>
 <nav class="ribbon">
-<button class="ribbon-btn" id="uploadBtn" type="button"><span>▶</span><span>Start Upload</span></button>
+<button class="ribbon-btn" id="uploadBtn" type="button"><span>▶</span><span>API / Git</span></button>
+<button class="ribbon-btn ribbon-btn-seamless" id="seamlessBtn" type="button"><span>⚡</span><span>Seamless</span></button>
 <button class="ribbon-btn" id="planBtn" type="button"><span>📋</span><span>Plan</span></button>
 <button class="ribbon-btn desktop-only" id="browseBtn" type="button"><span>📂</span><span>Browse</span></button>
 <span class="ribbon-sep"></span>
@@ -326,8 +372,13 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <label><span class="label">Parent folder</span>
 <div class="row-compact"><select id="parentPath"><option value="/">/ (root)</option></select><button class="btn-secondary btn-sm" id="refreshFolders" type="button">↻</button></div>
 </label>
+<div class="seamless-panel">
+<button class="btn-primary btn-seamless-wide" id="seamlessPanelBtn" type="button">⚡ Seamless Upload</button>
+<p class="muted">Stream to server cache — server handles encrypt, GitHub upload, and HLS. Best for large files.</p>
+</div>
+<p class="upload-split-label">Standard upload</p>
 <div class="row">
-<label><span class="label">Mode</span><select id="mode"><option value="api">API</option><option value="git">Git</option></select></label>
+<label><span class="label">Mode</span><select id="mode"><option value="api">API (resumable)</option><option value="git">Git push</option></select></label>
 <label><span class="label">Concurrency</span><input id="concurrency" type="number" min="1" max="32" value="12"></label>
 </div>
 <details class="details-block">
@@ -383,9 +434,9 @@ function getUploadPaths(){if(selectedFiles.length)return selectedFiles.slice();c
 function renderSelectedFiles(){const list=$('fileList');const paths=getUploadPaths();if(!paths.length){list.innerHTML='';list.classList.add('hidden');return}list.classList.remove('hidden');list.innerHTML=paths.map(p=>'<div class="item"><strong>'+esc(basename(p))+'</strong><div class="muted">'+esc(p)+'</div></div>').join('');$('filePath').value=paths.length===1?paths[0]:paths.length+' files selected';updateButtons()}
 function setState(text,type=''){const el=$('operationState');el.textContent=text;el.className='chip '+type}
 function setBusy(btn,busy,text){state.busy=busy;if(btn){btn.disabled=busy;btn.classList.toggle('button-spinner',busy);if(text){if(busy){btn.dataset.label=btn.textContent;btn.textContent=text}else if(btn.dataset.label){btn.textContent=btn.dataset.label;delete btn.dataset.label}}}updateButtons()}
-function updateButtons(){const hasFile=getUploadPaths().length>0;$('planBtn').disabled=state.busy||!hasFile||!state.configured;$('uploadBtn').disabled=state.busy||!hasFile||!state.configured;$('saveConfig').disabled=state.busy;$('browseBtn').disabled=state.busy;if($('browseBtnSide'))$('browseBtnSide').disabled=state.busy;$('useServer').disabled=state.busy||!$('serverHistory').value}
+function updateButtons(){const hasFile=getUploadPaths().length>0;const dis=state.busy||!hasFile||!state.configured;$('planBtn').disabled=dis;$('uploadBtn').disabled=dis;if($('seamlessBtn'))$('seamlessBtn').disabled=dis;if($('seamlessPanelBtn'))$('seamlessPanelBtn').disabled=dis;$('saveConfig').disabled=state.busy;$('browseBtn').disabled=state.busy;if($('browseBtnSide'))$('browseBtnSide').disabled=state.busy;$('useServer').disabled=state.busy||!$('serverHistory').value}
 function chunkSizeFromMbInput(){const MB=1024*1024;const mb=parseFloat($('chunkSize')?.value);if(!Number.isFinite(mb)||mb<=0)return 0;return Math.round(Math.min(95,Math.max(0.064,mb))*MB)}
-function getUploadBody(){return{parentPath:$('parentPath').value,mode:$('mode').value,concurrency:$('concurrency').value,chunkSize:chunkSizeFromMbInput(),convertHls:$('convertHls').checked}}
+function getUploadBody(modeOverride){const mode=modeOverride||$('mode').value;return{parentPath:$('parentPath').value,mode,concurrency:$('concurrency').value,chunkSize:chunkSizeFromMbInput(),convertHls:$('convertHls').checked}}
 async function api(path,opts={}){const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Request failed');return j}
 function setAuth(ok,text){state.configured=!!ok;$('authDot').className='dot '+(ok?'done':'error');$('authText').textContent=text;updateButtons()}
 function encodeServerId(id){return encodeURIComponent(id)}
@@ -400,19 +451,19 @@ function renderLocalUpload(localUpload){const el=$('localUploadBadge');if(!el)re
 function renderPlan(plan){renderFeedback(plan.feedback);if(plan.plans&&plan.plans.length>1){$('planOut').innerHTML='<div class="plan-summary"><div><span>Files</span><strong>'+plan.totalFiles+'</strong></div><div><span>Total</span><strong>'+bytes(plan.totalSize)+'</strong></div><div><span>Chunks</span><strong>'+plan.totalChunks+'</strong></div></div>';return}const p=plan.plans?plan.plans[0]:plan;const chunkMb=p.chunkSize?(p.chunkSize/1048576).toFixed(2)+' MB':bytes(p.chunkSize);$('planOut').innerHTML='<div class="plan-summary"><div><span>Chunks</span><strong>'+p.totalChunks+'</strong></div><div><span>Chunk size</span><strong>'+chunkMb+'</strong></div><div><span>ETA</span><strong>'+esc(p.estimatedTime||'--')+'</strong></div></div>'}
 async function loadConfig(){const c=await api('/api/config');$('serverUrl').value=c.serverUrl||'';$('apiKey').value=c.apiKey||'';$('cookie').value=c.cookie||'';renderServerHistory(c.serverHistory||[],c.activeServerId||'');renderLocalUpload(c.localUpload||null);const label=c.hasApiKey?c.apiKeyPreview:(c.cookiePreview||'');setAuth((c.hasApiKey||c.hasCookie)&&c.serverUrl,'Connected · '+label);updateButtons();if(state.configured)loadFolders()}
 async function loadFolders(){try{const f=await api('/api/folders');const sel=$('parentPath');if(!sel||!f.folders)return;const cur=sel.value;sel.innerHTML=f.folders.map(p=>'<option value="'+esc(p)+'"'+(p===cur?' selected':'')+'>'+esc(p||'/')+'</option>').join('');if(!sel.value)sel.value=cur||'/'}catch{}}
-async function refreshSessions(){const data=await api('/api/sessions');$('sessions').innerHTML=data.sessions.map(s=>'<div class="item"><strong>'+esc(s.fileName)+'</strong><div class="muted">'+esc(s.status)+' · '+(s.chunksDone||0)+'/'+(s.totalChunks||0)+'</div><div class="muted">'+esc(s.taskId)+'</div><div class="actions"><button class="btn-secondary btn-sm" data-resume="'+esc(s.taskId)+'">Resume</button></div></div>').join('')||'<p class="muted">No sessions.</p>';document.querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>startUpload(b.dataset.resume));}
+async function refreshSessions(){const data=await api('/api/sessions');$('sessions').innerHTML=data.sessions.map(s=>'<div class="item"><strong>'+esc(s.fileName)+'</strong><div class="muted">'+esc(s.uploadMode||'api')+' · '+esc(s.status)+' · '+(s.uploadMode==='seamless'?(s.totalParts?(s.chunksDone||0)+'/'+(s.totalParts||0)+' parts':(s.chunksDone||0)+'/'+(s.totalChunks||0)):(s.chunksDone||0)+'/'+(s.totalChunks||0))+'</div><div class="muted">'+esc(s.taskId)+'</div><div class="actions"><button class="btn-secondary btn-sm" data-resume="'+esc(s.taskId)+'" data-resume-mode="'+esc(s.uploadMode||'api')+'">Resume</button></div></div>').join('')||'<p class="muted">No sessions.</p>';document.querySelectorAll('[data-resume]').forEach(b=>b.onclick=()=>startUpload(b.dataset.resume,b.dataset.resumeMode==='seamless'?'seamless':null));}
 async function refreshRemote(){try{const data=await api('/api/remote-tasks');$('remote').innerHTML=(data.tasks||[]).map(t=>'<div class="item"><strong>'+esc((t.title||t.id)||'task')+'</strong><div class="muted">'+esc(t.status||'')+' · '+esc(t.phase||'')+' · '+(t.percent??0)+'%</div><div class="actions"><button class="btn-secondary btn-sm" data-pause="'+esc(t.id)+'">Pause</button><button class="btn-secondary btn-sm" data-resume-task="'+esc(t.id)+'">Resume</button><button class="btn-danger btn-sm" data-cancel="'+esc(t.id)+'">Cancel</button></div></div>').join('')||'<p class="muted">No remote tasks.</p>';document.querySelectorAll('[data-pause]').forEach(b=>b.onclick=()=>taskAction('pause',b.dataset.pause));document.querySelectorAll('[data-resume-task]').forEach(b=>b.onclick=()=>taskAction('resume',b.dataset.resumeTask));document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>taskAction('cancel',b.dataset.cancel));}catch(e){$('remote').innerHTML='<p class="muted">'+esc(e.message)+'</p>'}}
 async function taskAction(action,taskId){setState(action+'…','busy');await api('/api/task/'+action,{method:'POST',body:JSON.stringify({taskId})});setState('Ready','good');refreshRemote()}
 function validateUpload(){if(!getUploadPaths().length)throw new Error('Choose a file first');if(!state.configured)throw new Error('Connect to a server first')}
-function updateJobUi(j){const queueLabel=uploadQueue&&uploadQueue.total>1?' · '+(uploadQueue.index+1)+'/'+uploadQueue.total:'';$('activeStatus').textContent=j.status+queueLabel;const pct=(j.progress&&j.progress.percent)||0;$('progressFill').style.width=pct+'%';$('progressPct').textContent=pct+'%';$('chunks').textContent=((j.progress&&j.progress.chunksDone)||0)+'/'+((j.progress&&j.progress.totalChunks)||0);$('speed').textContent=speed(j.progress&&j.progress.speed);$('logs').textContent=(j.logs||[]).map(l=>new Date(l.at).toLocaleTimeString()+' '+l.message).join('\\n')||j.error||j.status}
+function updateJobUi(j){const queueLabel=uploadQueue&&uploadQueue.total>1?' · '+(uploadQueue.index+1)+'/'+uploadQueue.total:'';const p=j.progress||{};let chunkLabel='0/0';if(p.phase==='receiving'&&p.seamlessPartsTotal)chunkLabel=(p.seamlessPartsDone||0)+'/'+p.seamlessPartsTotal+' parts';else chunkLabel=(p.chunksDone||0)+'/'+(p.totalChunks||0);$('activeStatus').textContent=j.status+(p.phase?(' · '+p.phase):'')+queueLabel;const pct=p.percent||0;$('progressFill').style.width=pct+'%';$('progressPct').textContent=pct+'%';$('chunks').textContent=chunkLabel;$('speed').textContent=speed(p.speed);$('logs').textContent=(j.logs||[]).map(l=>new Date(l.at).toLocaleTimeString()+' '+l.message).join('\\n')||j.error||j.status}
 function waitForJob(taskId){return new Promise(resolve=>{const tick=async()=>{try{const j=await api('/api/jobs/'+encodeURIComponent(taskId));updateJobUi(j);if(['done','error','paused'].includes(j.status))resolve(j);else setTimeout(tick,500)}catch(e){setState('Waiting…','busy');setTimeout(tick,1200)}};tick()})}
-async function startUpload(resumeTaskId){validateUpload();const btn=$('uploadBtn');const paths=resumeTaskId?[$('filePath').value.trim()]:getUploadPaths();if(!paths.length)throw new Error('Choose a file first');setBusy(btn,true,'Starting');uploadQueue=paths.length>1&&!resumeTaskId?{total:paths.length,done:0,index:0}:null;try{const runOne=async(filePath,i)=>{if(uploadQueue)uploadQueue.index=i;{try{const base=getUploadBody();const body={...base,filePath};if(paths.length>1)body.concurrency=Math.min(parseInt(base.concurrency,10)||5,3);if(resumeTaskId&&i===0)body.resumeTaskId=resumeTaskId;const r=await api('/api/upload',{method:'POST',body:JSON.stringify(body)});return await waitForJob(r.taskId)}finally{if(uploadQueue)uploadQueue.done++}}};const limit=resumeTaskId?1:Math.min(MAX_PARALLEL_FILES,paths.length);const results=await runPool(paths,limit,runOne);const done=results.filter(j=>j&&j.status==='done').length;const failed=results.filter(j=>j&&j.status==='error');const paused=results.filter(j=>j&&j.status==='paused');if(!done&&!paused.length&&failed.length)throw new Error(failed[0].error||'Upload failed');if(paused.length&&!done){setState('Paused');return}if(failed.length)setState(done+' done, '+failed.length+' failed',done?'good':'bad');else setState(paths.length>1?done+'/'+paths.length+' complete':'Done','good');if(!failed.length&&paths.length>1){selectedFiles=[];renderSelectedFiles()}}catch(e){setState(e.message,'bad');$('logs').textContent=e.stack||e.message}finally{uploadQueue=null;setBusy(btn,false);refreshSessions();refreshRemote()}}
+async function startUpload(resumeTaskId,modeOverride){validateUpload();const seamless=modeOverride==='seamless';const btn=seamless?($('seamlessPanelBtn')||$('seamlessBtn')):$('uploadBtn');const paths=resumeTaskId?[$('filePath').value.trim()]:getUploadPaths();if(!paths.length)throw new Error('Choose a file first');setBusy(btn,true,seamless?'Seamless…':'Starting');uploadQueue=paths.length>1&&!resumeTaskId?{total:paths.length,done:0,index:0}:null;try{const runOne=async(filePath,i)=>{if(uploadQueue)uploadQueue.index=i;{try{const base=getUploadBody(seamless?'seamless':null);const body={...base,filePath};if(paths.length>1)body.concurrency=Math.min(parseInt(base.concurrency,10)||5,3);if(resumeTaskId&&i===0)body.resumeTaskId=resumeTaskId;const r=await api('/api/upload',{method:'POST',body:JSON.stringify(body)});return await waitForJob(r.taskId)}finally{if(uploadQueue)uploadQueue.done++}}};const limit=resumeTaskId?1:Math.min(MAX_PARALLEL_FILES,paths.length);const results=await runPool(paths,limit,runOne);const done=results.filter(j=>j&&j.status==='done').length;const failed=results.filter(j=>j&&j.status==='error');const paused=results.filter(j=>j&&j.status==='paused');if(!done&&!paused.length&&failed.length)throw new Error(failed[0].error||'Upload failed');if(paused.length&&!done){setState('Paused');return}if(failed.length)setState(done+' done, '+failed.length+' failed',done?'good':'bad');else setState(paths.length>1?done+'/'+paths.length+' complete':'Done','good');if(!failed.length&&paths.length>1){selectedFiles=[];renderSelectedFiles()}}catch(e){setState(e.message,'bad');$('logs').textContent=e.stack||e.message}finally{uploadQueue=null;setBusy(btn,false);refreshSessions();refreshRemote()}}
 async function chooseFiles(){if(!window.vaultDesktop){setState('Desktop picker only','bad');return}const pick=window.vaultDesktop.selectFiles||window.vaultDesktop.selectFile;const result=await pick();const filePaths=result&&(result.filePaths||[]).length?result.filePaths:(result&&result.filePath?[result.filePath]:[]);if(result&&!result.canceled&&filePaths.length){selectedFiles=filePaths;renderSelectedFiles();setState(filePaths.length+' file(s)','good')}}
 async function saveConfig(){const btn=$('saveConfig');setBusy(btn,true,'Checking');setState('Checking…','busy');try{const r=await api('/api/config',{method:'POST',body:JSON.stringify({serverUrl:$('serverUrl').value.trim(),apiKey:$('apiKey').value.trim(),cookie:$('cookie').value.trim()})});renderServerHistory(r.serverHistory||[],r.activeServerId||'');$('serverUrl').value=r.serverUrl||'';$('apiKey').value=r.apiKey||'';$('cookie').value=r.cookie||'';renderLocalUpload(r.localUpload||null);const label=r.hasApiKey?r.apiKeyPreview:(r.cookiePreview||'');setAuth((r.hasApiKey||r.hasCookie)&&r.serverUrl,'Connected · '+label);updateButtons();if(state.configured)loadFolders();const saved=(r.serverHistory||[]).length;const localNote=r.localUpload&&r.localUpload.active?' · Local upload ON':'';setState(r.authenticated?((saved?'Connected · saved to history':'Connected')+localNote):'Saved, but auth failed',r.authenticated?'good':'bad')}catch(e){setState(e.message,'bad')}finally{setBusy(btn,false)}}
 async function planUpload(){validateUpload();const btn=$('planBtn');const paths=getUploadPaths();setBusy(btn,true,'Planning');setState('Planning…','busy');try{const body={chunkSize:chunkSizeFromMbInput()};if(paths.length>1)body.filePaths=paths;else body.filePath=paths[0];const r=await api('/api/plan',{method:'POST',body:JSON.stringify(body)});renderPlan(r);setState('Plan ready','good')}catch(e){setState(e.message,'bad');$('planOut').textContent=e.message}finally{setBusy(btn,false)}}
 async function tryAutoConnect(){try{const defaults=[window.location.origin,'http://localhost:3000','http://127.0.0.1:3000'];for(const url of defaults){try{const r=await api('/api/probe-server',{method:'POST',body:JSON.stringify({url})});if(r&&r.key){await api('/api/config',{method:'POST',body:JSON.stringify({serverUrl:r.serverUrl||url,apiKey:r.key,cookie:''})});setState('Auto-connected','good');return true}}catch{}}return false}catch{return false}}
 async function initDesktopMode(){if(window.vaultDesktop){document.body.classList.add('is-desktop');$('desktopStatus').textContent='Desktop';$('desktopStatus').classList.add('good')}else{$('desktopStatus').textContent='Browser'}}
-$('saveConfig').onclick=saveConfig;$('useServer').onclick=useSelectedServer;$('removeServer').onclick=removeSelectedServer;$('serverHistory').onchange=()=>{applyServerPreview(decodeServerId($('serverHistory').value));updateButtons()};$('planBtn').onclick=planUpload;$('uploadBtn').onclick=()=>startUpload();$('browseBtn').onclick=chooseFiles;if($('browseBtnSide'))$('browseBtnSide').onclick=chooseFiles;$('filePath').addEventListener('input',()=>{if(selectedFiles.length&&!/\\d+ files selected$/.test($('filePath').value.trim())){selectedFiles=[];$('fileList').innerHTML='';$('fileList').classList.add('hidden')}updateButtons()});$('refreshSessions').onclick=refreshSessions;$('refreshRemote').onclick=refreshRemote;$('refreshFolders').onclick=loadFolders;$('clientHelp').onclick=()=>$('planOut').textContent='npm run client -- upload --file <path>\\nnpm run client -- list\\nnpm run client -- status <taskId>';
+$('saveConfig').onclick=saveConfig;$('useServer').onclick=useSelectedServer;$('removeServer').onclick=removeSelectedServer;$('serverHistory').onchange=()=>{applyServerPreview(decodeServerId($('serverHistory').value));updateButtons()};$('planBtn').onclick=planUpload;$('uploadBtn').onclick=()=>startUpload();if($('seamlessBtn'))$('seamlessBtn').onclick=()=>startUpload(null,'seamless');if($('seamlessPanelBtn'))$('seamlessPanelBtn').onclick=()=>startUpload(null,'seamless');$('browseBtn').onclick=chooseFiles;if($('browseBtnSide'))$('browseBtnSide').onclick=chooseFiles;$('filePath').addEventListener('input',()=>{if(selectedFiles.length&&!/\\d+ files selected$/.test($('filePath').value.trim())){selectedFiles=[];$('fileList').innerHTML='';$('fileList').classList.add('hidden')}updateButtons()});$('refreshSessions').onclick=refreshSessions;$('refreshRemote').onclick=refreshRemote;$('refreshFolders').onclick=loadFolders;$('clientHelp').onclick=()=>$('planOut').textContent='npm run client -- upload --file <path>\\nnpm run client -- list\\nnpm run client -- status <taskId>';
 initDesktopMode();loadConfig().then(()=>{if(!state.configured)tryAutoConnect().then(ok=>{if(ok){loadConfig();refreshSessions();refreshRemote()}})}).catch(()=>tryAutoConnect().then(ok=>{if(ok){loadConfig();refreshSessions();refreshRemote()}}));refreshSessions();refreshRemote();updateButtons();
 </script></body></html>`;
 }
@@ -429,6 +480,9 @@ function createServer() {
         return res.end(html());
       }
       if (req.method === 'GET' && url.pathname === '/api/config') return json(res, 200, safeConfig(configStore.load(), true));
+      if (req.method === 'GET' && url.pathname === '/api/version') {
+        return json(res, 200, { version: pkg.version, uiBuild: UI_BUILD, features: { seamless: true } });
+      }
       if (req.method === 'POST' && url.pathname === '/api/config') {
         const body = await readBody(req);
         const config = configStore.load();
@@ -564,7 +618,7 @@ function listenUiServer(opts = {}) {
       const address = server.address();
       const resolvedPort = typeof address === 'object' && address ? address.port : port;
       const url = `http://${host}:${resolvedPort}`;
-      resolve({ server, url, host, port: resolvedPort });
+      resolve({ server, url, host, port: resolvedPort, uiBuild: UI_BUILD });
     });
   });
 }

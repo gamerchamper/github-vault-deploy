@@ -438,7 +438,7 @@ class Explorer {
   }
 
   formatHlsDuration(seconds) {
-    if (!seconds || !Number.isFinite(seconds)) return '0:00';
+    if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return '';
     const total = Math.round(seconds);
     const h = Math.floor(total / 3600);
     const m = Math.floor((total % 3600) / 60);
@@ -455,11 +455,16 @@ class Explorer {
     const durationLabel = this.formatHlsDuration(dur);
     const broken = this.isHlsIncomplete(file);
     const brokenClass = broken ? ' hls-duration-broken' : '';
+    const durationBadge = durationLabel
+      ? `<span class="hls-duration-badge${brokenClass}">${durationLabel}</span>`
+      : '';
     const title = broken
-      ? `HLS may be incomplete — ${durationLabel} (${file.hls_segment_count || 0} segment(s))`
-      : `HLS duration ${durationLabel}`;
+      ? `HLS may be incomplete${durationLabel ? ` — ${durationLabel}` : ''} (${file.hls_segment_count || 0} segment(s))`
+      : durationLabel
+        ? `HLS duration ${durationLabel}`
+        : 'HLS stream available';
     return `<div class="hls-file-badges" title="${this.escape(title)}">`
-      + `<span class="hls-duration-badge${brokenClass}">${durationLabel}</span>`
+      + durationBadge
       + '<span class="hls-file-badge">m3u8</span>'
       + '</div>';
   }

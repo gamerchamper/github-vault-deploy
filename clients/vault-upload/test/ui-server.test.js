@@ -62,7 +62,8 @@ describe('UI server', function () {
     const res = await request(baseUrl, 'GET', '/');
     expect(res.status).to.equal(200);
     expect(res.text).to.include('Vault Upload');
-    expect(res.text).to.include('Start Upload');
+    expect(res.text).to.include('Seamless Upload');
+    expect(res.text).to.include('seamless-panel-1');
     expect(res.text).to.include('Browse');
     expect(res.text).to.include('operationState');
     expect(res.text).to.include('vaultDesktop.selectFiles');

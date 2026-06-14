@@ -84,6 +84,9 @@ async function launchDesktop(opts = {}) {
     }
     app.on('second-instance', () => {
       if (!mainWindow) return;
+      if (mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.reloadIgnoringCache();
+      }
       if (typeof mainWindow.restore === 'function' && mainWindow.isMinimized?.()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
@@ -106,7 +109,8 @@ async function launchDesktop(opts = {}) {
   await app.whenReady();
   setupDesktopIpc(electron, opts);
   ui = await listenUiServer({ host, port });
-  if (opts.log !== false) logger.log(`Vault Upload desktop loading ${ui.url}`);
+  const loadUrl = `${ui.url}?ui=${encodeURIComponent(ui.uiBuild || 'dev')}`;
+  if (opts.log !== false) logger.log(`Vault Upload desktop loading ${loadUrl}`);
 
   mainWindow = new BrowserWindow({
     width: opts.width || 1280,
@@ -159,7 +163,7 @@ async function launchDesktop(opts = {}) {
     desktop.window = null;
     if (activeDesktop === desktop) activeDesktop.window = null;
   });
-  await mainWindow.loadURL(ui.url);
+  await mainWindow.loadURL(loadUrl);
   if (mainWindow && !mainWindow.isVisible()) revealWindow();
 
   return desktop;

@@ -3,6 +3,7 @@
 const { program } = require('commander');
 const { VaultApi } = require('./api');
 const { UploadEngine, DEFAULT_CONCURRENCY } = require('./upload-engine');
+const { SeamlessUploadEngine } = require('./seamless-upload');
 const { SessionStore } = require('./session-store');
 const { load, save, addToServerHistory } = require('./config');
 const { renderProgressLine, renderFinalLine, renderTable } = require('./progress');
@@ -165,7 +166,7 @@ program
   .option('-p, --parent-path <dir>', 'Parent directory in vault', '/')
   .option('--chunk-size <bytes>', 'Chunk size in bytes', parseInt)
   .option('--concurrency <n>', 'Upload concurrency', parseInt, DEFAULT_CONCURRENCY)
-  .option('--mode <mode>', 'Upload mode: api or git', 'api')
+  .option('--mode <mode>', 'Upload mode: api, git, or seamless', 'api')
   .option('--convert-hls', 'Convert video to HLS after upload')
   .option('--resume <taskId>', 'Resume a previous upload task')
   .action(async (opts) => {
@@ -178,11 +179,53 @@ program
     if (!fs.existsSync(filePath)) return console.error(`File not found: ${filePath}`);
 
     const api = new VaultApi(config.serverUrl, { cookie: config.cookie, apiKey: config.apiKey });
+    const uploadMode = opts.mode === 'git' ? 'git' : opts.mode === 'seamless' ? 'seamless' : 'api';
+
+    if (uploadMode === 'seamless') {
+      const engine = new SeamlessUploadEngine(api, {
+        concurrency: opts.concurrency,
+        chunkSize: opts.chunkSize,
+        convertHls: opts.convertHls,
+        onProgress: (p) => {
+          process.stdout.write(renderProgressLine(p));
+        },
+        onLog: (msg) => {
+          process.stdout.write(`\n  [${new Date().toLocaleTimeString()}] ${msg}`);
+        },
+      });
+
+      let abortHandler = () => {
+        console.log('\nAborting...');
+        engine.abort();
+      };
+      process.on('SIGINT', abortHandler);
+      process.on('SIGTERM', abortHandler);
+
+      try {
+        if (opts.resume) {
+          console.log(`Resuming seamless upload ${opts.resume}...`);
+          await engine.resumeSession(opts.resume);
+        } else {
+          const taskId = SessionStore.generateTaskId();
+          console.log(`Seamless upload ${path.basename(filePath)}...`);
+          await engine.initSession(filePath, opts.parentPath, taskId);
+        }
+        const result = await engine.uploadAll();
+        console.log(renderFinalLine(result));
+      } catch (err) {
+        console.error(`\nUpload failed: ${err.message}`);
+        process.exit(1);
+      } finally {
+        process.removeListener('SIGINT', abortHandler);
+        process.removeListener('SIGTERM', abortHandler);
+      }
+      return;
+    }
 
     const engine = new UploadEngine(api, {
       concurrency: opts.concurrency,
       chunkSize: opts.chunkSize,
-      uploadMode: opts.mode,
+      uploadMode,
       convertHls: opts.convertHls,
       onProgress: (p) => {
         process.stdout.write(renderProgressLine(p));

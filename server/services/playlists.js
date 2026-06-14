@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db/database');
 const appUrl = require('./app-url');
+const episodeMeta = require('./episode-meta');
 
 const VISIBILITY = ['public', 'private', 'unlisted'];
 
@@ -31,6 +32,8 @@ function fileRowToItem(row) {
     chunk_count: row.chunk_count,
     has_thumbnail: row.has_thumbnail,
     has_hls: row.has_hls,
+    hls_segment_count: Number(row.hls_segment_count) || 0,
+    hls_duration_sec: Number(row.hls_duration_sec) || 0,
     parent_path: row.parent_path,
     position: row.position,
     added_at: row.added_at,
@@ -143,8 +146,15 @@ function listFolderLinks(playlistId) {
 }
 
 function sortFileRows(rows, sortBy, sortOrder) {
-  const dir = sortOrder === 'DESC' ? -1 : 1;
   const sorted = [...rows];
+  if (sortBy === 'smart') {
+    sorted.sort((a, b) => {
+      const cmp = episodeMeta.compareEpisodeTitles(a.name, b.name);
+      return sortOrder === 'DESC' ? -cmp : cmp;
+    });
+    return sorted;
+  }
+  const dir = sortOrder === 'DESC' ? -1 : 1;
   if (sortBy === 'created_at') {
     sorted.sort((a, b) => dir * String(a.created_at || '').localeCompare(String(b.created_at || '')));
   } else {
@@ -186,36 +196,56 @@ function rebuildPlaylistPositions(playlistId) {
     'SELECT * FROM playlist_folder_links WHERE playlist_id = ? ORDER BY id ASC'
   ).all(playlistId);
 
-  let pos = 0;
-  const upd = db.prepare('UPDATE playlist_items SET position = ? WHERE playlist_id = ? AND file_id = ?');
-
+  const linkTargets = new Map();
   for (const link of links) {
     const folder = db.prepare('SELECT * FROM files WHERE id = ? AND is_deleted = 0').get(link.folder_id);
+    if (!folder) {
+      linkTargets.set(link.id, new Set());
+      continue;
+    }
+    const files = listFilesForFolderLink(playlist.user_id, folder, !!link.include_subfolders);
+    linkTargets.set(link.id, new Set(files.map((f) => f.id)));
+  }
+
+  const currentItems = db.prepare(`
+    SELECT pi.file_id, pi.folder_link_id
+    FROM playlist_items pi
+    JOIN files f ON f.id = pi.file_id AND f.is_deleted = 0 AND f.is_folder = 0
+    WHERE pi.playlist_id = ?
+    ORDER BY pi.position ASC, pi.id ASC
+  `).all(playlistId);
+
+  const kept = [];
+  const keptSet = new Set();
+  for (const item of currentItems) {
+    if (item.folder_link_id) {
+      const targets = linkTargets.get(item.folder_link_id);
+      if (!targets?.has(item.file_id)) continue;
+    }
+    kept.push(item.file_id);
+    keptSet.add(item.file_id);
+  }
+
+  const toAppend = [];
+  for (const link of links) {
+    const targets = linkTargets.get(link.id);
+    if (!targets?.size) continue;
+    const missing = [...targets].filter((id) => !keptSet.has(id));
+    if (!missing.length) continue;
+    const folder = db.prepare('SELECT * FROM files WHERE id = ? AND is_deleted = 0').get(link.folder_id);
     if (!folder) continue;
-    const files = sortFileRows(
-      listFilesForFolderLink(playlist.user_id, folder, !!link.include_subfolders),
-      link.sort_by,
-      link.sort_order,
-    );
-    for (const f of files) {
-      const managed = db.prepare(`
-        SELECT 1 FROM playlist_items
-        WHERE playlist_id = ? AND file_id = ? AND folder_link_id = ?
-      `).get(playlistId, f.id, link.id);
-      if (managed) upd.run(pos, playlistId, f.id);
-      pos += 1;
+    const rows = listFilesForFolderLink(playlist.user_id, folder, !!link.include_subfolders)
+      .filter((f) => missing.includes(f.id));
+    const sorted = sortFileRows(rows, link.sort_by, link.sort_order);
+    for (const f of sorted) {
+      toAppend.push(f.id);
+      keptSet.add(f.id);
     }
   }
 
-  const manual = db.prepare(`
-    SELECT file_id FROM playlist_items
-    WHERE playlist_id = ? AND folder_link_id IS NULL
-    ORDER BY position ASC, id ASC
-  `).all(playlistId);
-  for (const { file_id: fileId } of manual) {
-    upd.run(pos, playlistId, fileId);
-    pos += 1;
-  }
+  const finalOrder = [...kept, ...toAppend];
+  const upd = db.prepare('UPDATE playlist_items SET position = ? WHERE playlist_id = ? AND file_id = ?');
+  finalOrder.forEach((fileId, idx) => upd.run(idx, playlistId, fileId));
 }
 
 function syncPlaylistFolderLink(userId, linkId) {
@@ -260,9 +290,12 @@ function syncPlaylistFolderLink(userId, linkId) {
 
   const insert = db.prepare(`
     INSERT INTO playlist_items (playlist_id, file_id, position, folder_link_id)
-    VALUES (?, ?, 0, ?)
+    VALUES (?, ?, ?, ?)
   `);
   let added = 0;
+  let nextPos = db.prepare(
+    'SELECT COALESCE(MAX(position), -1) AS m FROM playlist_items WHERE playlist_id = ?'
+  ).get(link.playlist_id).m + 1;
   for (const fileId of targetIds) {
     const existing = db.prepare(
       'SELECT folder_link_id FROM playlist_items WHERE playlist_id = ? AND file_id = ?'
@@ -270,7 +303,8 @@ function syncPlaylistFolderLink(userId, linkId) {
     if (existing) continue;
     try {
       assertFileOwned(userId, fileId);
-      insert.run(link.playlist_id, fileId, linkId);
+      insert.run(link.playlist_id, fileId, nextPos, linkId);
+      nextPos += 1;
       added += 1;
     } catch {
       /* file became unavailable during sync */
@@ -326,7 +360,11 @@ function linkFolder(userId, playlistId, folderId, options = {}) {
   assertFolderOwned(userId, folderId);
 
   const includeSubfolders = options.include_subfolders ? 1 : 0;
-  const sortBy = options.sort_by === 'created_at' ? 'created_at' : 'name';
+  const sortBy = options.sort_by === 'created_at'
+    ? 'created_at'
+    : options.sort_by === 'smart'
+      ? 'smart'
+      : 'name';
   const sortOrder = options.sort_order === 'DESC' ? 'DESC' : 'ASC';
 
   let linkId;
@@ -398,7 +436,9 @@ function listPlaylistItems(userId, playlistId, { limit, offset } = {}) {
   let sql = `
     SELECT f.id, f.name, f.path, f.size, f.mime_type, f.chunk_count, f.has_thumbnail, f.has_hls,
            f.parent_path, pi.position, pi.added_at, pi.display_name, pi.folder_link_id,
-           pp.progress_pct, pp.completed, pp.position_seconds
+           pp.progress_pct, pp.completed, pp.position_seconds,
+           (SELECT COUNT(*) FROM hls_segments WHERE file_id = f.id) AS hls_segment_count,
+           (SELECT COALESCE(SUM(duration), 0) FROM hls_segments WHERE file_id = f.id) AS hls_duration_sec
     FROM playlist_items pi
     JOIN files f ON f.id = pi.file_id AND f.is_deleted = 0 AND f.is_folder = 0
     LEFT JOIN playlist_progress pp ON pp.file_id = f.id AND pp.playlist_id = pi.playlist_id AND pp.user_id = ?
@@ -627,6 +667,12 @@ function reorderItems(userId, playlistId, orderedFileIds) {
   return { items: listPlaylistItems(userId, playlistId) };
 }
 
+function smartReorderItems(userId, playlistId) {
+  const items = listPlaylistItems(userId, playlistId);
+  const sorted = episodeMeta.sortItemsByEpisodeMeta(items);
+  return reorderItems(userId, playlistId, sorted.map((i) => i.id));
+}
+
 function createShareToken(userId, playlistId, req = null) {
   const row = db.prepare('SELECT * FROM playlists WHERE id = ? AND user_id = ?').get(playlistId, userId);
   if (!row) throw new Error('Playlist not found');
@@ -678,7 +724,9 @@ function getByShareToken(token, req = null) {
 
   const items = db.prepare(`
     SELECT f.id, f.name, f.path, f.size, f.mime_type, f.chunk_count, f.has_thumbnail, f.has_hls,
-           f.parent_path, pi.position, pi.added_at, pi.display_name
+           f.parent_path, pi.position, pi.added_at, pi.display_name,
+           (SELECT COUNT(*) FROM hls_segments WHERE file_id = f.id) AS hls_segment_count,
+           (SELECT COALESCE(SUM(duration), 0) FROM hls_segments WHERE file_id = f.id) AS hls_duration_sec
     FROM playlist_items pi
     JOIN files f ON f.id = pi.file_id AND f.is_deleted = 0 AND f.is_folder = 0
     WHERE pi.playlist_id = ?
@@ -861,6 +909,7 @@ module.exports = {
   updateItemDisplayName,
   updateItemsDisplayNames,
   reorderItems,
+  smartReorderItems,
   createShareToken,
   revokeShareToken,
   getByShareToken,

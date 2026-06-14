@@ -1,6 +1,6 @@
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
-const { createMemoryDb, seedTestUser, seedTestFile } = require('../helpers/setup');
+const { createMemoryDb, seedTestUser, seedTestFile, seedTestRepo } = require('../helpers/setup');
 
 describe('playlists routes', function () {
   let app;
@@ -227,6 +227,50 @@ describe('playlists routes', function () {
     expect(get.body.items.map((i) => i.id)).to.include(track2.id);
   });
 
+  it('preserves custom episode order when a new file syncs into a linked folder', async function () {
+    const folder = seedTestFile(db, user.id, {
+      id: 'pl-folder-order',
+      name: 'Ordered',
+      path: '/Ordered',
+      size: 0,
+      mime_type: null,
+      is_folder: 1,
+      parent_path: '/',
+    });
+    const epA = seedTestFile(db, user.id, {
+      id: 'pl-order-a',
+      name: 'alpha.mp4',
+      path: '/Ordered/alpha.mp4',
+      parent_path: '/Ordered',
+    });
+    const epB = seedTestFile(db, user.id, {
+      id: 'pl-order-b',
+      name: 'beta.mp4',
+      path: '/Ordered/beta.mp4',
+      parent_path: '/Ordered',
+    });
+
+    const created = await request(app).post('/api/playlists').send({ title: 'Ordered show' });
+    const id = created.body.id;
+    await request(app).post(`/api/playlists/${id}/folders`).send({ folder_id: folder.id });
+
+    await request(app)
+      .patch(`/api/playlists/${id}/reorder`)
+      .send({ file_ids: [epB.id, epA.id] });
+
+    const epC = seedTestFile(db, user.id, {
+      id: 'pl-order-c',
+      name: 'gamma.mp4',
+      path: '/Ordered/gamma.mp4',
+      parent_path: '/Ordered',
+    });
+
+    playlistsService.syncPlaylistsForFile(user.id, epC.id);
+
+    const get = await request(app).get(`/api/playlists/${id}`);
+    expect(get.body.items.map((i) => i.id)).to.deep.equal([epB.id, epA.id, epC.id]);
+  });
+
   it('removes synced items when a file is trashed in a linked folder', async function () {
     const folder = seedTestFile(db, user.id, {
       id: 'pl-folder-3',
@@ -282,5 +326,43 @@ describe('playlists routes', function () {
     expect(unlinked.status).to.equal(200);
     expect(unlinked.body.folder_links).to.have.length(0);
     expect(unlinked.body.items).to.have.length(0);
+  });
+
+  it('smart reorders playlist items by season/episode in titles', async function () {
+    const ep3 = seedTestFile(db, user.id, { id: 'pl-smart-ep-3', name: 'Show S01E03.mp4' });
+    const ep1 = seedTestFile(db, user.id, { id: 'pl-smart-ep-1', name: 'Show S01E01.mp4' });
+    const ep2 = seedTestFile(db, user.id, { id: 'pl-smart-ep-2', name: 'Show S01E02.mp4' });
+
+    const created = await request(app).post('/api/playlists').send({ title: 'Smart sort test' });
+    const id = created.body.id;
+    await request(app)
+      .post(`/api/playlists/${id}/items`)
+      .send({ file_ids: [ep3.id, ep1.id, ep2.id] });
+
+    const res = await request(app).post(`/api/playlists/${id}/reorder-smart`);
+    expect(res.status).to.equal(200);
+    expect(res.body.items.map((i) => i.id)).to.deep.equal([ep1.id, ep2.id, ep3.id]);
+  });
+
+  it('includes hls duration on playlist items', async function () {
+    const repo = seedTestRepo(db, user.id);
+    const hlsFile = seedTestFile(db, user.id, {
+      id: 'pl-hls-1',
+      name: 'stream.mp4',
+      has_hls: 1,
+    });
+    db.prepare(`
+      INSERT INTO hls_segments (file_id, segment_index, duration, repo_id, repo_path, sha, size)
+      VALUES (?, 0, 6.5, ?, 'path/0.ts', 'sha0', 100),
+             (?, 1, 4.0, ?, 'path/1.ts', 'sha1', 100)
+    `).run(hlsFile.id, repo.id, hlsFile.id, repo.id);
+
+    const created = await request(app).post('/api/playlists').send({ title: 'HLS playlist' });
+    const id = created.body.id;
+    await request(app).post(`/api/playlists/${id}/items`).send({ file_ids: [hlsFile.id] });
+
+    const pl = await request(app).get(`/api/playlists/${id}`);
+    expect(pl.body.items[0].hls_duration_sec).to.be.closeTo(10.5, 0.01);
+    expect(pl.body.items[0].hls_segment_count).to.equal(2);
   });
 });

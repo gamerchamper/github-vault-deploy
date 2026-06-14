@@ -196,6 +196,14 @@ router.patch('/:id/reorder', (req, res) => {
   }
 });
 
+router.post('/:id/reorder-smart', (req, res) => {
+  try {
+    res.json(playlists.smartReorderItems(req.user.id, req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.patch('/:id/items', (req, res) => {
   try {
     res.json(playlists.updateItemsDisplayNames(req.user.id, req.params.id, req.body.items));

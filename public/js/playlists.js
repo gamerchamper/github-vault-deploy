@@ -91,6 +91,34 @@ const Playlists = {
     explorer.render();
   },
 
+  async smartSortPlaylist(playlistId) {
+    const id = playlistId || this.currentPlaylist?.id || explorer.playlistId;
+    if (!id) return;
+    try {
+      await API.playlists.smartReorder(id);
+      await this.loadPlaylistDetail(id);
+      explorer.render();
+      App.toast('Sorted by season/episode from titles', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  smartSortBuilderItems() {
+    if (!this.builderItems?.length || typeof EpisodeMeta === 'undefined') return;
+    this.builderItems = EpisodeMeta.sortItems(this.builderItems);
+    this.renderBuilderList();
+    App.toast('Sorted by detected season/episode numbers', 'success');
+  },
+
+  episodeMetaBadge(file) {
+    if (typeof EpisodeMeta === 'undefined') return '';
+    const title = file.display_name || file.name || '';
+    const meta = EpisodeMeta.parse(title);
+    if (!meta.match || !meta.label) return '';
+    return `<span class="builder-ep-detected" title="Detected from title">${this.escape(meta.label)}</span>`;
+  },
+
   async movePlaylistItem(fileId, delta) {
     const ids = this.playlistItemIds();
     const idx = ids.indexOf(fileId);
@@ -256,10 +284,11 @@ const Playlists = {
         <p class="curated-hero-desc">${pl.description || ''}</p>
         <div class="curated-hero-stats">${pl.item_count || 0} items · ${formatSize(pl.total_bytes || 0)}</div>
         ${folderLinksHtml}
-        <p class="curated-hero-order-hint">Share links and Play all use the episode order below — drag items or use ↑↓ to reorder. Synced folder items re-sort on sync.</p>
+        <p class="curated-hero-order-hint">Share links and Play all use the episode order below — drag items or use ↑↓ to reorder. New folder uploads are appended without changing your order.</p>
         <div class="curated-hero-actions">
           <button type="button" class="btn-primary" id="btn-playlist-play">▶ Play all</button>
           <button type="button" class="btn-secondary" id="btn-playlist-reorder">Reorder episodes</button>
+          <button type="button" class="btn-secondary" id="btn-playlist-smart-sort" title="Sort by season/episode numbers parsed from filenames">Smart sort</button>
           <button type="button" class="btn-secondary" id="btn-playlist-edit">Edit playlist</button>
           ${folderLinks.length ? '<button type="button" class="btn-secondary" id="btn-playlist-sync-folders">Sync folders</button>' : ''}
           <button type="button" class="btn-secondary" id="btn-playlist-share">${pl.share_url ? 'Copy share link' : 'Share'}</button>
@@ -272,6 +301,7 @@ const Playlists = {
     fileView.prepend(hero);
     hero.querySelector('#btn-playlist-play')?.addEventListener('click', () => this.playPlaylist(pl.id));
     hero.querySelector('#btn-playlist-reorder')?.addEventListener('click', () => this.openBuilder(pl));
+    hero.querySelector('#btn-playlist-smart-sort')?.addEventListener('click', () => this.smartSortPlaylist(pl.id));
     hero.querySelector('#btn-playlist-edit')?.addEventListener('click', () => this.openBuilder(pl));
     hero.querySelector('#btn-playlist-sync-folders')?.addEventListener('click', () => this.syncPlaylistFolders(pl.id));
     hero.querySelector('#btn-playlist-share')?.addEventListener('click', () => this.sharePlaylist(pl.id));
@@ -519,6 +549,7 @@ const Playlists = {
         <button type="button" class="builder-move" data-dir="1" title="Move down" ${idx === this.builderItems.length - 1 ? 'disabled' : ''}>↓</button>
         <span class="builder-drag" aria-hidden="true">⠿</span>
         <div class="builder-item-fields">
+          ${this.episodeMetaBadge(file)}
           <input type="text" class="builder-display-name form-input" value="${this.escape(file.display_name || '')}" placeholder="${this.escape(file.name)}" title="Display name in playlist" aria-label="Display name for ${this.escape(file.name)}">
           ${hasAlias ? `<span class="builder-file-name" title="Original filename">${this.escape(file.name)}</span>` : ''}
         </div>
@@ -729,7 +760,11 @@ const Playlists = {
       btn.addEventListener('click', async () => {
         if (mode === 'link' && folderId) {
           const includeSubfolders = document.getElementById('playlist-picker-include-subfolders')?.checked;
-          await this.linkFolderToPlaylist(pl.id, folderId, { include_subfolders: includeSubfolders });
+          const sortBy = document.getElementById('playlist-picker-sort-by')?.value || 'name';
+          await this.linkFolderToPlaylist(pl.id, folderId, {
+            include_subfolders: includeSubfolders,
+            sort_by: sortBy,
+          });
         } else {
           await this.addFilesToPlaylist(pl.id, fileIds);
         }
@@ -845,6 +880,7 @@ const Playlists = {
     document.getElementById('btn-save-playlist')?.addEventListener('click', () => this.savePlaylistModal());
     document.getElementById('btn-save-collection')?.addEventListener('click', () => this.saveCollectionModal());
     document.getElementById('btn-save-builder')?.addEventListener('click', () => this.saveBuilder());
+    document.getElementById('btn-builder-smart-sort')?.addEventListener('click', () => this.smartSortBuilderItems());
     document.getElementById('btn-save-collection-builder')?.addEventListener('click', () => this.saveCollectionBuilder());
     document.getElementById('collection-builder-add')?.addEventListener('click', () => this.searchPlaylistsForCollection());
     document.getElementById('collection-builder-search')?.addEventListener('keydown', (e) => {

@@ -251,6 +251,69 @@ class VaultApi {
   async revokeApiKey(id) {
     return this._fetch('DELETE', `/auth/api-keys/${id}`);
   }
+
+  async seamlessInit({
+    fileName, parentPath, size, mimeType, chunkSize, fileId, taskId, convertHls,
+  }) {
+    return this._fetch('POST', '/api/files/upload/seamless/init', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName,
+        parentPath,
+        size,
+        mimeType,
+        chunkSize: chunkSize || undefined,
+        fileId: fileId || undefined,
+        taskId: taskId || undefined,
+        convertHls: !!convertHls,
+      }),
+    });
+  }
+
+  async seamlessPart(fileId, partIndex, buffer, taskId) {
+    const form = new FormData();
+    form.append('fileId', fileId);
+    form.append('partIndex', String(partIndex));
+    if (taskId) form.append('taskId', taskId);
+    form.append('part', buffer, {
+      filename: `part-${partIndex}`,
+      contentType: 'application/octet-stream',
+    });
+    const headers = { ...this.defaultHeaders, ...form.getHeaders() };
+    return this._fetch('POST', '/api/files/upload/seamless/part', {
+      headers,
+      body: form,
+      timeout: 600000,
+    });
+  }
+
+  async seamlessComplete(fileId, taskId, convertHls = false) {
+    return this._fetch('POST', '/api/files/upload/seamless/complete', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileId,
+        taskId,
+        convertHls: convertHls ? '1' : '0',
+      }),
+      timeout: 600000,
+    });
+  }
+
+  async seamlessStatus(fileId) {
+    return this._fetch('GET', `/api/files/upload/seamless/status/${fileId}`);
+  }
+
+  async seamlessResume(fileId, taskId, convertHls = false) {
+    return this._fetch('POST', '/api/files/upload/seamless/resume', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileId,
+        taskId,
+        convertHls: convertHls ? '1' : '0',
+      }),
+      timeout: 600000,
+    });
+  }
 }
 
 module.exports = { VaultApi, VaultApiError };
