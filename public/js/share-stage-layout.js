@@ -91,16 +91,26 @@ const ShareStageLayout = {
       ?? this.getViewport().width;
   },
 
+  getShellContentWidth() {
+    const shell = document.querySelector('.share-shell');
+    if (shell?.clientWidth > 0) return shell.clientWidth;
+    const frameW = this.getAppFrameWidth();
+    if (this.isRailOpen() && !document.body.classList.contains('share-rail-stack')) {
+      return Math.max(this.minWidth(), frameW - this.getRailWidth());
+    }
+    return frameW;
+  },
+
+  getSideBySideMaxStageWidth() {
+    return Math.max(this.minWidth(), this.getShellContentWidth());
+  },
+
   shouldStackRail(stageWidth) {
     if (!this.panel?.classList.contains('share-stage-user-sized')) return false;
     if (!this.isRailOpen()) return false;
 
-    const frameW = this.getAppFrameWidth();
-    const railW = this.getRailWidth();
-    const gap = 12;
-    const margin = 8;
-    // Stack when the player is too wide to leave room for the side rail.
-    const maxSideBySideStage = frameW - railW - gap - margin;
+    // Shell already reserves side-rail space — stack only when the stage is wider than that column.
+    const maxSideBySideStage = this.getSideBySideMaxStageWidth();
 
     if (this._stackMode) {
       return stageWidth > maxSideBySideStage - this.STACK_HYSTERESIS;
@@ -229,11 +239,8 @@ const ShareStageLayout = {
     let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? offsetTop + margin;
 
     let maxW = Math.max(minW, viewRight - offsetLeft - margin * 2 - outset);
-    if (this.isRailOpen() && layout.userSized !== false) {
-      const sideBySideLimit = this.getAppFrameWidth() - this.getRailWidth() - 12 - margin;
-      if (!this.shouldStackRail(width)) {
-        maxW = Math.min(maxW, Math.max(minW, sideBySideLimit));
-      }
+    if (this.isRailOpen() && layout.userSized !== false && !this.shouldStackRail(width)) {
+      maxW = Math.min(maxW, this.getSideBySideMaxStageWidth());
     }
     const maxH = Math.max(minH, viewBottom - top - margin - outset);
     width = Math.min(width, maxW);
@@ -530,7 +537,11 @@ const ShareStageLayout = {
       if (dragStarted) return;
       dragStarted = true;
       const saved = this.read();
-      let layout = saved?.userSized ? saved : this.captureCurrent();
+      let layout = saved?.userSized ? { ...saved } : this.captureCurrent();
+      if (!saved?.userSized && (axis === 's' || axis === 'e' || axis === 'se')) {
+        layout.widthSized = axis === 'e' || axis === 'se';
+        layout.heightSized = axis === 's' || axis === 'se';
+      }
       layout = this.apply(layout);
       startW = layout.width;
       startH = layout.height;
@@ -573,6 +584,8 @@ const ShareStageLayout = {
         left: startL,
         top: startT,
         userSized: true,
+        widthSized: axis === 'e' || axis === 'se' || this.read()?.widthSized,
+        heightSized: axis === 's' || axis === 'se' || this.read()?.heightSized,
       });
     };
 
