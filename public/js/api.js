@@ -428,10 +428,12 @@ const UploadPrefs = {
     const mode = localStorage.getItem(this.KEY);
     if (mode === 'git') return 'git';
     if (mode === 'api') return 'api';
-    return 'seamless';
+    // Legacy preference from when seamless lived in the dropdown
+    if (mode === 'seamless') return 'api';
+    return 'api';
   },
   set(mode) {
-    const stored = mode === 'git' ? 'git' : mode === 'api' ? 'api' : 'seamless';
+    const stored = mode === 'git' ? 'git' : 'api';
     localStorage.setItem(this.KEY, stored);
   },
 };

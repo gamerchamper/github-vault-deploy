@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.5">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.6">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.0">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -79,13 +79,16 @@
     <!-- Ribbon / Toolbar -->
     <div class="ribbon">
       <div class="ribbon-group">
-        <button id="btn-upload" class="ribbon-btn" title="Upload files">
+        <button id="btn-upload" class="ribbon-btn" title="Upload files (API or Git)">
           <span class="ribbon-icon">📤</span>
           <span>Upload</span>
         </button>
+        <button id="btn-seamless-upload" class="ribbon-btn ribbon-btn-seamless" type="button" title="Seamless upload — stream to server, auto encrypt, upload, and HLS">
+          <span class="ribbon-icon">⚡</span>
+          <span>Seamless</span>
+        </button>
         <label class="visually-hidden" for="upload-mode">Upload method</label>
-        <select id="upload-mode" class="upload-mode-select" aria-label="Upload method">
-          <option value="seamless">Seamless (recommended)</option>
+        <select id="upload-mode" class="upload-mode-select" aria-label="Upload method for standard upload">
           <option value="api">API (resumable)</option>
           <option value="git">Git push (faster)</option>
         </select>
@@ -1021,6 +1024,7 @@
       <div class="context-item" data-action="new-collection">New collection</div>
       <div class="context-item" data-action="new-folder">New folder</div>
       <div class="context-item" data-action="upload">Upload files</div>
+      <div class="context-item" data-action="upload-seamless">Seamless upload</div>
       <div class="context-separator"></div>
       <div class="context-item" data-action="refresh-view">Refresh</div>
     </div>
@@ -1105,6 +1109,6 @@
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
   <script src="/js/local-upload.js?v=1.0.2"></script>
-  <script src="/js/app.js?v=1.0.8"></script>
+  <script src="/js/app.js?v=1.0.9"></script>
 </body>
 </html>

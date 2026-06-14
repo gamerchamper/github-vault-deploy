@@ -1588,6 +1588,17 @@ body::before {
   background: rgba(34, 197, 94, 0.1);
 }
 
+.ribbon-btn-seamless {
+  color: var(--accent);
+  border-color: rgba(91, 140, 247, 0.45);
+  background: rgba(91, 140, 247, 0.08);
+}
+
+.ribbon-btn-seamless:hover:not(:disabled):not(.loading) {
+  border-color: rgba(91, 140, 247, 0.65);
+  background: rgba(91, 140, 247, 0.14);
+}
+
 .local-upload-detected {
   display: flex;
   flex-wrap: wrap;

@@ -14,6 +14,7 @@ const App = {
   metadataReposExpanded: false,
   apiKeysLoaded: false,
   lastLocalUpload: null,
+  pendingUploadMode: null,
 
   toast(message, type = '') {
     if (type === 'error') {
@@ -604,8 +605,8 @@ const App = {
       if (gitOption) {
         gitOption.disabled = !this.gitAvailable;
         if (!this.gitAvailable && uploadMode.value === 'git') {
-          uploadMode.value = 'seamless';
-          UploadPrefs.set('seamless');
+          uploadMode.value = 'api';
+          UploadPrefs.set('api');
         }
       }
     } catch {
@@ -945,11 +946,17 @@ const App = {
     });
 
     document.getElementById('btn-upload').addEventListener('click', () => {
-      document.getElementById('file-input').click();
+      this.openUploadPicker();
+    });
+
+    document.getElementById('btn-seamless-upload')?.addEventListener('click', () => {
+      this.openUploadPicker('seamless');
     });
 
     document.getElementById('file-input').addEventListener('change', (e) => {
-      this.uploadFiles(e.target.files);
+      const mode = this.pendingUploadMode;
+      this.pendingUploadMode = null;
+      this.uploadFiles(e.target.files, mode);
       e.target.value = '';
     });
 
@@ -1066,6 +1073,7 @@ const App = {
       explorer.accountView = e.target.value || 'primary';
       const isPrimary = explorer.accountView === 'primary';
       document.getElementById('btn-upload')?.toggleAttribute('disabled', !isPrimary);
+      document.getElementById('btn-seamless-upload')?.toggleAttribute('disabled', !isPrimary);
       document.getElementById('file-input')?.toggleAttribute('disabled', !isPrimary);
       await explorer.navigate(explorer.currentPath);
       this.loadAccountViews();
@@ -1185,7 +1193,8 @@ const App = {
         if (action === 'new-folder') this.openFolderModal();
         if (action === 'new-playlist') Playlists.openCreatePlaylistModal();
         if (action === 'new-collection') Playlists.openCreateCollectionModal();
-        if (action === 'upload') document.getElementById('file-input').click();
+        if (action === 'upload') this.openUploadPicker();
+        if (action === 'upload-seamless') this.openUploadPicker('seamless');
         if (action === 'refresh-view') App.refreshAll();
         return;
       }
@@ -1607,11 +1616,17 @@ const App = {
     return results;
   },
 
-  async uploadFiles(fileList) {
+  openUploadPicker(mode = null) {
+    this.pendingUploadMode = mode === 'seamless' ? 'seamless' : null;
+    document.getElementById('file-input')?.click();
+  },
+
+  async uploadFiles(fileList, modeOverride = null) {
     const files = [...fileList];
     if (!files.length) return;
 
-    const uploadMode = UploadPrefs.get();
+    const forcedMode = modeOverride === 'seamless' ? 'seamless' : null;
+    const uploadMode = forcedMode || UploadPrefs.get();
     const specs = [];
 
     for (const file of files) {
@@ -1620,7 +1635,7 @@ const App = {
       let convertHls = false;
       const isMp4 = /\.mp4$/i.test(file.name) || file.type === 'video/mp4';
       if (file.size > 100 * 1024 * 1024 || isMp4) {
-        const confirmed = await this.showUploadPlan(file);
+        const confirmed = await this.showUploadPlan(file, { defaultMode: uploadMode });
         if (!confirmed) continue;
         chunkSize = confirmed.chunkSize;
         mode = confirmed.uploadMode || uploadMode;
@@ -1651,7 +1666,7 @@ const App = {
     return Math.round(clamped * MB);
   },
 
-  async showUploadPlan(file) {
+  async showUploadPlan(file, { defaultMode = UploadPrefs.get() } = {}) {
     return new Promise((resolve) => {
       const modal = document.getElementById('upload-plan-modal');
       const chunkInput = document.getElementById('plan-chunk-size');
@@ -1660,6 +1675,9 @@ const App = {
 
       const modeSelect = document.getElementById('plan-upload-mode');
       const gitAvailable = App.gitAvailable !== false;
+      const initialMode = defaultMode === 'seamless'
+        ? 'seamless'
+        : (defaultMode === 'git' && gitAvailable ? 'git' : UploadPrefs.get());
 
       const isMp4 = /\.mp4$/i.test(file.name) || file.type === 'video/mp4';
       const hlsCheck = document.getElementById('plan-hls-convert');
@@ -1671,7 +1689,7 @@ const App = {
 
       const render = async () => {
         const cs = this.chunkSizeFromMbInput(chunkInput);
-        const selectedMode = modeSelect?.value || UploadPrefs.get();
+        const selectedMode = modeSelect?.value || initialMode;
         const convertHls = !!(hlsCheck?.checked && isMp4);
         try {
           const plan = await API.files.plan(file.size, cs, {
@@ -1744,8 +1762,9 @@ const App = {
       }
 
       if (modeSelect) {
-        modeSelect.value = UploadPrefs.get();
-        modeSelect.disabled = !gitAvailable;
+        modeSelect.value = initialMode;
+        const gitOption = modeSelect.querySelector('option[value="git"]');
+        if (gitOption) gitOption.disabled = !gitAvailable;
         modeSelect.onchange = render;
       }
 
@@ -1763,10 +1782,10 @@ const App = {
       document.getElementById('plan-cancel').onclick = () => { cleanup(); resolve(null); };
       document.getElementById('plan-confirm').onclick = () => {
         const cs = this.chunkSizeFromMbInput(chunkInput);
-        const uploadMode = modeSelect?.value || UploadPrefs.get();
+        const uploadMode = modeSelect?.value || initialMode;
         const convertHls = !!(hlsCheck?.checked && isMp4);
         console.log('[upload] plan confirmed', { cs, uploadMode, convertHls, checked: hlsCheck?.checked });
-        UploadPrefs.set(uploadMode);
+        if (uploadMode !== 'seamless') UploadPrefs.set(uploadMode);
         cleanup();
         resolve({ chunkSize: cs, uploadMode, convertHls });
       };
@@ -2400,8 +2419,9 @@ document.getElementById('btn-migrate-mysql')?.addEventListener('click', async ()
 
   const commands = [
     { icon: '📁', label: 'New Folder', action: () => App.openFolderModal(), keywords: 'create mkdir' },
-    { icon: '📤', label: 'Upload File', action: () => document.getElementById('file-input').click(), keywords: 'add import' },
-    { icon: '📂', label: 'Upload Folder', action: () => { document.getElementById('file-input').setAttribute('webkitdirectory',''); document.getElementById('file-input').click(); document.getElementById('file-input').removeAttribute('webkitdirectory'); }, keywords: 'directory' },
+    { icon: '📤', label: 'Upload File', action: () => App.openUploadPicker(), keywords: 'add import' },
+    { icon: '⚡', label: 'Seamless Upload', action: () => App.openUploadPicker('seamless'), keywords: 'stream server cache large' },
+    { icon: '📂', label: 'Upload Folder', action: () => { document.getElementById('file-input').setAttribute('webkitdirectory',''); App.openUploadPicker(); document.getElementById('file-input').removeAttribute('webkitdirectory'); }, keywords: 'directory' },
     { icon: '🔄', label: 'Refresh', action: () => App.refreshAll(), keywords: 'reload' },
     { icon: '⚙️', label: 'Storage Repos', action: () => App.showRepoModal(), keywords: 'settings repos' },
     { icon: '🔑', label: 'API Keys', action: () => App.showApiKeysPanel(), keywords: 'keys tokens' },
