@@ -75,6 +75,8 @@ Metadata (file names, paths, chunk locations, SHAs) is stored locally in SQLite.
 | `CHUNK_SIZE` | 921600 (900KB) | Size of each chunk in bytes |
 | `PORT` | 3000 | Server port |
 | `APP_URL` | http://localhost:3000 | Must match OAuth callback base URL |
+| `LOCAL_AUTH` | true | Auto-login when visiting via localhost or server LAN IP (set `false` to require GitHub sign-in everywhere) |
+| `LOCAL_AUTH_USER_ID` | (first user) | Which vault user to use for local auto-login |
 
 ## Docker
 

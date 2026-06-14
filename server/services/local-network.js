@@ -167,6 +167,7 @@ module.exports = {
   isPrivateIpv4,
   normalizeIpv4,
   sameSubnet,
+  hostFromRequest,
   getServerIpv4Addresses,
   getUserLocalUploadIpv4,
   setUserLocalUploadIpv4,

@@ -7,6 +7,7 @@ const db = require('../db/database');
 const audit = require('../services/audit');
 const router = express.Router();
 const appUrl = require('../services/app-url');
+const localAuth = require('../services/local-auth');
 
 const GITHUB_SCOPES = ['repo', 'user', 'read:org'];
 
@@ -106,11 +107,16 @@ router.get('/github/callback', (req, res, next) => {
 router.get('/me', (req, res) => {
   res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
   if (!req.isAuthenticated || !req.isAuthenticated()) {
-    return res.json({ authenticated: false, app_url: appUrl.getAppUrl(req) });
+    return res.json({
+      authenticated: false,
+      app_url: appUrl.getAppUrl(req),
+      local_auth: localAuth.getStatus(req),
+    });
   }
   res.json({
     authenticated: true,
     app_url: appUrl.getAppUrl(req),
+    auth_method: req.authType === 'local' ? 'local' : 'github',
     user: {
       id: req.user.id,
       username: req.user.username,

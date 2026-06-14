@@ -199,6 +199,16 @@ body::before {
   margin-bottom: 32px;
 }
 
+.login-local-hint {
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: -16px 0 24px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(91, 140, 247, 0.12);
+}
+
 .btn-github {
   display: inline-flex;
   align-items: center;

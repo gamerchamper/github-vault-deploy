@@ -170,14 +170,16 @@ const App = {
   },
 
   async checkAuth(retries = 3) {
+    let last = { authenticated: false };
     for (let i = 0; i < retries; i++) {
       try {
         const auth = await API.auth.me();
         if (auth.authenticated) return auth;
+        last = auth;
       } catch { /* retry */ }
       if (i < retries - 1) await new Promise(r => setTimeout(r, 300));
     }
-    return { authenticated: false };
+    return last;
   },
 
   async init() {
@@ -201,7 +203,7 @@ const App = {
         window.history.replaceState({}, '', '/');
       }
     } else {
-      this.showLogin();
+      this.showLogin(auth);
       if (params.get('error')) {
         const reason = params.get('reason');
         const msg = reason
@@ -218,7 +220,7 @@ const App = {
     DownloadManager.bindEvents();
   },
 
-  showLogin() {
+  showLogin(auth = {}) {
     if (this.softReloadTimer) {
       clearTimeout(this.softReloadTimer);
       this.softReloadTimer = null;
@@ -226,6 +228,22 @@ const App = {
     this.teardownRuntime();
     document.getElementById('login-screen').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
+
+    const hint = document.getElementById('login-local-hint');
+    if (hint) {
+      const local = auth.local_auth;
+      const onLocal = typeof LocalUpload !== 'undefined' && LocalUpload.isLocalHostname();
+      if (onLocal && local?.needs_setup) {
+        hint.textContent = 'Sign in with GitHub once to finish setup. After that, local visits skip login.';
+        hint.classList.remove('hidden');
+      } else if (onLocal && local?.eligible && local?.enabled === false) {
+        hint.textContent = 'Local auto-login is disabled on this server (LOCAL_AUTH=false).';
+        hint.classList.remove('hidden');
+      } else {
+        hint.textContent = '';
+        hint.classList.add('hidden');
+      }
+    }
   },
 
   showApp(user) {

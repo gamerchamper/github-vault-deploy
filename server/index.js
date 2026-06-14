@@ -190,6 +190,7 @@ app.use(express.static(PUBLIC_DIR, {
 
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(require('./middleware/local-auth').localAuthMiddleware);
 
 const { trackUserActivity } = require('./middleware/activity');
 app.use('/api', trackUserActivity);
