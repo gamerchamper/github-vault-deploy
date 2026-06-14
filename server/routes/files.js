@@ -877,6 +877,170 @@ router.post('/hls-convert/:id', async (req, res) => {
   }
 });
 
+function isVerifyHlsEligible(file) {
+  if (!file || file.is_folder) return false;
+  if (file.has_hls) return true;
+  const count = hlsConvert.getHlsSegmentCount(file.id);
+  return count > 0;
+}
+
+async function runVerifyHlsTask(userId, taskId, fileIds) {
+  const results = [];
+  for (let i = 0; i < fileIds.length; i++) {
+    const fileId = fileIds[i];
+    const file = db.prepare('SELECT id, name FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
+    const name = file?.name || 'file';
+    tasks.update(taskId, userId, {
+      status: 'processing',
+      phase: 'verify',
+      percent: Math.round((i / fileIds.length) * 100),
+      title: fileIds.length === 1
+        ? `Verifying HLS: ${name}`
+        : `Verifying HLS: ${name} (${i + 1}/${fileIds.length})`,
+      done: i,
+      total: fileIds.length,
+      currentName: name,
+      fileId,
+      error: null,
+    });
+
+    const result = await hlsConvert.verifyHlsOnGitHub(userId, fileId, (p) => {
+      const base = Math.round((i / fileIds.length) * 100);
+      const slice = fileIds.length === 1 ? 100 : Math.round(100 / fileIds.length);
+      tasks.update(taskId, userId, {
+        status: 'processing',
+        phase: p.phase === 'playlist' ? 'playlist' : 'verify',
+        percent: Math.min(99, base + Math.round((p.percent / 100) * slice)),
+        segmentsDone: p.checked,
+        segmentsTotal: p.total,
+        lastLog: p.phase === 'playlist'
+          ? 'Checking m3u8 playlist on GitHub'
+          : `Checking HLS segments on GitHub (${p.checked}/${p.total})`,
+      });
+    });
+
+    results.push(result);
+    const logLine = result.valid
+      ? `${name}: all ${result.totalSegments} segment(s) verified`
+      : `${name}: ${result.issues.join('; ')}`;
+    tasks.appendLog(taskId, userId, logLine);
+  }
+
+  const failed = results.filter((r) => !r.valid);
+  const last = results[results.length - 1];
+  tasks.update(taskId, userId, {
+    status: failed.length ? 'error' : 'done',
+    phase: failed.length ? 'verify' : 'done',
+    percent: 100,
+    done: fileIds.length,
+    total: fileIds.length,
+    valid: failed.length === 0,
+    issues: failed.flatMap((r) => r.issues.map((issue) => `${r.fileName}: ${issue}`)),
+    missing: failed.flatMap((r) => r.missing),
+    segmentsDone: last?.verified ?? 0,
+    segmentsTotal: last?.totalSegments ?? 0,
+    error: failed.length
+      ? (fileIds.length === 1
+        ? failed[0].issues[0] || 'HLS verification failed'
+        : `${failed.length} of ${fileIds.length} file(s) have HLS issues`)
+      : null,
+    lastLog: failed.length
+      ? failed.map((r) => `${r.fileName}: ${r.issues[0]}`).join('; ')
+      : `All ${fileIds.length} file(s) verified — HLS segments complete`,
+    resumable: false,
+  });
+  return results;
+}
+
+router.post('/verify-hls-batch', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? [...new Set(req.body.ids.filter(Boolean))] : [];
+    if (!ids.length) return res.status(400).json({ error: 'No files selected' });
+
+    const eligible = [];
+    const skipped = [];
+    for (const id of ids) {
+      const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(id, req.user.id);
+      if (!file) continue;
+      if (isVerifyHlsEligible(file)) eligible.push(id);
+      else skipped.push(file.name);
+    }
+    if (!eligible.length) {
+      return res.status(400).json({
+        error: skipped.length
+          ? 'Selected files have no HLS data to verify'
+          : 'No valid files selected',
+      });
+    }
+
+    const taskId = uuidv4();
+    const title = eligible.length === 1
+      ? `Verifying HLS: ${db.prepare('SELECT name FROM files WHERE id = ?').get(eligible[0])?.name || 'file'}`
+      : `Verifying HLS (${eligible.length} files)`;
+
+    tasks.create(req.user.id, {
+      id: taskId,
+      type: 'verify-hls',
+      title,
+      payload: { fileIds: eligible, skipped, done: 0, total: eligible.length },
+    });
+
+    (async () => {
+      try {
+        await runVerifyHlsTask(req.user.id, taskId, eligible);
+      } catch (err) {
+        tasks.appendLog(taskId, req.user.id, `HLS verification failed: ${err.message}`);
+        tasks.update(taskId, req.user.id, { status: 'error', error: err.message, resumable: false });
+      }
+    })();
+
+    res.json({ taskId, count: eligible.length, skipped });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/verify-hls', async (req, res) => {
+  try {
+    const fileId = req.params.id;
+    const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, req.user.id);
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    if (!isVerifyHlsEligible(file)) {
+      return res.status(400).json({ error: 'File has no HLS data to verify' });
+    }
+
+    const existing = db.prepare(`
+      SELECT id FROM tasks
+      WHERE user_id = ? AND type = 'verify-hls' AND status IN ('processing', 'pending')
+        AND payload LIKE ?
+    `).get(req.user.id, `%"${fileId}"%`);
+    if (existing) {
+      return res.json({ success: true, taskId: existing.id, alreadyRunning: true });
+    }
+
+    const taskId = uuidv4();
+    tasks.create(req.user.id, {
+      id: taskId,
+      type: 'verify-hls',
+      title: `Verifying HLS: ${file.name}`,
+      payload: { fileId, fileIds: [fileId], fileName: file.name },
+    });
+
+    (async () => {
+      try {
+        await runVerifyHlsTask(req.user.id, taskId, [fileId]);
+      } catch (err) {
+        tasks.appendLog(taskId, req.user.id, `HLS verification failed: ${err.message}`);
+        tasks.update(taskId, req.user.id, { status: 'error', error: err.message, resumable: false });
+      }
+    })();
+
+    res.json({ success: true, taskId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/refresh-thumbnail/:id', async (req, res) => {
   try {
     const result = await storage.refreshThumbnail(req.user.id, req.params.id);

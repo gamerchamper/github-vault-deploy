@@ -452,7 +452,7 @@ class Explorer {
     const thumbSrc = file.has_thumbnail
       ? ThumbCache.resolveUrl(file.id, file.thumbVersion)
       : '';
-    const hasHls = !isPending && !file.is_folder && file.has_hls;
+    const hasHls = !isPending && !file.is_folder && (file.has_hls || (file.hls_segment_count > 0));
     const iconHtml = !isPending && file.has_thumbnail
       ? `<div class="file-icon-wrap"><img class="file-thumb" src="${thumbSrc}" alt="" loading="lazy" decoding="async">${hasHls ? '<span class="hls-file-badge">m3u8</span>' : ''}</div>`
       : `<div class="file-icon-wrap"><div class="file-icon">${isPending ? '⏳' : getFileIcon(file.name, file.is_folder)}</div>${hasHls ? '<span class="hls-file-badge">m3u8</span>' : ''}${file.is_favorite ? '<span class="favorite-badge" title="Favorite">★</span>' : ''}</div>`;
@@ -583,6 +583,83 @@ class Explorer {
 
   getMoveIds(file) {
     return this.selected.has(file.id) ? [...this.selected] : [file.id];
+  }
+
+  getSelectedFileObjects() {
+    return this.files.filter((f) => this.selected.has(f.id) && !f.is_folder);
+  }
+
+  getActionTargets(file = null) {
+    if (this.selected.size > 0) return this.getSelectedFileObjects();
+    return file && !file.is_folder ? [file] : [];
+  }
+
+  isHlsEligible(file) {
+    return !!file && !file.is_folder && (file.has_hls || (file.hls_segment_count > 0));
+  }
+
+  isVideoEligibleForHls(file) {
+    return !!file && !file.is_folder
+      && (file.mime_type?.startsWith('video/') || /\.mp4$/i.test(file.name || ''))
+      && !file.has_hls;
+  }
+
+  hideSelectionActionsMenu() {
+    document.getElementById('selection-actions-menu')?.classList.add('hidden');
+    const btn = document.getElementById('btn-selection-actions');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
+  toggleSelectionActionsMenu() {
+    const menu = document.getElementById('selection-actions-menu');
+    const btn = document.getElementById('btn-selection-actions');
+    if (!menu || !btn || btn.disabled) return;
+    const open = menu.classList.toggle('hidden');
+    btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+  }
+
+  async verifyHlsSelected() {
+    return VerifyHls.runForSelection();
+  }
+
+  async hlsConvertSelected() {
+    const targets = this.getSelectedFileObjects().filter((f) => this.isVideoEligibleForHls(f));
+    if (!targets.length) {
+      App.toast('No eligible videos selected for HLS conversion', 'error');
+      return;
+    }
+    for (const file of targets) {
+      try {
+        const result = await API.files.hlsConvert(file.id);
+        if (result?.taskId) TaskPanel.track(result.taskId);
+      } catch (err) {
+        App.toast(`${file.name}: ${err.message || 'HLS conversion failed'}`, 'error');
+      }
+    }
+    TaskPanel.setExpanded(true);
+    App.toast(`Started HLS conversion for ${targets.length} file(s)`, 'success');
+  }
+
+  verifyFileSelected() {
+    const targets = this.getSelectedFileObjects();
+    if (!targets.length) {
+      App.toast('Select a file to verify', 'error');
+      return;
+    }
+    if (targets.length > 1) {
+      App.toast('Verify file works on one file at a time — select a single file', 'error');
+      return;
+    }
+    VerifyRepair.prompt(targets[0]);
+  }
+
+  runBulkAction(action) {
+    this.hideSelectionActionsMenu();
+    if (action === 'verify-hls') return this.verifyHlsSelected();
+    if (action === 'verify-file') return this.verifyFileSelected();
+    if (action === 'hls-convert') return this.hlsConvertSelected();
+    if (action === 'delete') return this.deleteSelected();
+    return null;
   }
 
   handleDragStart(e, file) {
@@ -981,6 +1058,44 @@ class Explorer {
     if (permDel) permDel.classList.toggle('hidden', !trash);
     if (permDel) permDel.disabled = !hasSelection;
 
+    const actionsBtn = document.getElementById('btn-selection-actions');
+    const actionsMenu = document.getElementById('selection-actions-menu');
+    const curatedBlocked = trash || curated;
+    if (actionsBtn) {
+      actionsBtn.disabled = !hasFiles || curatedBlocked || playlistDetail || collectionDetail;
+    }
+    if (actionsMenu && actionsBtn?.disabled) {
+      actionsMenu.classList.add('hidden');
+      actionsBtn.setAttribute('aria-expanded', 'false');
+    }
+    if (actionsMenu) {
+      const hlsTargets = selectedFiles.filter((f) => !f.is_folder && (f.has_hls || (f.hls_segment_count > 0)));
+      const videoTargets = selectedFiles.filter((f) => this.isVideoEligibleForHls(f));
+      const verifyHlsItem = actionsMenu.querySelector('[data-bulk-action="verify-hls"]');
+      const verifyFileItem = actionsMenu.querySelector('[data-bulk-action="verify-file"]');
+      const hlsConvertItem = actionsMenu.querySelector('[data-bulk-action="hls-convert"]');
+      const deleteItem = actionsMenu.querySelector('[data-bulk-action="delete"]');
+      if (verifyHlsItem) {
+        verifyHlsItem.disabled = hlsTargets.length === 0;
+        verifyHlsItem.textContent = hlsTargets.length > 1
+          ? `Verify HLS (${hlsTargets.length} files)`
+          : 'Verify HLS';
+      }
+      if (verifyFileItem) {
+        verifyFileItem.disabled = selectedFiles.filter((f) => !f.is_folder).length !== 1;
+        verifyFileItem.textContent = 'Verify file';
+      }
+      if (hlsConvertItem) {
+        hlsConvertItem.disabled = videoTargets.length === 0;
+        hlsConvertItem.textContent = videoTargets.length > 1
+          ? `Convert to HLS (${videoTargets.length} files)`
+          : 'Convert to HLS';
+      }
+      if (deleteItem) {
+        deleteItem.textContent = trash ? 'Delete forever' : 'Delete';
+      }
+    }
+
     const openItem = document.querySelector('[data-action="open"]');
     if (openItem) openItem.style.display = singleFolder ? '' : 'none';
   }
@@ -1219,6 +1334,7 @@ class Explorer {
     const shareItem = menu.querySelector('[data-action="share"]');
     const thumbItem = menu.querySelector('[data-action="refresh-thumb"]');
     const verifyItem = menu.querySelector('[data-action="verify-file"]');
+    const verifyHlsItem = menu.querySelector('[data-action="verify-hls"]');
     const hlsItem = menu.querySelector('[data-action="hls-convert"]');
     const moveItem = menu.querySelector('[data-action="move"]');
     const addPlaylistItem = menu.querySelector('[data-action="add-to-playlist"]');
@@ -1230,11 +1346,25 @@ class Explorer {
     shareItem.style.display = file.is_folder ? 'none' : '';
     if (thumbItem) thumbItem.style.display = file.is_folder ? 'none' : '';
     if (verifyItem) verifyItem.style.display = file.is_folder ? 'none' : '';
+    const actionTargets = this.getActionTargets(file);
+    const hlsTargets = actionTargets.filter((f) => this.isHlsEligible(f));
+    const videoTargets = actionTargets.filter((f) => this.isVideoEligibleForHls(f));
+    if (verifyHlsItem) {
+      verifyHlsItem.classList.toggle('hidden', hlsTargets.length === 0);
+      verifyHlsItem.textContent = hlsTargets.length > 1
+        ? `Verify HLS (${hlsTargets.length} files)`
+        : 'Verify HLS';
+    }
+    if (verifyItem && actionTargets.length > 1) {
+      verifyItem.style.display = 'none';
+    }
     if (addPlaylistItem) addPlaylistItem.style.display = file.is_folder ? 'none' : '';
     if (linkFolderItem) linkFolderItem.style.display = file.is_folder ? '' : 'none';
     if (hlsItem) {
-      const isVideo = !file.is_folder && (file.mime_type?.startsWith('video/') || /\.mp4$/i.test(file.name || ''));
-      hlsItem.classList.toggle('hidden', !isVideo);
+      hlsItem.classList.toggle('hidden', videoTargets.length === 0);
+      hlsItem.textContent = videoTargets.length > 1
+        ? `Convert to HLS (${videoTargets.length} files)`
+        : 'Convert to HLS';
     }
 
     const playlistDetail = this.viewMode === 'playlist-detail' && file._inPlaylist;
@@ -1249,6 +1379,7 @@ class Explorer {
       shareItem.style.display = 'none';
       if (thumbItem) thumbItem.style.display = 'none';
       if (verifyItem) verifyItem.style.display = 'none';
+      if (verifyHlsItem) verifyHlsItem.classList.add('hidden');
       hlsItem?.classList.add('hidden');
       if (moveItem) moveItem.style.display = 'none';
       if (addPlaylistItem) addPlaylistItem.style.display = 'none';

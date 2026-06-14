@@ -507,6 +507,207 @@ function getHlsSegmentCount(fileId) {
   return row?.n || 0;
 }
 
+function formatIndexList(indices, max = 12) {
+  if (!indices.length) return '';
+  if (indices.length <= max) return indices.join(', ');
+  return `${indices.slice(0, max).join(', ')}… (+${indices.length - max} more)`;
+}
+
+function parsePlaylistSegments(content) {
+  const lines = String(content).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const urls = [];
+  let hasEndList = false;
+  let extinfCount = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] === '#EXT-X-ENDLIST') hasEndList = true;
+    if (lines[i].startsWith('#EXTINF:')) {
+      extinfCount += 1;
+      const next = lines[i + 1];
+      if (next && !next.startsWith('#')) urls.push(next);
+    }
+  }
+  return { extinfCount, urls, hasEndList };
+}
+
+function extractRepoPathFromRawUrl(url, repo) {
+  const prefix = `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/`;
+  if (url.startsWith(prefix)) return decodeURIComponent(url.slice(prefix.length));
+  const match = url.match(/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/(.+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+async function checkHlsBlobOnGitHub(userId, repo, repoPath) {
+  if (!repo?.is_active) return { present: false };
+  const [owner, repoName] = repo.full_name.split('/');
+  const octokit = accounts.createClientForRepo(userId, repo);
+  try {
+    const sha = await github.getFileSha(
+      octokit, owner, repoName, repoPath, repo.default_branch,
+      { subsystem: 'verify-hls', bypassMissing: true }
+    );
+    return { present: !!sha, sha: sha || null };
+  } catch {
+    return { present: false };
+  }
+}
+
+async function verifyHlsOnGitHub(userId, fileId, onProgress = null) {
+  const file = db.prepare(`
+    SELECT * FROM files WHERE id = ? AND user_id = ? AND is_folder = 0
+  `).get(fileId, userId);
+  if (!file) throw new Error('File not found');
+
+  const segmentCount = getHlsSegmentCount(fileId);
+  if (!file.has_hls && segmentCount === 0) {
+    throw new Error('File has no HLS data to verify');
+  }
+
+  const dbSegments = db.prepare(`
+    SELECT s.*, r.full_name, r.default_branch, r.is_active
+    FROM hls_segments s
+    JOIN storage_repos r ON s.repo_id = r.id
+    WHERE s.file_id = ?
+    ORDER BY s.segment_index
+  `).all(fileId);
+
+  const { mapConcurrent } = require('./chunk-session');
+  let checked = 0;
+  const segmentTotal = Math.max(dbSegments.length, 1);
+
+  const segmentResults = dbSegments.length
+    ? await mapConcurrent(dbSegments, 16, async (seg) => {
+      const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(seg.repo_id);
+      const result = await checkHlsBlobOnGitHub(userId, repo, seg.repo_path);
+      checked += 1;
+      if (onProgress) {
+        onProgress({
+          checked,
+          total: segmentTotal,
+          percent: Math.min(85, Math.round((checked / segmentTotal) * 85)),
+          phase: 'segments',
+        });
+      }
+      if (result.sha && result.sha !== seg.sha && seg.sha && seg.sha !== 'pending') {
+        db.prepare('UPDATE hls_segments SET sha = ? WHERE file_id = ? AND segment_index = ?')
+          .run(result.sha, fileId, seg.segment_index);
+      }
+      return { segmentIndex: seg.segment_index, present: result.present };
+    })
+    : [];
+
+  const missingOnGitHub = segmentResults
+    .filter((r) => !r.present)
+    .map((r) => r.segmentIndex)
+    .sort((a, b) => a - b);
+  const verified = segmentResults.filter((r) => r.present).length;
+
+  const indexSet = new Set(dbSegments.map((s) => s.segment_index));
+  const gaps = [];
+  if (dbSegments.length > 0) {
+    const maxIdx = Math.max(...dbSegments.map((s) => s.segment_index));
+    for (let i = 0; i <= maxIdx; i++) {
+      if (!indexSet.has(i)) gaps.push(i);
+    }
+  }
+
+  let playlistPresent = false;
+  let playlistHasEndList = false;
+  let playlistSegmentCount = null;
+  let playlistMismatch = false;
+  let playlistOnlyMissing = [];
+
+  if (file.hls_playlist_path && file.hls_playlist_repo_id) {
+    const playlistRepo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(file.hls_playlist_repo_id);
+    if (playlistRepo) {
+      const plCheck = await checkHlsBlobOnGitHub(userId, playlistRepo, file.hls_playlist_path);
+      playlistPresent = plCheck.present;
+
+      if (playlistPresent) {
+        try {
+          const [owner, repoName] = playlistRepo.full_name.split('/');
+          const octokit = accounts.createClientForRepo(userId, playlistRepo);
+          const content = await github.downloadChunk(
+            octokit, owner, repoName, file.hls_playlist_path, playlistRepo.default_branch,
+            { subsystem: 'verify-hls' }
+          );
+          const parsed = parsePlaylistSegments(content);
+          playlistHasEndList = parsed.hasEndList;
+          playlistSegmentCount = parsed.extinfCount;
+
+          if (dbSegments.length > 0 && parsed.extinfCount !== dbSegments.length) {
+            playlistMismatch = true;
+          }
+
+          if (!dbSegments.length && parsed.urls.length) {
+            const urlResults = await mapConcurrent(parsed.urls, 16, async (url, idx) => {
+              const repoPath = extractRepoPathFromRawUrl(url, playlistRepo);
+              if (!repoPath) return { index: idx, present: false };
+              const blob = await checkHlsBlobOnGitHub(userId, playlistRepo, repoPath);
+              return { index: idx, present: blob.present };
+            });
+            playlistOnlyMissing = urlResults
+              .filter((r) => !r.present)
+              .map((r) => r.index);
+            if (playlistOnlyMissing.length) {
+              playlistMismatch = true;
+            }
+          }
+        } catch (err) {
+          hlsLog(`Playlist parse failed for ${fileId}: ${err.message}`);
+        }
+      }
+    }
+    if (onProgress) {
+      onProgress({ checked: segmentTotal, total: segmentTotal, percent: 95, phase: 'playlist' });
+    }
+  }
+
+  const issues = [];
+  if (gaps.length) {
+    issues.push(`Missing segment index(es) in sequence: ${formatIndexList(gaps)}`);
+  }
+  if (missingOnGitHub.length) {
+    issues.push(`Segment(s) missing on GitHub: ${formatIndexList(missingOnGitHub)}`);
+  }
+  if (file.hls_playlist_path && !playlistPresent) {
+    issues.push('m3u8 playlist missing on GitHub');
+  }
+  if (playlistPresent && playlistHasEndList === false) {
+    issues.push('m3u8 playlist is incomplete (missing #EXT-X-ENDLIST)');
+  }
+  if (playlistMismatch && dbSegments.length > 0) {
+    issues.push(`Playlist lists ${playlistSegmentCount} segments but vault has ${dbSegments.length}`);
+  }
+  if (playlistOnlyMissing.length) {
+    issues.push(`${playlistOnlyMissing.length} segment URL(s) in playlist missing on GitHub`);
+  }
+  if (!file.has_hls && segmentCount > 0) {
+    issues.push('HLS conversion was interrupted (segments exist but file is not marked as HLS-ready)');
+  }
+
+  const missing = [...new Set([...gaps, ...missingOnGitHub])].sort((a, b) => a - b);
+
+  if (onProgress) {
+    onProgress({ checked: segmentTotal, total: segmentTotal, percent: 100, phase: 'done' });
+  }
+
+  return {
+    valid: issues.length === 0,
+    fileId,
+    fileName: file.name,
+    hasHls: !!file.has_hls,
+    totalSegments: dbSegments.length || playlistSegmentCount || 0,
+    verified,
+    missing,
+    gaps,
+    missingOnGitHub,
+    playlistPresent,
+    playlistHasEndList,
+    playlistSegmentCount,
+    issues,
+  };
+}
+
 function hasHls(fileId) {
   const row = db.prepare('SELECT has_hls FROM files WHERE id = ?').get(fileId);
   return !!(row?.has_hls);
@@ -519,6 +720,7 @@ module.exports = {
   getHlsSegments,
   getHlsSegmentCount,
   hasHls,
+  verifyHlsOnGitHub,
   isFfmpegAvailable,
   resumeInterruptedConversions,
 };

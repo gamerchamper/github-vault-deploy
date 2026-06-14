@@ -99,6 +99,20 @@
           <span class="ribbon-icon">📂</span>
           <span>Move</span>
         </button>
+        <div class="ribbon-dropdown" id="selection-actions-wrap">
+          <button id="btn-selection-actions" class="ribbon-btn" title="Selection actions" disabled aria-haspopup="true" aria-expanded="false">
+            <span class="ribbon-icon">⚡</span>
+            <span>Actions</span>
+            <span class="ribbon-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="selection-actions-menu" class="selection-actions-menu hidden" role="menu">
+            <button type="button" class="context-item" data-bulk-action="verify-hls" role="menuitem">Verify HLS</button>
+            <button type="button" class="context-item" data-bulk-action="verify-file" role="menuitem">Verify file</button>
+            <button type="button" class="context-item" data-bulk-action="hls-convert" role="menuitem">Convert to HLS</button>
+            <div class="context-separator" role="separator"></div>
+            <button type="button" class="context-item context-danger" data-bulk-action="delete" role="menuitem">Delete</button>
+          </div>
+        </div>
         <button id="btn-delete" class="ribbon-btn" title="Delete selected" disabled>
           <span class="ribbon-icon">🗑️</span>
           <span>Delete</span>
@@ -956,6 +970,7 @@
       <div class="context-item" data-action="link-folder-to-playlist">Link folder to playlist</div>
       <div class="context-item" data-action="refresh-thumb">Refresh thumbnail</div>
       <div class="context-item" data-action="verify-file">Verify file</div>
+      <div class="context-item verify-hls-item hidden" data-action="verify-hls">Verify HLS</div>
       <div class="context-item hls-convert-item hidden" data-action="hls-convert">Convert to HLS</div>
       <div class="context-separator"></div>
       <div class="context-item context-danger" data-action="delete">Move to trash</div>
@@ -1035,6 +1050,7 @@
   <script src="/js/upload-store.js?v=1.0.0"></script>
   <script src="/js/adaptive-concurrency.js?v=1.0.0"></script>
   <script src="/js/verify-repair.js?v=1.0.0"></script>
+  <script src="/js/verify-hls.js?v=1.0.0"></script>
   <script src="/js/upload-manager.js?v=1.0.0"></script>
   <script src="/js/chunk-blocks.js?v=1.0.0"></script>
   <script src="/js/download-manager.js?v=1.0.0"></script>

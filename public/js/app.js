@@ -952,6 +952,17 @@ const App = {
     });
     document.getElementById('btn-confirm-move').addEventListener('click', () => explorer.confirmMove());
     document.getElementById('btn-delete').addEventListener('click', () => explorer.deleteSelected());
+    document.getElementById('btn-selection-actions')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      explorer.toggleSelectionActionsMenu();
+    });
+    document.getElementById('selection-actions-menu')?.addEventListener('click', (e) => {
+      const action = e.target?.dataset?.bulkAction;
+      if (!action || e.target.disabled) return;
+      e.stopPropagation();
+      explorer.runBulkAction(action);
+    });
+    document.addEventListener('click', () => explorer.hideSelectionActionsMenu());
     document.getElementById('btn-restore')?.addEventListener('click', () => explorer.restoreSelected());
     document.getElementById('btn-permanent-delete')?.addEventListener('click', () => explorer.permanentDeleteSelected());
     document.getElementById('btn-refresh').addEventListener('click', () => {
@@ -1129,26 +1140,9 @@ const App = {
       if (action === 'download' && !file.is_folder) explorer.downloadFile(file);
       if (action === 'move') explorer.showMoveDialog([...explorer.selected]);
       if (action === 'refresh-thumb' && !file.is_folder) explorer.refreshThumbnail(file);
-      if (action === 'verify-file' && !file.is_folder) VerifyRepair.prompt(file);
-      if (action === 'hls-convert' && !file.is_folder) {
-        App.withButton(e.target, async () => {
-          try {
-            const result = await API.files.hlsConvert(file.id);
-            if (result.taskId) {
-              TaskPanel.track(result.taskId);
-              TaskPanel.setExpanded(true);
-            } else {
-              TaskPanel.ensurePoll();
-            }
-            App.toast(
-              result.alreadyRunning ? 'HLS conversion already running' : 'HLS conversion started in background',
-              'success'
-            );
-          } catch (err) {
-            App.toast(err.message || 'HLS conversion failed', 'error');
-          }
-        });
-      }
+      if (action === 'verify-file' && !file.is_folder) explorer.verifyFileSelected();
+      if (action === 'verify-hls') explorer.verifyHlsSelected();
+      if (action === 'hls-convert') explorer.hlsConvertSelected();
       if (action === 'favorite') explorer.toggleFavorite(file);
       if (action === 'add-to-playlist' && !file.is_folder) {
         const ids = explorer.selected.size ? [...explorer.selected] : [file.id];

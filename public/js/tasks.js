@@ -404,6 +404,13 @@ const TaskPanel = {
       App.toast('HLS conversion complete', 'success');
       explorer.refresh({ filesOnly: true });
     }
+    if (task.type === 'verify-hls') {
+      const msg = task.valid === false
+        ? (task.error || 'HLS verification found issues')
+        : 'HLS verification complete';
+      App.toast(msg, task.valid === false ? 'error' : 'success');
+      explorer.refresh({ filesOnly: true });
+    }
   },
 
   ensurePoll() {
@@ -499,6 +506,18 @@ const TaskPanel = {
       if (task.phase === 'rate-limit') return task.currentRepo || 'Waiting for GitHub rate limit...';
       return 'Verifying file...';
     }
+    if (task.type === 'verify-hls') {
+      if (task.status === 'error') return task.error || 'HLS verification failed';
+      if (task.lastLog) return task.lastLog;
+      if (task.total > 1) {
+        return `Verifying HLS (${(task.done || 0) + 1}/${task.total})`;
+      }
+      if (task.phase === 'playlist') return 'Checking m3u8 playlist on GitHub';
+      if (task.segmentsTotal) {
+        return `Checking HLS segments (${task.segmentsDone || 0}/${task.segmentsTotal})`;
+      }
+      return 'Verifying HLS...';
+    }
     if (task.type === 'delete') {
       if (task.total > 1) return `Removing from GitHub (${task.done || 0}/${task.total})`;
       return 'Removing chunks from GitHub repos...';
@@ -563,6 +582,11 @@ const TaskPanel = {
       if (task.method) rows.push(['Method', task.method]);
       if (task.chunksTotal) rows.push(['Chunks', `${task.chunksDone || 0} / ${task.chunksTotal}`]);
       if (task.currentRepo) rows.push(['Current', task.currentRepo]);
+    }
+    if (task.type === 'verify-hls') {
+      if (task.segmentsTotal) rows.push(['Segments', `${task.segmentsDone || 0} / ${task.segmentsTotal}`]);
+      if (task.missing?.length) rows.push(['Missing', task.missing.join(', ')]);
+      if (task.issues?.length) rows.push(['Issues', task.issues.join('; ')]);
     }
     if (task.error) rows.push(['Error', task.error]);
     return rows;
@@ -664,7 +688,7 @@ const TaskPanel = {
           <button class="task-btn task-btn-pause" data-task-id="${task.id}">Pause</button>
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
-      ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair') ? `
+      ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair' || task.type === 'verify-hls') ? `
         <div class="task-actions">
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
@@ -683,7 +707,7 @@ const TaskPanel = {
       return `
         <div class="task-item task-${task.status}${expanded ? ' task-expanded' : ''}" data-task-id="${task.id}">
           <div class="task-item-header">
-            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : task.type === 'verify-repair' ? '🔍' : '🗑️'}</span>
+            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : (task.type === 'verify-repair' || task.type === 'verify-hls') ? '🔍' : '🗑️'}</span>
             <span class="task-title" title="${this.escape(task.title)}">${this.escape(task.title)}</span>
             <span class="task-percent">${cancelled ? 'Cancelled' : failed && !resumable ? 'Failed' : done ? 'Done' : `${percent}%`}</span>
             <button type="button" class="task-expand-btn" title="${expanded ? 'Hide details' : 'Show debug log'}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>

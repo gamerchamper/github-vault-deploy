@@ -1286,7 +1286,7 @@ function getFileDetails(userId, fileId, req = null) {
       encryption_mode: file.encryption_mode || 'whole',
       share_token: file.share_token,
       created_at: file.created_at,
-      hls_segment_count: file.has_hls ? getHlsSegmentCount(file.id) : 0,
+      hls_segment_count: file.hls_segment_count || 0,
     },
     chunks: chunks.map(c => ({
       index: c.chunk_index,
@@ -1684,7 +1684,8 @@ function listFiles(userId, parentPath, view = null, opts = {}) {
   const limit = Math.min(Math.max(parseInt(opts.limit, 10) || 0, 0), 500);
   const offset = Math.max(parseInt(opts.offset, 10) || 0, 0);
   const rows = db.prepare(`
-    SELECT id, name, path, size, mime_type, is_folder, parent_path, chunk_count, has_thumbnail, has_hls, created_at
+    SELECT id, name, path, size, mime_type, is_folder, parent_path, chunk_count, has_thumbnail, has_hls, created_at,
+      (SELECT COUNT(*) FROM hls_segments WHERE file_id = files.id) AS hls_segment_count
     FROM files
     WHERE user_id = ? AND parent_path = ?
       AND (upload_status IS NULL OR upload_status = 'ready')
@@ -1718,7 +1719,7 @@ function listFiles(userId, parentPath, view = null, opts = {}) {
       view_status: file.is_folder ? 'folder' : 'synced',
       view_chunks_available: file.chunk_count,
       view_chunks_total: file.chunk_count,
-      hls_segment_count: file.has_hls ? getHlsSegmentCount(file.id) : 0,
+      hls_segment_count: file.hls_segment_count || 0,
     }));
     metadata.warmThumbnailsBackground(userId, files);
     return {
@@ -1751,7 +1752,7 @@ function listFiles(userId, parentPath, view = null, opts = {}) {
       view_status: stats.status,
       view_chunks_available: stats.chunks_available,
       view_chunks_total: stats.chunks_total,
-      hls_segment_count: file.has_hls ? getHlsSegmentCount(file.id) : 0,
+      hls_segment_count: file.hls_segment_count || 0,
     };
   });
   return {
