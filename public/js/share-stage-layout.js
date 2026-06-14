@@ -99,12 +99,13 @@ const ShareStageLayout = {
     const railW = this.getRailWidth();
     const gap = 12;
     const margin = 8;
-    const sideBySideLimit = frameW - railW - gap - margin;
+    // Stack when the player is too wide to leave room for the side rail.
+    const maxSideBySideStage = frameW - railW - gap - margin;
 
     if (this._stackMode) {
-      return stageWidth < sideBySideLimit + this.STACK_HYSTERESIS;
+      return stageWidth > maxSideBySideStage - this.STACK_HYSTERESIS;
     }
-    return stageWidth < sideBySideLimit;
+    return stageWidth > maxSideBySideStage;
   },
 
   shouldStackRailColumn(stageWidth) {
