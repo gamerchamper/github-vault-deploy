@@ -1,6 +1,8 @@
 const MediaPlayer = {
-  CONTROLS_AUDIO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings'],
+  CONTROLS_AUDIO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'airplay'],
   CONTROLS_VIDEO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'airplay', 'fullscreen'],
+
+  CAST_ICON: `<svg class="icon--cast" role="presentation" focusable="false" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>`,
 
   /** Prepare a <video> for browser-native enhancement (Edge VSR, RTX VSR, HW decode). */
   configureVideoElement(video, options = {}) {
@@ -29,6 +31,100 @@ const MediaPlayer = {
     }
 
     return video;
+  },
+
+  configureAudioElement(audio, options = {}) {
+    if (!audio || audio.tagName !== 'AUDIO') return audio;
+
+    audio.setAttribute('x-webkit-airplay', 'allow');
+    audio.disableRemotePlayback = false;
+    audio.classList.add('vault-audio-remote');
+
+    const wrap = audio.closest('.viewer-player-wrap, .share-audio-player, .details-preview-media');
+    if (options.enhancerWrap !== false && wrap) {
+      wrap.classList.add('vault-audio-remote-wrap');
+    }
+
+    return audio;
+  },
+
+  supportsRemotePlayback(media) {
+    return !!(media && 'remote' in media && typeof media.remote?.watchAvailability === 'function');
+  },
+
+  insertControlButton(plyr, name, label, html, anchorName) {
+    const controls = plyr?.elements?.controls;
+    if (!controls || controls.querySelector(`[data-plyr="${name}"]`)) return null;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'plyr__controls__item plyr__control';
+    btn.dataset.plyr = name;
+    btn.hidden = true;
+    btn.innerHTML = `${html}<span class="plyr__tooltip" role="tooltip">${label}</span><span class="plyr__sr-only">${label}</span>`;
+
+    const anchor = controls.querySelector(`[data-plyr="${anchorName}"]`);
+    if (anchor?.parentNode) anchor.parentNode.insertBefore(btn, anchor);
+    else controls.appendChild(btn);
+    return btn;
+  },
+
+  /** Chromecast / remote playback (Chrome, Edge) — keeps auth cookies via browser relay. */
+  enableRemotePlayback(plyr) {
+    const media = plyr?.media;
+    if (!this.supportsRemotePlayback(media)) return null;
+
+    const attach = () => {
+      const btn = this.insertControlButton(plyr, 'cast', 'Cast', this.CAST_ICON, 'fullscreen');
+      if (!btn || btn.dataset.vaultCastBound) return btn;
+      btn.dataset.vaultCastBound = '1';
+
+      const state = { available: false, watchId: null, connected: false };
+
+      const sync = () => {
+        btn.hidden = !state.available;
+        btn.classList.toggle('plyr__control--pressed', state.connected);
+        btn.disabled = !state.available;
+      };
+
+      const onConnect = () => {
+        state.connected = true;
+        sync();
+      };
+      const onDisconnect = () => {
+        state.connected = false;
+        sync();
+      };
+
+      media.remote.addEventListener('connect', onConnect);
+      media.remote.addEventListener('disconnect', onDisconnect);
+
+      media.remote.watchAvailability((available) => {
+        state.available = available;
+        sync();
+      }).then((watchId) => {
+        state.watchId = watchId;
+      }).catch(() => {});
+
+      btn.addEventListener('click', () => {
+        media.remote.prompt().catch(() => {});
+      });
+
+      plyr.on('destroy', () => {
+        media.remote.removeEventListener('connect', onConnect);
+        media.remote.removeEventListener('disconnect', onDisconnect);
+        if (state.watchId != null) {
+          media.remote.cancelWatchAvailability(state.watchId).catch(() => {});
+        }
+      });
+
+      sync();
+      return btn;
+    };
+
+    if (plyr.elements?.controls) return attach();
+    plyr.on('ready', () => attach());
+    return null;
   },
 
   /** Keep native controls enabled for Edge quick actions while Plyr supplies the visible UI. */
@@ -70,13 +166,16 @@ const MediaPlayer = {
 
   createPlyr(el, isAudio, hooks = {}) {
     if (typeof Plyr === 'undefined') return null;
-    if (!isAudio) this.configureVideoElement(el);
+    if (isAudio) this.configureAudioElement(el);
+    else this.configureVideoElement(el);
     const plyr = new Plyr(el, this.plyrOptions(isAudio));
-    if (!isAudio) {
+    if (isAudio) this.configureAudioElement(plyr.media || el);
+    else {
       this.enableBrowserVideoActions(plyr);
       const wrapper = plyr.elements?.container?.querySelector?.('.plyr__video-wrapper');
       if (wrapper) wrapper.classList.add('vault-video-enhanced-wrap');
     }
+    this.enableRemotePlayback(plyr);
     if (hooks.onProgress) plyr.on('progress', hooks.onProgress);
     if (hooks.onTimeupdate) plyr.on('timeupdate', hooks.onTimeupdate);
     if (hooks.onPlay) plyr.on('play', hooks.onPlay);
@@ -210,6 +309,7 @@ const MediaPlayer = {
 
   attachStreamPlayback(el, hooks = {}) {
     if (el?.tagName === 'VIDEO') this.configureVideoElement(el);
+    else if (el?.tagName === 'AUDIO') this.configureAudioElement(el);
     el.preload = 'auto';
     let ready = false;
     const handlers = [];
@@ -252,7 +352,7 @@ const MediaPlayer = {
           </div>
           <canvas class="viewer-audio-viz share-audio-viz" aria-hidden="true"></canvas>
         </div>
-        <audio class="share-audio-el" playsinline preload="auto"></audio>
+        <audio class="share-audio-el vault-audio-remote" playsinline preload="auto" x-webkit-airplay="allow"></audio>
       </div>
     `;
   },

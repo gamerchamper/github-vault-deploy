@@ -12,11 +12,11 @@ function loadClientModule(relPath) {
   return fn(require);
 }
 
-function mockVideo() {
+function mockMedia(tagName = 'VIDEO') {
   const attrs = new Map();
   const classes = new Set();
   return {
-    tagName: 'VIDEO',
+    tagName,
     playsInline: false,
     disableRemotePlayback: true,
     disablePictureInPicture: true,
@@ -41,7 +41,7 @@ describe('media-player client', function () {
 
   describe('configureVideoElement', function () {
     it('should set inline playback and AirPlay attributes', function () {
-      const video = mockVideo();
+      const video = mockMedia('VIDEO');
       MediaPlayer.configureVideoElement(video, { enhancerWrap: false });
 
       expect(video.playsInline).to.be.true;
@@ -57,6 +57,17 @@ describe('media-player client', function () {
     });
   });
 
+  describe('configureAudioElement', function () {
+    it('should enable AirPlay and remote playback for audio', function () {
+      const audio = mockMedia('AUDIO');
+      MediaPlayer.configureAudioElement(audio, { enhancerWrap: false });
+
+      expect(audio.disableRemotePlayback).to.be.false;
+      expect(audio.getAttribute('x-webkit-airplay')).to.equal('allow');
+      expect(audio._classes.has('vault-audio-remote')).to.be.true;
+    });
+  });
+
   describe('plyrOptions', function () {
     it('should include airplay and playsinline for video', function () {
       const opts = MediaPlayer.plyrOptions(false);
@@ -65,10 +76,10 @@ describe('media-player client', function () {
       expect(opts.disableContextMenu).to.be.false;
     });
 
-    it('should not include airplay for audio', function () {
+    it('should include airplay for audio', function () {
       const opts = MediaPlayer.plyrOptions(true);
-      expect(opts.controls).to.not.include('airplay');
-      expect(opts.playsinline).to.be.undefined;
+      expect(opts.controls).to.include('airplay');
+      expect(opts.controls).to.not.include('pip');
     });
   });
 
@@ -80,6 +91,24 @@ describe('media-player client', function () {
       expect(html).to.include('x-webkit-airplay="allow"');
       expect(html).to.include('controls');
       expect(html).to.include('controlslist="nodownload"');
+    });
+  });
+
+  describe('buildAudioPlayerHtml', function () {
+    it('should include AirPlay attributes', function () {
+      const html = MediaPlayer.buildAudioPlayerHtml();
+      expect(html).to.include('vault-audio-remote');
+      expect(html).to.include('x-webkit-airplay="allow"');
+    });
+  });
+
+  describe('supportsRemotePlayback', function () {
+    it('should detect Remote Playback API support', function () {
+      expect(MediaPlayer.supportsRemotePlayback(null)).to.be.false;
+      expect(MediaPlayer.supportsRemotePlayback({})).to.be.false;
+      expect(MediaPlayer.supportsRemotePlayback({
+        remote: { watchAvailability: () => Promise.resolve(1) },
+      })).to.be.true;
     });
   });
 });

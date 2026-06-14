@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.8">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.9">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.0">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -664,7 +664,7 @@
               </div>
               <canvas id="viewer-audio-viz" class="viewer-audio-viz" aria-hidden="true"></canvas>
             </div>
-            <audio id="viewer-audio" preload="auto"></audio>
+            <audio id="viewer-audio" class="vault-audio-remote" preload="auto" x-webkit-airplay="allow"></audio>
           </div>
           <iframe id="viewer-frame" class="viewer-frame hidden" title="Document preview"></iframe>
           <pre id="viewer-text" class="viewer-text vault-scroll hidden"></pre>
@@ -1085,12 +1085,12 @@
   <script src="/js/hls.min.js?v=1.0.0"></script>
 
   <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
-  <script src="/js/media-player.js?v=1.0.2"></script>
+  <script src="/js/media-player.js?v=1.0.3"></script>
   <script src="/js/api.js?v=1.0.6"></script>
   <script src="/js/playback-memory.js?v=1.0.0"></script>
   <script src="/js/pdf-viewer.js?v=1.0.0"></script>
   <script src="/js/image-viewer.js?v=1.0.0"></script>
-  <script src="/js/details-preview.js?v=1.0.1"></script>
+  <script src="/js/details-preview.js?v=1.0.2"></script>
   <script src="/js/thumb-cache.js?v=1.0.0"></script>
   <script src="/js/virtual-scroll.js?v=1.0.0"></script>
   <script src="/js/display-names.js?v=1.0.0"></script>

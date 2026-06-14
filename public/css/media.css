@@ -149,6 +149,12 @@
   pointer-events: none;
 }
 
+.plyr__control[data-plyr="cast"] .icon--cast {
+  width: 1.125rem;
+  height: 1.125rem;
+  display: block;
+}
+
 .viewer-audio-player {
   max-width: 720px;
   margin: 0 auto;

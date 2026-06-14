@@ -61,10 +61,12 @@ const DetailsPreview = {
 
     if (type === 'audio') {
       this.mount.innerHTML = `
-        <div class="details-preview-media details-preview-audio">
-          <audio class="details-preview-audio-el" controls preload="metadata"
+        <div class="details-preview-media details-preview-audio vault-audio-remote-wrap">
+          <audio class="details-preview-audio-el vault-audio-remote" controls preload="metadata"
+            x-webkit-airplay="allow"
             src="${API.files.stream(file.id, view)}"></audio>
         </div>`;
+      MediaPlayer?.configureAudioElement?.(this.mount.querySelector('.details-preview-audio-el'));
       return;
     }
 
