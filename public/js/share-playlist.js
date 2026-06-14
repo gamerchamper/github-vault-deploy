@@ -191,6 +191,8 @@ const SharePlaylist = {
     ShareStageLayout?.syncLayoutMode?.();
     ShareViewer?.refitCinemaStage?.();
   },
+
+  getFilteredItems() {
     if (!this.searchQuery) return PlaylistQueue.items;
     return PlaylistQueue.items.filter((f) => PlaylistQueue.itemSearchText(f).includes(this.searchQuery));
   },
