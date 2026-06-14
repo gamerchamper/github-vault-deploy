@@ -1637,7 +1637,7 @@ router.get('/stats', async (req, res) => {
     const stats = await storage.getStorageStats(req.user.id);
     res.json({
       ...stats,
-      localUpload: localNetwork.getLocalUploadStatus(req),
+      localUpload: localNetwork.getLocalUploadStatus(req, req.user.id),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

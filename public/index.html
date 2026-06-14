@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.4">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.5">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.0">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -89,6 +89,10 @@
           <option value="git">Git push (faster)</option>
         </select>
         <span id="local-upload-ribbon" class="local-upload-ribbon hidden" aria-live="polite" title="Local network upload path"></span>
+        <button id="btn-local-upload" class="ribbon-btn ribbon-btn-compact" type="button" title="Configure server LAN IPv4 for faster uploads">
+          <span class="ribbon-icon">⚡</span>
+          <span>LAN</span>
+        </button>
         <button id="btn-new-folder" class="ribbon-btn" title="New folder">
           <span class="ribbon-icon">📁</span>
           <span>New folder</span>
@@ -941,6 +945,30 @@
     </div>
   </div>
 
+  <!-- Local upload (LAN) settings -->
+  <div id="local-upload-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Local upload (LAN)</h2>
+        <button class="modal-close" data-close="local-upload-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">When you open the vault via a domain or tunnel, uploads still go through the public path. Save your server&rsquo;s <strong>local IPv4</strong> so you get a one-click link to the fast LAN address on this network.</p>
+        <label class="form-label" for="local-upload-ipv4">Server LAN IPv4</label>
+        <input type="text" id="local-upload-ipv4" class="form-input" placeholder="192.168.1.100" autocomplete="off" spellcheck="false">
+        <p class="form-hint">Private address only (192.168.x.x, 10.x.x.x, 172.16–31.x.x). Find it on the server with <code>ipconfig</code> (Windows) or <code>ip addr</code> (Linux).</p>
+        <div id="local-upload-detected" class="local-upload-detected"></div>
+        <div id="local-upload-modal-status" class="local-upload-modal-status"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="btn-clear-local-upload">Clear</button>
+        <button type="button" class="btn-secondary" id="btn-open-local-url" disabled>Open LAN URL</button>
+        <button type="button" class="btn-secondary" data-close="local-upload-modal">Cancel</button>
+        <button type="button" id="btn-save-local-upload" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Cache Settings Modal -->
   <div id="cache-settings-modal" class="modal hidden">
     <div class="modal-content">
@@ -1046,7 +1074,7 @@
 
   <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
   <script src="/js/media-player.js?v=1.0.0"></script>
-  <script src="/js/api.js?v=1.0.4"></script>
+  <script src="/js/api.js?v=1.0.5"></script>
   <script src="/js/playback-memory.js?v=1.0.0"></script>
   <script src="/js/pdf-viewer.js?v=1.0.0"></script>
   <script src="/js/image-viewer.js?v=1.0.0"></script>
@@ -1075,7 +1103,7 @@
   <script src="/js/upload-center.js?v=1.0.0"></script>
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
-  <script src="/js/local-upload.js?v=1.0.1"></script>
-  <script src="/js/app.js?v=1.0.7"></script>
+  <script src="/js/local-upload.js?v=1.0.2"></script>
+  <script src="/js/app.js?v=1.0.8"></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 const os = require('os');
+const db = require('../db/database');
 const geoip = require('./geoip');
 
 function ipv4ToInt(ip) {
@@ -14,6 +15,15 @@ function isPrivateIpv4(ip) {
   if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
   if (parts[0] === 127) return true;
   return false;
+}
+
+function normalizeIpv4(raw) {
+  const ip = String(raw || '').trim();
+  if (!ip) return null;
+  if (!isPrivateIpv4(ip)) {
+    throw new Error('Enter a private IPv4 address (e.g. 192.168.1.100)');
+  }
+  return ip;
 }
 
 function isLoopbackClientIp(ip) {
@@ -57,6 +67,18 @@ function getServerIpv4Addresses() {
   });
 }
 
+function getUserLocalUploadIpv4(userId) {
+  const row = db.prepare('SELECT local_upload_ipv4 FROM users WHERE id = ?').get(userId);
+  const saved = row?.local_upload_ipv4?.trim();
+  return saved && isPrivateIpv4(saved) ? saved : null;
+}
+
+function setUserLocalUploadIpv4(userId, rawIpv4) {
+  const ip = rawIpv4 ? normalizeIpv4(rawIpv4) : null;
+  db.prepare('UPDATE users SET local_upload_ipv4 = ? WHERE id = ?').run(ip, userId);
+  return ip;
+}
+
 function hostFromRequest(req) {
   const host = req.get('host') || '';
   if (host.startsWith('[')) {
@@ -78,16 +100,29 @@ function portFromRequest(req) {
   return String(process.env.PORT || 3000);
 }
 
-function clientOnServerLan(clientIp, serverIfaces) {
+function buildLocalUrl(req, ipv4) {
+  if (!ipv4) return null;
+  const port = portFromRequest(req);
+  const protocol = req.protocol === 'https' ? 'https' : 'http';
+  return `${protocol}://${ipv4}:${port}`;
+}
+
+function clientOnServerLan(clientIp, serverIfaces, configuredIpv4) {
+  if (configuredIpv4 && (isLoopbackClientIp(clientIp) || isPrivateIpv4(clientIp))) {
+    if (isLoopbackClientIp(clientIp)) return true;
+    if (sameSubnet(clientIp, configuredIpv4, '255.255.255.0')) return true;
+  }
   if (!serverIfaces.length) return isLoopbackClientIp(clientIp) || isPrivateIpv4(clientIp);
   if (isLoopbackClientIp(clientIp)) return true;
   if (!isPrivateIpv4(clientIp)) return false;
   return serverIfaces.some((iface) => sameSubnet(clientIp, iface.address, iface.netmask));
 }
 
-function browsingViaLocalPath(hostname, serverIfaces) {
+function browsingViaLocalPath(hostname, serverIfaces, configuredIpv4) {
   if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+  if (configuredIpv4 && hostname === configuredIpv4) return true;
   if (isPrivateIpv4(hostname)) {
+    if (configuredIpv4 && hostname === configuredIpv4) return true;
     if (!serverIfaces.length) return true;
     return serverIfaces.some((iface) => iface.address === hostname
       || sameSubnet(hostname, iface.address, iface.netmask));
@@ -96,31 +131,32 @@ function browsingViaLocalPath(hostname, serverIfaces) {
   return false;
 }
 
-function pickLocalUrl(req, clientIp, serverIfaces) {
-  if (!serverIfaces.length) return null;
-  const port = portFromRequest(req);
-  const protocol = req.protocol === 'https' ? 'https' : 'http';
-  const match = serverIfaces.find((i) => clientOnServerLan(clientIp, [i]))
-    || serverIfaces.find((i) => sameSubnet(clientIp, i.address, i.netmask))
-    || serverIfaces[0];
-  return `${protocol}://${match.address}:${port}`;
-}
-
-function getLocalUploadStatus(req) {
+function getLocalUploadStatus(req, userId = null) {
   const clientIp = geoip.getClientIp(req);
   const serverIfaces = getServerIpv4Addresses();
-  const serverIpv4 = serverIfaces.map((i) => i.address);
+  const detectedIpv4 = serverIfaces.map((i) => i.address);
+  const configuredIpv4 = userId ? getUserLocalUploadIpv4(userId) : null;
+  const serverIpv4 = [...new Set([
+    ...(configuredIpv4 ? [configuredIpv4] : []),
+    ...detectedIpv4,
+  ])];
   const hostname = hostFromRequest(req);
-  const onLan = clientOnServerLan(clientIp, serverIfaces);
-  const active = browsingViaLocalPath(hostname, serverIfaces);
-  const localUrl = (!active && onLan && serverIfaces.length)
-    ? pickLocalUrl(req, clientIp, serverIfaces)
-    : null;
+  const onLan = clientOnServerLan(clientIp, serverIfaces, configuredIpv4);
+  const active = browsingViaLocalPath(hostname, serverIfaces, configuredIpv4);
+  const localUrl = configuredIpv4
+    ? buildLocalUrl(req, configuredIpv4)
+    : ((!active && onLan && serverIfaces.length)
+      ? buildLocalUrl(req, (serverIfaces.find((i) => clientOnServerLan(clientIp, [i], null))
+        || serverIfaces[0])?.address)
+      : null);
 
   return {
     active,
     onLan,
+    configured: !!configuredIpv4,
+    configuredIpv4,
     serverIpv4,
+    detectedIpv4,
     localUrl: active ? null : localUrl,
     hostname,
     clientIp: isPrivateIpv4(clientIp) || isLoopbackClientIp(clientIp) ? clientIp : null,
@@ -129,7 +165,10 @@ function getLocalUploadStatus(req) {
 
 module.exports = {
   isPrivateIpv4,
+  normalizeIpv4,
   sameSubnet,
   getServerIpv4Addresses,
+  getUserLocalUploadIpv4,
+  setUserLocalUploadIpv4,
   getLocalUploadStatus,
 };

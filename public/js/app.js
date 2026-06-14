@@ -1109,6 +1109,42 @@ const App = {
       this.saveCacheSettings();
     });
 
+    document.getElementById('btn-local-upload')?.addEventListener('click', () => {
+      LocalUpload.openModal();
+    });
+    document.getElementById('local-upload-ribbon')?.addEventListener('click', () => {
+      LocalUpload.openModal();
+    });
+    document.getElementById('local-upload-status')?.addEventListener('click', () => {
+      LocalUpload.openModal();
+    });
+    document.getElementById('btn-save-local-upload')?.addEventListener('click', async () => {
+      const input = document.getElementById('local-upload-ipv4');
+      const btn = document.getElementById('btn-save-local-upload');
+      if (btn) App.setButtonLoading(btn, true);
+      try {
+        const status = await LocalUpload.save(input?.value?.trim() || '');
+        this.lastLocalUpload = status;
+        App.toast(status.configuredIpv4 ? `LAN IP saved: ${status.configuredIpv4}` : 'LAN IP cleared', 'success');
+        document.getElementById('local-upload-modal')?.classList.add('hidden');
+      } catch (err) {
+        App.toast(err.message || 'Save failed', 'error');
+      } finally {
+        if (btn) App.setButtonLoading(btn, false);
+      }
+    });
+    document.getElementById('btn-clear-local-upload')?.addEventListener('click', async () => {
+      const input = document.getElementById('local-upload-ipv4');
+      if (input) input.value = '';
+      try {
+        const status = await LocalUpload.save('');
+        this.lastLocalUpload = status;
+        App.toast('LAN IP cleared', 'success');
+      } catch (err) {
+        App.toast(err.message || 'Clear failed', 'error');
+      }
+    });
+
     document.getElementById('btn-create-api-key')?.addEventListener('click', () => this.createApiKey());
 
     document.getElementById('api-key-name')?.addEventListener('keydown', (e) => {
@@ -1660,9 +1696,11 @@ const App = {
             <p class="plan-note">GitHub Contents API limit: ${plan.githubMaxMb} MB per stored file.</p>
             ${App.lastLocalUpload?.active
               ? '<p class="plan-note plan-local-on">⚡ Local upload is ON — this file will stream to the server over your LAN.</p>'
-              : App.lastLocalUpload?.onLan && App.lastLocalUpload?.localUrl
-                ? `<p class="plan-note">⚡ For faster uploads, open <a href="${App.lastLocalUpload.localUrl}">${App.lastLocalUpload.localUrl.replace(/^https?:\/\//, '')}</a> on this device.</p>`
-                : ''}
+              : App.lastLocalUpload?.configuredIpv4 && App.lastLocalUpload?.localUrl
+                ? `<p class="plan-note">⚡ Faster uploads on this network: open <a href="${App.lastLocalUpload.localUrl}">${App.lastLocalUpload.localUrl.replace(/^https?:\/\//, '')}</a> (saved LAN IP ${App.lastLocalUpload.configuredIpv4}).</p>`
+                : App.lastLocalUpload?.onLan && App.lastLocalUpload?.localUrl
+                  ? `<p class="plan-note">⚡ For faster uploads, open <a href="${App.lastLocalUpload.localUrl}">${App.lastLocalUpload.localUrl.replace(/^https?:\/\//, '')}</a> on this device.</p>`
+                  : '<p class="plan-note">⚡ Using a domain? Click <strong>LAN</strong> in the ribbon to save your server IPv4 for faster uploads.</p>'}
             <p class="plan-note">Upload method: <strong>${selectedMode === 'seamless'
               ? 'Seamless Upload — stream to server cache, auto encrypt/upload/HLS with retry'
               : selectedMode === 'git' ? 'Git clone & push' : 'API chunks (resumable)'}</strong></p>

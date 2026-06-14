@@ -41,6 +41,30 @@ describe('local-network', function () {
       expect(status.hostname).to.equal('localhost');
     });
 
+    it('uses saved user IPv4 on domain host', function () {
+      const db = require('../../server/db/database');
+      const user = db.prepare('SELECT id FROM users LIMIT 1').get();
+      if (!user) return this.skip();
+
+      localNetwork.setUserLocalUploadIpv4(user.id, '192.168.1.50');
+      const req = {
+        protocol: 'http',
+        get(name) {
+          if (name === 'host') return 'vault.example.com';
+          return undefined;
+        },
+        ip: '203.0.113.10',
+        headers: {},
+        socket: { remoteAddress: '203.0.113.10' },
+      };
+      const status = localNetwork.getLocalUploadStatus(req, user.id);
+      expect(status.configured).to.equal(true);
+      expect(status.configuredIpv4).to.equal('192.168.1.50');
+      expect(status.active).to.equal(false);
+      expect(status.localUrl).to.equal('http://192.168.1.50:3000');
+      localNetwork.setUserLocalUploadIpv4(user.id, null);
+    });
+
     it('suggests local URL when client is on LAN but host is remote', function () {
       const req = {
         protocol: 'http',

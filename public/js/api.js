@@ -22,6 +22,20 @@ const API = {
     return res.json();
   },
 
+  async put(url, body = {}) {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText || 'Request failed');
+    }
+    return res.json();
+  },
+
   async delete(url) {
     const res = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
     if (!res.ok) {

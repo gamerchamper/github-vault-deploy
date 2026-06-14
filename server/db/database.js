@@ -225,6 +225,7 @@ try { db.exec('ALTER TABLE files ADD COLUMN is_favorite INTEGER DEFAULT 0'); } c
 try { db.exec('ALTER TABLE files ADD COLUMN is_deleted INTEGER DEFAULT 0'); } catch { /* exists */ }
 try { db.exec('ALTER TABLE files ADD COLUMN deleted_at TEXT'); } catch { /* exists */ }
 try { db.exec('ALTER TABLE files ADD COLUMN backup_skip INTEGER DEFAULT 0'); } catch { /* exists */ }
+try { db.exec('ALTER TABLE users ADD COLUMN local_upload_ipv4 TEXT'); } catch { /* exists */ }
 
 try {
   db.exec(`

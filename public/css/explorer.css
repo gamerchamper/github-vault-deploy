@@ -1567,6 +1567,83 @@ body::before {
   text-decoration: underline;
 }
 
+.ribbon-btn-compact {
+  min-width: auto;
+  padding: 0 10px;
+}
+
+.ribbon-btn-compact.local-upload-btn-on {
+  color: #0d7a3f;
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.local-upload-detected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.local-upload-detect-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.local-upload-detect-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.local-upload-modal-status {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.local-upload-modal-on {
+  color: #0d7a3f;
+}
+
+.local-upload-modal-suggest a {
+  color: var(--accent);
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.form-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.local-upload-status,
+.local-upload-ribbon {
+  cursor: pointer;
+}
+
 /* Background task panel — see consolidated styles at end of file */
 
 .task-clear-failed {

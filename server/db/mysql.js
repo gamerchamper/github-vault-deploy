@@ -208,6 +208,11 @@ async function createTables() {
   for (const stmt of statements) {
     await pool.execute(stmt);
   }
+  try {
+    await pool.execute('ALTER TABLE users ADD COLUMN local_upload_ipv4 VARCHAR(45) NULL');
+  } catch {
+    /* column exists */
+  }
 }
 
 async function getConn() {
