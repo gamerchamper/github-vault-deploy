@@ -6,11 +6,16 @@ const ShareStageLayout = {
   STRIP: 10,
   CORNER: 16,
   GAP: 3,
+  STACK_HYSTERESIS: 48,
+  GRID_MIN_WIDTH: 720,
   panel: null,
   overlays: null,
   syncFrame: null,
   activeAxis: null,
+  activePointerId: null,
   _reflowFrame: null,
+  _stackMode: false,
+  _stackColumn: false,
 
   handleOutset() {
     return this.stripSize() + this.GAP;
@@ -34,6 +39,10 @@ const ShareStageLayout = {
 
   minHeight() {
     return this.isCoarsePointer() ? 120 : 160;
+  },
+
+  isResizing() {
+    return !!this.activeAxis;
   },
 
   getViewport() {
@@ -60,6 +69,58 @@ const ShareStageLayout = {
       offsetLeft: vp.offsetLeft,
       offsetTop: vp.offsetTop,
     };
+  },
+
+  getRailWidth() {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--share-right-rail-width');
+    const parsed = parseFloat(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 360;
+  },
+
+  isRailOpen() {
+    const rail = document.getElementById('share-right-rail');
+    return !!(
+      rail?.classList.contains('share-right-rail-open')
+      || document.body.classList.contains('share-shoutbox-open')
+      || document.body.classList.contains('share-playlist-active')
+    );
+  },
+
+  getAppFrameWidth() {
+    return document.getElementById('share-app-frame')?.clientWidth
+      ?? this.getViewport().width;
+  },
+
+  shouldStackRail(stageWidth) {
+    if (!this.panel?.classList.contains('share-stage-user-sized')) return false;
+    if (!this.isRailOpen()) return false;
+
+    const frameW = this.getAppFrameWidth();
+    const railW = this.getRailWidth();
+    const gap = 12;
+    const margin = 8;
+    const sideBySideLimit = frameW - railW - gap - margin;
+
+    if (this._stackMode) {
+      return stageWidth < sideBySideLimit + this.STACK_HYSTERESIS;
+    }
+    return stageWidth < sideBySideLimit;
+  },
+
+  shouldStackRailColumn(stageWidth) {
+    if (!this._stackMode) return false;
+
+    const hasPlaylist = document.body.classList.contains('share-playlist-active');
+    const hasShoutbox = document.body.classList.contains('share-shoutbox-open');
+    if (!hasPlaylist || !hasShoutbox) return true;
+
+    const frameW = this.getAppFrameWidth();
+    const gridLimit = this.GRID_MIN_WIDTH;
+
+    if (this._stackColumn) {
+      return frameW < gridLimit + this.STACK_HYSTERESIS;
+    }
+    return frameW < gridLimit;
   },
 
   init() {
@@ -91,11 +152,11 @@ const ShareStageLayout = {
       el.style.cursor = cursor;
       el.title = title;
       el.dataset.axis = id === 'se' ? 'se' : id;
-      el.addEventListener('pointerdown', (e) => this.onOverlayPointerDown(e, el.dataset.axis));
+      el.addEventListener('pointerdown', (ev) => this.onOverlayPointerDown(ev, el.dataset.axis));
       if (id === 'se') {
-        el.addEventListener('dblclick', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
+        el.addEventListener('dblclick', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
           this.resetToDefault();
         });
       }
@@ -153,11 +214,31 @@ const ShareStageLayout = {
     };
   },
 
+  clearRailLayoutClasses() {
+    document.body.classList.remove('share-rail-stack', 'share-rail-stack-grid', 'share-rail-stack-column');
+    this._stackMode = false;
+    this._stackColumn = false;
+  },
+
   updateLayoutMode(clamped) {
+    const width = clamped?.width ?? this.panel?.getBoundingClientRect().width ?? 0;
     const userSized = this.panel?.classList.contains('share-stage-user-sized');
-    document.body.classList.toggle('share-rail-stack', userSized);
-    if (clamped?.width) {
-      document.documentElement.style.setProperty('--share-user-stage-width', `${clamped.width}px`);
+
+    if (!userSized) {
+      this.clearRailLayoutClasses();
+      document.documentElement.style.removeProperty('--share-user-stage-width');
+      return;
+    }
+
+    this._stackMode = this.shouldStackRail(width);
+    this._stackColumn = this.shouldStackRailColumn(width);
+
+    document.body.classList.toggle('share-rail-stack', this._stackMode);
+    document.body.classList.toggle('share-rail-stack-grid', this._stackMode && !this._stackColumn);
+    document.body.classList.toggle('share-rail-stack-column', this._stackMode && this._stackColumn);
+
+    if (width > 0) {
+      document.documentElement.style.setProperty('--share-user-stage-width', `${Math.round(width)}px`);
     } else {
       document.documentElement.style.removeProperty('--share-user-stage-width');
     }
@@ -165,7 +246,7 @@ const ShareStageLayout = {
 
   syncLayoutMode() {
     if (!this.isActive() || !this.panel?.classList.contains('share-stage-user-sized')) {
-      document.body.classList.remove('share-rail-stack');
+      this.clearRailLayoutClasses();
       document.documentElement.style.removeProperty('--share-user-stage-width');
       return;
     }
@@ -185,7 +266,7 @@ const ShareStageLayout = {
   },
 
   scheduleReflow() {
-    if (this._reflowFrame) return;
+    if (this._reflowFrame || this.activeAxis) return;
     this._reflowFrame = requestAnimationFrame(() => {
       this._reflowFrame = null;
       window.dispatchEvent(new Event('resize'));
@@ -221,7 +302,7 @@ const ShareStageLayout = {
   clearInlineLayout() {
     if (!this.panel) return;
     this.panel.classList.remove('share-stage-user-sized', 'share-stage-fitted', 'share-stage-capped', 'share-stage-resizing');
-    document.body.classList.remove('share-rail-stack');
+    this.clearRailLayoutClasses();
     document.documentElement.style.removeProperty('--share-user-stage-width');
     this.panel.style.removeProperty('--share-stage-height');
     this.panel.style.width = '';
@@ -262,7 +343,10 @@ const ShareStageLayout = {
 
   hideOverlays() {
     if (!this.overlays) return;
-    for (const el of Object.values(this.overlays)) el.style.display = 'none';
+    for (const el of Object.values(this.overlays)) {
+      el.style.display = 'none';
+      el.style.pointerEvents = 'none';
+    }
   },
 
   placeOverlay(el, left, top, width, height) {
@@ -271,7 +355,7 @@ const ShareStageLayout = {
     el.style.top = `${Math.round(top)}px`;
     el.style.width = `${Math.max(1, Math.round(width))}px`;
     el.style.height = `${Math.max(1, Math.round(height))}px`;
-    el.style.pointerEvents = 'auto';
+    el.style.pointerEvents = this.activeAxis ? 'none' : 'auto';
   },
 
   syncOverlays() {
@@ -288,9 +372,17 @@ const ShareStageLayout = {
     const corner = this.cornerSize();
     const gap = this.GAP;
 
-    this.placeOverlay(this.overlays.e, r.right + gap, r.top, strip, r.height);
-    this.placeOverlay(this.overlays.s, r.left, r.bottom + gap, r.width, strip);
-    this.placeOverlay(this.overlays.se, r.right + gap, r.bottom + gap, corner, corner);
+    const e = this.overlays.e;
+    const s = this.overlays.s;
+    const se = this.overlays.se;
+
+    e.style.pointerEvents = 'auto';
+    s.style.pointerEvents = 'auto';
+    se.style.pointerEvents = 'auto';
+
+    this.placeOverlay(e, r.right + gap, r.top, strip, r.height);
+    this.placeOverlay(s, r.left, r.bottom + gap, r.width, strip);
+    this.placeOverlay(se, r.right + gap, r.bottom + gap, corner, corner);
   },
 
   startSyncLoop() {
@@ -333,11 +425,13 @@ const ShareStageLayout = {
     this.stopSyncLoop();
     this.hideOverlays();
     this.activeAxis = null;
+    this.activePointerId = null;
     document.body.classList.remove('share-stage-resizing-active');
     delete document.body.dataset.shareResizeAxis;
   },
 
   applySaved() {
+    if (this.isResizing()) return;
     const saved = this.read();
     if (saved?.userSized) this.apply(saved, { reflow: true });
     else this.syncOverlays();
@@ -350,8 +444,30 @@ const ShareStageLayout = {
     if (next) this.save(next);
   },
 
+  finishDrag(pointerId) {
+    if (this.activePointerId != null && pointerId != null && this.activePointerId !== pointerId) return;
+
+    this.activeAxis = null;
+    this.activePointerId = null;
+    this.panel?.classList.remove('share-stage-resizing');
+    document.body.classList.remove('share-stage-resizing-active');
+    delete document.body.dataset.shareResizeAxis;
+
+    if (this.overlays) {
+      for (const el of Object.values(this.overlays)) {
+        el.style.pointerEvents = 'auto';
+      }
+    }
+
+    const finalLayout = this.captureCurrent();
+    this.save(finalLayout);
+    this.syncOverlays();
+    this.updateLayoutMode(finalLayout);
+    this.scheduleReflow();
+  },
+
   onOverlayPointerDown(e, axis) {
-    if (this._resetting) return;
+    if (this._resetting || this.activeAxis) return;
     if (axis === 'se' && e.detail >= 2) {
       e.preventDefault();
       e.stopPropagation();
@@ -362,16 +478,15 @@ const ShareStageLayout = {
     e.preventDefault();
     e.stopPropagation();
 
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
+    const saved = this.read();
+    let layout = saved?.userSized ? saved : this.captureCurrent();
+    layout = this.apply(layout);
 
     this.activeAxis = axis;
+    this.activePointerId = e.pointerId;
     this.panel.classList.add('share-stage-resizing');
     document.body.classList.add('share-stage-resizing-active');
     document.body.dataset.shareResizeAxis = axis;
-
-    let layout = this.read()?.userSized ? this.read() : this.captureCurrent();
-    layout = this.apply(layout);
 
     const startX = e.clientX;
     const startY = e.clientY;
@@ -379,8 +494,11 @@ const ShareStageLayout = {
     const startH = layout.height;
     const startL = layout.left;
     const startT = layout.top;
+    const pointerId = e.pointerId;
 
     const onMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      ev.preventDefault();
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
       let width = startW;
@@ -397,24 +515,26 @@ const ShareStageLayout = {
     };
 
     const onUp = (ev) => {
-      target.releasePointerCapture(ev.pointerId);
-      target.removeEventListener('pointermove', onMove);
-      target.removeEventListener('pointerup', onUp);
-      target.removeEventListener('pointercancel', onUp);
-      this.activeAxis = null;
-      this.panel.classList.remove('share-stage-resizing');
-      document.body.classList.remove('share-stage-resizing-active');
-      delete document.body.dataset.shareResizeAxis;
-      const finalLayout = this.captureCurrent();
-      this.save(finalLayout);
-      this.syncOverlays();
-      this.updateLayoutMode(finalLayout);
-      this.scheduleReflow();
+      if (ev.pointerId !== pointerId) return;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onBlur);
+      this.finishDrag(pointerId);
     };
 
-    target.addEventListener('pointermove', onMove);
-    target.addEventListener('pointerup', onUp);
-    target.addEventListener('pointercancel', onUp);
+    const onBlur = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('blur', onBlur);
+      this.finishDrag(pointerId);
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    window.addEventListener('blur', onBlur);
   },
 };
 

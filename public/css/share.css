@@ -342,7 +342,7 @@ body.share-cinema-active .share-cinema-stage {
   transition: none;
 }
 
-/* User-resized stage: full viewport width, rail/shoutbox stack below (fluid desktop + mobile) */
+/* User-resized stage: rail moves below only when player + side rail no longer fit */
 body.share-rail-stack .share-app-frame {
   flex-direction: column;
   overflow: visible;
@@ -372,6 +372,7 @@ body.share-rail-stack .share-right-rail {
   width: 100% !important;
   max-width: 100% !important;
   align-self: stretch;
+  overflow: visible;
 }
 
 body.share-rail-stack .share-right-rail.share-right-rail-open {
@@ -380,7 +381,8 @@ body.share-rail-stack .share-right-rail.share-right-rail-open {
   right: auto !important;
   bottom: auto !important;
   height: auto !important;
-  max-height: min(42vh, 380px);
+  max-height: none !important;
+  min-height: 0;
 }
 
 body.share-rail-stack .share-shoutbox.shoutbox-open {
@@ -388,19 +390,79 @@ body.share-rail-stack .share-shoutbox.shoutbox-open {
   top: auto !important;
   right: auto !important;
   bottom: auto !important;
-  flex: 0 0 auto !important;
-  width: 100% !important;
-  max-width: 100% !important;
+  flex: 1 1 auto !important;
+  width: auto !important;
+  max-width: none !important;
   height: auto !important;
+  min-height: 220px;
   max-height: min(42vh, 380px) !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
   align-self: stretch;
 }
 
 body.share-rail-stack .share-playlist-panel:not(.hidden) {
+  flex: 0 0 auto;
   max-height: min(36vh, 320px);
   border-left: none;
   border-top: 1px solid var(--glass-border);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+/* Stacked + wide: playlist and shoutbox side-by-side below the player */
+body.share-rail-stack-grid .share-right-rail.share-right-rail-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
+
+body.share-rail-stack-grid.share-playlist-active .share-playlist-panel:not(.hidden) {
+  grid-column: 1;
+  grid-row: 1;
+  max-height: min(38vh, 340px);
+  border-radius: var(--radius-lg);
+  border-top: 1px solid var(--glass-border);
+}
+
+body.share-rail-stack-grid.share-shoutbox-open .share-shoutbox.shoutbox-open {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 260px;
+  max-height: min(38vh, 340px) !important;
+  border-left: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+body.share-rail-stack-grid:not(.share-playlist-active) .share-shoutbox.shoutbox-open,
+body.share-rail-stack-grid:not(.share-shoutbox-open) .share-playlist-panel:not(.hidden) {
+  grid-column: 1 / -1;
+}
+
+/* Stacked + narrow: playlist above shoutbox */
+body.share-rail-stack-column .share-right-rail.share-right-rail-open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+body.share-rail-stack-column .share-playlist-panel:not(.hidden) {
+  flex: 0 0 auto;
+  order: 1;
+  max-height: min(32vh, 280px);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+body.share-rail-stack-column .share-shoutbox.shoutbox-open {
+  flex: 1 1 auto;
+  order: 2;
+  min-height: 220px;
+  max-height: min(40vh, 360px) !important;
+  border-left: none;
+  border-top: 1px solid var(--glass-border);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 body.share-rail-stack.share-shoutbox-open .shoutbox-open-btn {
@@ -410,6 +472,13 @@ body.share-rail-stack.share-shoutbox-open .shoutbox-open-btn {
 body.share-rail-stack.share-cinema-active .share-shell {
   overflow-x: visible;
   overflow-y: visible;
+}
+
+body.share-stage-resizing-active .share-app-frame,
+body.share-stage-resizing-active .share-shell,
+body.share-stage-resizing-active .share-right-rail,
+body.share-stage-resizing-active .share-shoutbox {
+  transition: none !important;
 }
 
 body.share-stage-resizing-active .share-cinema-layout {
@@ -1421,15 +1490,24 @@ body.share-playlist-active .share-playlist-panel .playlist-panel-list {
     width: 100% !important;
     max-width: 100% !important;
     height: auto !important;
-    max-height: min(42vh, 380px);
+    max-height: none !important;
   }
 
+  body.share-rail-stack-grid .share-shoutbox.shoutbox-open,
+  body.share-rail-stack-column .share-shoutbox.shoutbox-open,
   body.share-rail-stack:not(.share-playlist-active) .share-shoutbox.shoutbox-open {
     position: relative !important;
-    width: 100% !important;
-    max-width: 100% !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: auto !important;
+    max-width: none !important;
     height: auto !important;
     max-height: min(42vh, 380px) !important;
+    flex: 1 1 auto !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
   }
 }
 

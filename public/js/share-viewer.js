@@ -386,6 +386,7 @@ const ShareViewer = {
   fitCinemaStage(video, { force = false } = {}) {
     if (!video || !document.body.classList.contains('share-cinema-active')) return;
     if (!force && typeof ShareStageLayout !== 'undefined' && ShareStageLayout.isUserSized()) {
+      if (ShareStageLayout.isResizing?.()) return;
       ShareStageLayout.applySaved();
       return;
     }
@@ -441,6 +442,7 @@ const ShareViewer = {
       const shellEl = document.querySelector('.share-shell');
       if (shellEl && typeof ResizeObserver !== 'undefined') {
         this._stageResizeObs = new ResizeObserver(() => {
+          if (ShareStageLayout?.isResizing?.()) return;
           if (this._fitVideoEl?.videoWidth) apply();
         });
         this._stageResizeObs.observe(shellEl);
