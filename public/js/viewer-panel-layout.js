@@ -132,19 +132,21 @@ const ViewerPanelLayout = {
   clampToViewport(layout) {
     if (!layout) return layout;
     const { margin, outset, minW, minH, vw, vh, offsetLeft, offsetTop } = this.getBounds();
+    const viewRight = offsetLeft + vw;
+    const viewBottom = offsetTop + vh;
 
     let width = Math.max(minW, layout.width || minW);
     let height = Math.max(minH, layout.height || minH);
     let left = layout.left ?? Math.round(offsetLeft + (vw - width) / 2);
     let top = layout.top ?? Math.round(offsetTop + (vh - height) / 2);
 
-    const maxW = Math.max(minW, vw - left - margin - outset);
-    const maxH = Math.max(minH, vh - top - margin - outset);
+    const maxW = Math.max(minW, viewRight - left - margin - outset);
+    const maxH = Math.max(minH, viewBottom - top - margin - outset);
     width = Math.min(width, maxW);
     height = Math.min(height, maxH);
 
-    left = Math.min(Math.max(offsetLeft + margin, left), offsetLeft + vw - width - margin - outset);
-    top = Math.min(Math.max(offsetTop + margin, top), offsetTop + vh - height - margin - outset);
+    left = Math.min(Math.max(offsetLeft + margin, left), viewRight - width - margin - outset);
+    top = Math.min(Math.max(offsetTop + margin, top), viewBottom - height - margin - outset);
 
     return {
       ...layout,
@@ -314,6 +316,7 @@ const ViewerPanelLayout = {
   },
 
   onWindowResize() {
+    if (this.activeAxis) return;
     if (!this.isUserSized() || !this.panel?.classList.contains('viewer-panel-custom')) return;
     const next = this.apply(this.read(), { reflow: true });
     if (next) this.save(next);
@@ -334,6 +337,11 @@ const ViewerPanelLayout = {
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
 
+    this.activeAxis = axis;
+    this.panel.classList.add('viewer-panel-resizing');
+    document.body.classList.add('viewer-panel-resizing-active');
+    document.body.dataset.viewerResizeAxis = axis;
+
     let layout = this.read()?.userSized ? this.read() : this.captureCurrent();
     layout = this.apply(layout);
 
@@ -344,11 +352,6 @@ const ViewerPanelLayout = {
     const startL = layout.left;
     const startT = layout.top;
     const resizeAxis = axis;
-
-    this.activeAxis = resizeAxis;
-    this.panel.classList.add('viewer-panel-resizing');
-    document.body.classList.add('viewer-panel-resizing-active');
-    document.body.dataset.viewerResizeAxis = resizeAxis;
 
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
@@ -363,7 +366,7 @@ const ViewerPanelLayout = {
         left: startL,
         top: startT,
         userSized: true,
-      }, { reflow: true });
+      });
     };
 
     const onUp = (ev) => {

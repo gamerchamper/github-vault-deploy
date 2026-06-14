@@ -126,24 +126,31 @@ const ShareStageLayout = {
   clampToViewport(layout) {
     if (!layout) return layout;
     const { margin, outset, minW, minH, vw, vh, offsetLeft, offsetTop } = this.getBounds();
+    const viewRight = offsetLeft + vw;
+    const viewBottom = offsetTop + vh;
     const parent = this.panel?.parentElement?.getBoundingClientRect();
-    const topDock = document.getElementById('share-top-dock')?.offsetHeight || 0;
 
     let width = Math.max(minW, layout.width || minW);
     let height = Math.max(minH, layout.height || minH);
     let left = layout.left ?? (parent ? parent.left + (parent.width - width) / 2 : offsetLeft + margin);
-    let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? offsetTop + topDock;
+    let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? offsetTop + margin;
 
-    const maxW = Math.max(minW, vw - left - margin - outset);
-    const maxH = Math.max(minH, vh - top - margin - outset);
+    if (parent) {
+      width = Math.min(width, Math.max(minW, parent.width - margin * 2));
+    }
+
+    const maxW = Math.max(minW, viewRight - left - margin - outset);
+    const maxH = Math.max(minH, viewBottom - top - margin - outset);
     width = Math.min(width, maxW);
     height = Math.min(height, maxH);
 
     if (parent) {
-      left = Math.min(Math.max(parent.left + margin, left), parent.right - width - margin);
+      const relLeft = left - parent.left;
+      const maxRelLeft = Math.max(0, parent.width - width - margin);
+      left = parent.left + Math.min(Math.max(margin, relLeft), maxRelLeft);
     }
-    left = Math.min(Math.max(offsetLeft + margin, left), offsetLeft + vw - width - margin - outset);
-    top = Math.min(Math.max(offsetTop + margin, top), offsetTop + vh - height - margin - outset);
+    left = Math.min(Math.max(offsetLeft + margin, left), viewRight - width - margin - outset);
+    top = Math.min(Math.max(offsetTop + margin, top), viewBottom - height - margin - outset);
 
     return {
       ...layout,
@@ -323,6 +330,7 @@ const ShareStageLayout = {
   },
 
   onWindowResize() {
+    if (this.activeAxis) return;
     if (!this.isUserSized() || !this.panel?.classList.contains('share-stage-user-sized')) return;
     const next = this.apply(this.read(), { reflow: true });
     if (next) this.save(next);
@@ -343,6 +351,11 @@ const ShareStageLayout = {
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
 
+    this.activeAxis = axis;
+    this.panel.classList.add('share-stage-resizing');
+    document.body.classList.add('share-stage-resizing-active');
+    document.body.dataset.shareResizeAxis = axis;
+
     let layout = this.read()?.userSized ? this.read() : this.captureCurrent();
     layout = this.apply(layout);
 
@@ -352,11 +365,6 @@ const ShareStageLayout = {
     const startH = layout.height;
     const startL = layout.left;
     const startT = layout.top;
-
-    this.activeAxis = axis;
-    this.panel.classList.add('share-stage-resizing');
-    document.body.classList.add('share-stage-resizing-active');
-    document.body.dataset.shareResizeAxis = axis;
 
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
@@ -371,7 +379,7 @@ const ShareStageLayout = {
         left: startL,
         top: startT,
         userSized: true,
-      }, { reflow: true });
+      });
     };
 
     const onUp = (ev) => {
