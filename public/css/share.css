@@ -302,6 +302,8 @@ body.share-cinema-active .share-cinema-layout {
   width: 100%;
   max-width: 100%;
   overflow-x: clip;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .share-cinema-stage {
@@ -335,7 +337,16 @@ body.share-cinema-active .share-cinema-stage {
 
 .share-cinema-stage.share-stage-user-sized {
   box-sizing: border-box;
+  max-height: none !important;
   transition: none;
+}
+
+body.share-stage-resizing-active .share-cinema-layout {
+  overflow-y: auto;
+}
+
+body.share-stage-resizing-active .share-cinema-dock {
+  flex-shrink: 0;
 }
 
 .share-cinema-stage.share-stage-resizing {
@@ -431,6 +442,17 @@ body.share-stage-resizing-active[data-share-resize-axis="se"] * {
 }
 
 body.share-cinema-active .share-viewer-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.share-cinema-stage.share-stage-user-sized .share-viewer-stage,
+.share-cinema-stage.share-stage-user-sized #share-viewer {
+  flex: 1 1 auto;
   min-height: 0;
   height: 100%;
 }

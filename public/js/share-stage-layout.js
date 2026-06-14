@@ -3,25 +3,74 @@
  */
 const ShareStageLayout = {
   STORAGE_KEY: 'vault-share-stage-layout',
-  MIN_W: 320,
-  MIN_H: 200,
   STRIP: 10,
   CORNER: 16,
   GAP: 3,
-
-  handleOutset() {
-    return this.STRIP + this.GAP;
-  },
   panel: null,
   overlays: null,
   syncFrame: null,
   activeAxis: null,
+  _reflowFrame: null,
+
+  handleOutset() {
+    return this.stripSize() + this.GAP;
+  },
+
+  isCoarsePointer() {
+    return window.matchMedia('(pointer: coarse)').matches || window.innerWidth <= 768;
+  },
+
+  stripSize() {
+    return this.isCoarsePointer() ? 18 : this.STRIP;
+  },
+
+  cornerSize() {
+    return this.isCoarsePointer() ? 22 : this.CORNER;
+  },
+
+  minWidth() {
+    return this.isCoarsePointer() ? 180 : 240;
+  },
+
+  minHeight() {
+    return this.isCoarsePointer() ? 120 : 160;
+  },
+
+  getViewport() {
+    const vv = window.visualViewport;
+    return {
+      width: vv?.width ?? window.innerWidth,
+      height: vv?.height ?? window.innerHeight,
+      offsetLeft: vv?.offsetLeft ?? 0,
+      offsetTop: vv?.offsetTop ?? 0,
+    };
+  },
+
+  getBounds() {
+    const vp = this.getViewport();
+    const margin = this.isCoarsePointer() ? 2 : 4;
+    return {
+      vp,
+      margin,
+      outset: this.handleOutset(),
+      minW: this.minWidth(),
+      minH: this.minHeight(),
+      vw: vp.width,
+      vh: vp.height,
+      offsetLeft: vp.offsetLeft,
+      offsetTop: vp.offsetTop,
+    };
+  },
 
   init() {
     this.panel = document.getElementById('share-cinema-stage');
     if (!this.panel) return;
     this.ensureOverlays();
     window.addEventListener('resize', () => {
+      this.syncOverlays();
+      this.onWindowResize();
+    });
+    window.visualViewport?.addEventListener('resize', () => {
       this.syncOverlays();
       this.onWindowResize();
     });
@@ -74,29 +123,28 @@ const ShareStageLayout = {
     return !!this.read()?.userSized;
   },
 
-  maxHeight() {
-    const topDock = document.getElementById('share-top-dock')?.offsetHeight || 0;
-    const dock = document.getElementById('share-cinema-dock')?.offsetHeight || 140;
-    return Math.max(this.MIN_H, window.innerHeight - topDock - Math.min(dock, 280) - 24);
-  },
-
   clampToViewport(layout) {
     if (!layout) return layout;
-    const margin = 12;
-    const outset = this.handleOutset();
+    const { margin, outset, minW, minH, vw, vh, offsetLeft, offsetTop } = this.getBounds();
     const parent = this.panel?.parentElement?.getBoundingClientRect();
-    const maxW = Math.max(this.MIN_W, (parent?.width || window.innerWidth) - margin * 2 - outset);
-    const maxH = Math.max(this.MIN_H, this.maxHeight() - outset);
-    let width = Math.min(Math.max(this.MIN_W, layout.width || this.MIN_W), maxW);
-    let height = Math.min(Math.max(this.MIN_H, layout.height || this.MIN_H), maxH);
-    let left = layout.left ?? (parent ? parent.left + (parent.width - width) / 2 : margin);
-    let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? margin;
+    const topDock = document.getElementById('share-top-dock')?.offsetHeight || 0;
+
+    let width = Math.max(minW, layout.width || minW);
+    let height = Math.max(minH, layout.height || minH);
+    let left = layout.left ?? (parent ? parent.left + (parent.width - width) / 2 : offsetLeft + margin);
+    let top = layout.top ?? this.panel?.getBoundingClientRect().top ?? offsetTop + topDock;
+
+    const maxW = Math.max(minW, vw - left - margin - outset);
+    const maxH = Math.max(minH, vh - top - margin - outset);
+    width = Math.min(width, maxW);
+    height = Math.min(height, maxH);
+
     if (parent) {
-      left = Math.min(Math.max(parent.left + margin, left), parent.right - width - margin - outset);
-    } else {
-      left = Math.min(Math.max(margin, left), window.innerWidth - width - margin - outset);
+      left = Math.min(Math.max(parent.left + margin, left), parent.right - width - margin);
     }
-    top = Math.min(Math.max(margin, top), window.innerHeight - height - margin - outset);
+    left = Math.min(Math.max(offsetLeft + margin, left), offsetLeft + vw - width - margin - outset);
+    top = Math.min(Math.max(offsetTop + margin, top), offsetTop + vh - height - margin - outset);
+
     return {
       ...layout,
       width: Math.round(width),
@@ -118,17 +166,26 @@ const ShareStageLayout = {
     });
   },
 
-  apply(layout) {
+  scheduleReflow() {
+    if (this._reflowFrame) return;
+    this._reflowFrame = requestAnimationFrame(() => {
+      this._reflowFrame = null;
+      window.dispatchEvent(new Event('resize'));
+    });
+  },
+
+  apply(layout, { reflow = false } = {}) {
     if (!this.panel || !layout) return null;
     const clamped = this.clampToViewport(layout);
     const parent = this.panel.parentElement?.getBoundingClientRect();
 
     this.panel.classList.add('share-stage-user-sized', 'share-stage-fitted');
+    this.panel.classList.remove('share-stage-capped');
     this.panel.style.setProperty('--share-stage-height', `${clamped.height}px`);
     this.panel.style.width = `${clamped.width}px`;
     this.panel.style.height = `${clamped.height}px`;
     this.panel.style.minHeight = `${clamped.height}px`;
-    this.panel.style.maxHeight = `${clamped.height}px`;
+    this.panel.style.maxHeight = 'none';
     this.panel.style.flex = '0 0 auto';
     this.panel.style.alignSelf = 'flex-start';
 
@@ -138,6 +195,7 @@ const ShareStageLayout = {
     }
 
     this.syncOverlays();
+    if (reflow) this.scheduleReflow();
     return clamped;
   },
 
@@ -205,8 +263,8 @@ const ShareStageLayout = {
     const r = this.panel.getBoundingClientRect();
     if (r.width < 10 || r.height < 10) return;
 
-    const strip = this.STRIP;
-    const corner = this.CORNER;
+    const strip = this.stripSize();
+    const corner = this.cornerSize();
     const gap = this.GAP;
 
     this.placeOverlay(this.overlays.e, r.right + gap, r.top, strip, r.height);
@@ -242,7 +300,7 @@ const ShareStageLayout = {
 
     const saved = this.read();
     if (saved?.userSized) {
-      this.apply(saved);
+      this.apply(saved, { reflow: true });
     } else {
       this.clearInlineLayout();
     }
@@ -260,13 +318,13 @@ const ShareStageLayout = {
 
   applySaved() {
     const saved = this.read();
-    if (saved?.userSized) this.apply(saved);
+    if (saved?.userSized) this.apply(saved, { reflow: true });
     else this.syncOverlays();
   },
 
   onWindowResize() {
     if (!this.isUserSized() || !this.panel?.classList.contains('share-stage-user-sized')) return;
-    const next = this.apply(this.read());
+    const next = this.apply(this.read(), { reflow: true });
     if (next) this.save(next);
   },
 
@@ -278,7 +336,7 @@ const ShareStageLayout = {
       this.resetToDefault();
       return;
     }
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -313,7 +371,7 @@ const ShareStageLayout = {
         left: startL,
         top: startT,
         userSized: true,
-      });
+      }, { reflow: true });
     };
 
     const onUp = (ev) => {
@@ -328,6 +386,7 @@ const ShareStageLayout = {
       const finalLayout = this.captureCurrent();
       this.save(finalLayout);
       this.syncOverlays();
+      this.scheduleReflow();
     };
 
     target.addEventListener('pointermove', onMove);

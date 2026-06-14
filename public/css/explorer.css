@@ -2502,7 +2502,15 @@ body::before {
 
 .viewer-panel-custom {
   box-sizing: border-box;
+  max-width: none !important;
+  max-height: none !important;
   box-shadow: 0 20px 56px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.viewer-panel-custom .viewer-playlist-panel {
+  width: min(280px, 30vw);
+  min-width: 120px;
+  flex-shrink: 1;
 }
 
 .media-viewer.viewer-layout-custom {
@@ -2612,6 +2620,7 @@ body.viewer-panel-resizing-active[data-viewer-resize-axis="se"] * {
 .viewer-panel-custom .viewer-body {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .viewer-panel-custom .viewer-main-column {
