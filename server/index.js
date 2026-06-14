@@ -204,6 +204,7 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/viewers', viewerRoutes);
 app.use('/api/bandwidth', bandwidthRoutes);
+app.use('/api/network', require('./routes/network'));
 
 app.get('*', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');

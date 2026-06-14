@@ -16,6 +16,10 @@ function isPrivateIpv4(ip) {
   return false;
 }
 
+function isLoopbackClientIp(ip) {
+  return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost';
+}
+
 function sameSubnet(ipA, ipB, netmask) {
   if (!ipA || !ipB || !netmask) return false;
   if (!isPrivateIpv4(ipA) || !isPrivateIpv4(ipB)) return false;
@@ -23,8 +27,16 @@ function sameSubnet(ipA, ipB, netmask) {
   return (ipv4ToInt(ipA) & mask) === (ipv4ToInt(ipB) & mask);
 }
 
+function envServerIpv4() {
+  const raw = process.env.LOCAL_UPLOAD_IPV4 || process.env.SERVER_LAN_IPV4 || '';
+  return raw.split(/[\s,;]+/).map((s) => s.trim()).filter(isPrivateIpv4);
+}
+
 function getServerIpv4Addresses() {
   const addrs = [];
+  for (const envIp of envServerIpv4()) {
+    addrs.push({ address: envIp, netmask: '255.255.255.0', source: 'env' });
+  }
   for (const ifaces of Object.values(os.networkInterfaces())) {
     for (const iface of ifaces || []) {
       const family = iface.family === 'IPv4' || iface.family === 4;
@@ -33,6 +45,7 @@ function getServerIpv4Addresses() {
       addrs.push({
         address: iface.address,
         netmask: iface.netmask || '255.255.255.0',
+        source: 'interface',
       });
     }
   }
@@ -66,16 +79,20 @@ function portFromRequest(req) {
 }
 
 function clientOnServerLan(clientIp, serverIfaces) {
+  if (!serverIfaces.length) return isLoopbackClientIp(clientIp) || isPrivateIpv4(clientIp);
+  if (isLoopbackClientIp(clientIp)) return true;
   if (!isPrivateIpv4(clientIp)) return false;
   return serverIfaces.some((iface) => sameSubnet(clientIp, iface.address, iface.netmask));
 }
 
 function browsingViaLocalPath(hostname, serverIfaces) {
   if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
-  if (serverIfaces.some((i) => i.address === hostname)) return true;
   if (isPrivateIpv4(hostname)) {
-    return serverIfaces.some((iface) => sameSubnet(hostname, iface.address, iface.netmask));
+    if (!serverIfaces.length) return true;
+    return serverIfaces.some((iface) => iface.address === hostname
+      || sameSubnet(hostname, iface.address, iface.netmask));
   }
+  if (serverIfaces.some((i) => i.address === hostname)) return true;
   return false;
 }
 
@@ -102,10 +119,11 @@ function getLocalUploadStatus(req) {
 
   return {
     active,
-    onLan: clientOnServerLan(clientIp, serverIfaces),
+    onLan,
     serverIpv4,
-    localUrl,
+    localUrl: active ? null : localUrl,
     hostname,
+    clientIp: isPrivateIpv4(clientIp) || isLoopbackClientIp(clientIp) ? clientIp : null,
   };
 }
 
