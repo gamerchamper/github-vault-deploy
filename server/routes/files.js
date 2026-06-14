@@ -1431,7 +1431,8 @@ router.post('/:id/favorite', (req, res) => {
 router.get('/favorites', (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT id, name, path, size, mime_type, is_folder, parent_path, chunk_count, has_thumbnail, created_at, is_favorite
+      SELECT id, name, path, size, mime_type, is_folder, parent_path, chunk_count, has_thumbnail, has_hls, created_at, is_favorite,
+        (SELECT COUNT(*) FROM hls_segments WHERE file_id = files.id) AS hls_segment_count
       FROM files
       WHERE user_id = ? AND (upload_status IS NULL OR upload_status = 'ready') AND is_deleted = 0 AND is_favorite = 1
       ORDER BY name ASC

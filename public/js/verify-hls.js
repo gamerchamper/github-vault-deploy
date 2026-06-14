@@ -1,6 +1,6 @@
 const VerifyHls = {
   eligibleFiles(files) {
-    return (files || []).filter((f) => !f.is_folder && (f.has_hls || (f.hls_segment_count > 0)));
+    return (files || []).filter((f) => explorer?.isHlsEligible?.(f));
   },
 
   async runForFiles(files) {

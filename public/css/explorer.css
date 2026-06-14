@@ -561,9 +561,10 @@ body::before {
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--glass-border);
   z-index: 9;
+  overflow: visible;
 }
 
-.ribbon-group { display: flex; gap: 2px; }
+.ribbon-group { display: flex; gap: 2px; overflow: visible; }
 
 .ribbon-separator {
   width: 1px;

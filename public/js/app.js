@@ -956,13 +956,21 @@ const App = {
       e.stopPropagation();
       explorer.toggleSelectionActionsMenu();
     });
+    document.getElementById('selection-actions-wrap')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
     document.getElementById('selection-actions-menu')?.addEventListener('click', (e) => {
-      const action = e.target?.dataset?.bulkAction;
-      if (!action || e.target.disabled) return;
+      const action = e.target?.closest('[data-bulk-action]')?.dataset?.bulkAction;
+      if (!action) return;
+      const item = e.target.closest('[data-bulk-action]');
+      if (!item || item.disabled) return;
       e.stopPropagation();
       explorer.runBulkAction(action);
     });
-    document.addEventListener('click', () => explorer.hideSelectionActionsMenu());
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#selection-actions-wrap')) return;
+      explorer.hideSelectionActionsMenu();
+    });
     document.getElementById('btn-restore')?.addEventListener('click', () => explorer.restoreSelected());
     document.getElementById('btn-permanent-delete')?.addEventListener('click', () => explorer.permanentDeleteSelected());
     document.getElementById('btn-refresh').addEventListener('click', () => {

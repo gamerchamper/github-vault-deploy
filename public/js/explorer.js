@@ -590,18 +590,23 @@ class Explorer {
   }
 
   getActionTargets(file = null) {
-    if (this.selected.size > 0) return this.getSelectedFileObjects();
+    const fromSelection = this.getSelectedFileObjects();
+    if (fromSelection.length > 0) return fromSelection;
+    if (this.selected.size > 0 && file && this.selected.has(file.id) && !file.is_folder) {
+      return [file];
+    }
     return file && !file.is_folder ? [file] : [];
   }
 
   isHlsEligible(file) {
-    return !!file && !file.is_folder && (file.has_hls || (file.hls_segment_count > 0));
+    if (!file || file.is_folder) return false;
+    return Number(file.has_hls) > 0 || Number(file.hls_segment_count) > 0;
   }
 
   isVideoEligibleForHls(file) {
     return !!file && !file.is_folder
       && (file.mime_type?.startsWith('video/') || /\.mp4$/i.test(file.name || ''))
-      && !file.has_hls;
+      && Number(file.has_hls) <= 0;
   }
 
   hideSelectionActionsMenu() {
@@ -614,8 +619,9 @@ class Explorer {
     const menu = document.getElementById('selection-actions-menu');
     const btn = document.getElementById('btn-selection-actions');
     if (!menu || !btn || btn.disabled) return;
-    const open = menu.classList.toggle('hidden');
-    btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+    const willOpen = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden');
+    btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
   }
 
   async verifyHlsSelected() {
@@ -864,6 +870,7 @@ class Explorer {
       file.uploadStatus || '',
       file.has_thumbnail ? 1 : 0,
       file.has_hls ? 1 : 0,
+      file.hls_segment_count || 0,
       file.is_favorite ? 1 : 0,
       file._inPlaylist ? (file._playlistIndex ?? file.position ?? '') : '',
       file._trash ? 1 : 0,
@@ -1062,15 +1069,16 @@ class Explorer {
     const actionsMenu = document.getElementById('selection-actions-menu');
     const curatedBlocked = trash || curated;
     if (actionsBtn) {
-      actionsBtn.disabled = !hasFiles || curatedBlocked || playlistDetail || collectionDetail;
+      actionsBtn.disabled = !hasSelection || curatedBlocked || playlistDetail || collectionDetail;
     }
     if (actionsMenu && actionsBtn?.disabled) {
       actionsMenu.classList.add('hidden');
       actionsBtn.setAttribute('aria-expanded', 'false');
     }
     if (actionsMenu) {
-      const hlsTargets = selectedFiles.filter((f) => !f.is_folder && (f.has_hls || (f.hls_segment_count > 0)));
-      const videoTargets = selectedFiles.filter((f) => this.isVideoEligibleForHls(f));
+      const fileTargets = selectedFiles.filter((f) => !f.is_folder);
+      const hlsTargets = fileTargets.filter((f) => this.isHlsEligible(f));
+      const videoTargets = fileTargets.filter((f) => this.isVideoEligibleForHls(f));
       const verifyHlsItem = actionsMenu.querySelector('[data-bulk-action="verify-hls"]');
       const verifyFileItem = actionsMenu.querySelector('[data-bulk-action="verify-file"]');
       const hlsConvertItem = actionsMenu.querySelector('[data-bulk-action="hls-convert"]');
@@ -1082,7 +1090,7 @@ class Explorer {
           : 'Verify HLS';
       }
       if (verifyFileItem) {
-        verifyFileItem.disabled = selectedFiles.filter((f) => !f.is_folder).length !== 1;
+        verifyFileItem.disabled = fileTargets.length !== 1;
         verifyFileItem.textContent = 'Verify file';
       }
       if (hlsConvertItem) {
@@ -1350,7 +1358,9 @@ class Explorer {
     const hlsTargets = actionTargets.filter((f) => this.isHlsEligible(f));
     const videoTargets = actionTargets.filter((f) => this.isVideoEligibleForHls(f));
     if (verifyHlsItem) {
-      verifyHlsItem.classList.toggle('hidden', hlsTargets.length === 0);
+      const showVerifyHls = !file.is_folder && hlsTargets.length > 0;
+      verifyHlsItem.style.display = showVerifyHls ? '' : 'none';
+      verifyHlsItem.classList.remove('hidden');
       verifyHlsItem.textContent = hlsTargets.length > 1
         ? `Verify HLS (${hlsTargets.length} files)`
         : 'Verify HLS';
@@ -1361,7 +1371,9 @@ class Explorer {
     if (addPlaylistItem) addPlaylistItem.style.display = file.is_folder ? 'none' : '';
     if (linkFolderItem) linkFolderItem.style.display = file.is_folder ? '' : 'none';
     if (hlsItem) {
-      hlsItem.classList.toggle('hidden', videoTargets.length === 0);
+      const showConvert = videoTargets.length > 0;
+      hlsItem.style.display = showConvert ? '' : 'none';
+      hlsItem.classList.remove('hidden');
       hlsItem.textContent = videoTargets.length > 1
         ? `Convert to HLS (${videoTargets.length} files)`
         : 'Convert to HLS';
@@ -1379,8 +1391,8 @@ class Explorer {
       shareItem.style.display = 'none';
       if (thumbItem) thumbItem.style.display = 'none';
       if (verifyItem) verifyItem.style.display = 'none';
-      if (verifyHlsItem) verifyHlsItem.classList.add('hidden');
-      hlsItem?.classList.add('hidden');
+      if (verifyHlsItem) verifyHlsItem.style.display = 'none';
+      if (hlsItem) hlsItem.style.display = 'none';
       if (moveItem) moveItem.style.display = 'none';
       if (addPlaylistItem) addPlaylistItem.style.display = 'none';
       if (linkFolderItem) linkFolderItem.style.display = 'none';
