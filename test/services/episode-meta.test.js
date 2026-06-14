@@ -52,4 +52,21 @@ describe('episode-meta', function () {
     const sorted = episodeMeta.sortItemsByEpisodeMeta(items);
     expect(sorted.map((i) => i.id)).to.deep.equal(['b', 'a']);
   });
+
+  it('sorts season folders before newer seasons when filenames only have episode numbers', function () {
+    const items = [
+      { id: 's2e1', name: 'E01.mkv', parent_path: '/Show/Season 2' },
+      { id: 's2e2', name: 'E02.mkv', parent_path: '/Show/Season 2' },
+      { id: 's1e1', name: 'E01.mkv', parent_path: '/Show/Season 1' },
+      { id: 's1e2', name: 'E02.mkv', parent_path: '/Show/Season 1' },
+    ];
+    const sorted = episodeMeta.sortItemsByEpisodeMeta(items);
+    expect(sorted.map((i) => i.id)).to.deep.equal(['s1e1', 's1e2', 's2e1', 's2e2']);
+  });
+
+  it('orders multi-season SxxExx titles oldest season first', function () {
+    const names = ['Show S03E01', 'Show S02E01', 'Show S01E01'];
+    const sorted = [...names].sort(episodeMeta.compareEpisodeTitles);
+    expect(sorted).to.deep.equal(['Show S01E01', 'Show S02E01', 'Show S03E01']);
+  });
 });

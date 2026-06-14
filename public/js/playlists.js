@@ -114,7 +114,7 @@ const Playlists = {
   episodeMetaBadge(file) {
     if (typeof EpisodeMeta === 'undefined') return '';
     const title = file.display_name || file.name || '';
-    const meta = EpisodeMeta.parse(title);
+    const meta = EpisodeMeta.parse(title, file.parent_path || '');
     if (!meta.match || !meta.label) return '';
     return `<span class="builder-ep-detected" title="Detected from title">${this.escape(meta.label)}</span>`;
   },

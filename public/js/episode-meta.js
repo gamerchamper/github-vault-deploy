@@ -1,7 +1,30 @@
 const EpisodeMeta = {
-  parse(rawTitle) {
+  extractSeasonHint(...sources) {
+    const patterns = [
+      /\bSeason[\s._-]*(\d{1,2})\b/i,
+      /\bS(\d{1,2})(?:[\s._-]*E[\s._-]*\d|\b)/i,
+      /(?:^|[/\\])Season[\s._-]*(\d{1,2})(?:[/\\]|$)/i,
+      /(?:^|[/\\])S(\d{1,2})(?:[/\\]|$)/i,
+      /(?:^|[/\\])(\d{1,2})(?:[/\\]|$)/,
+    ];
+
+    for (const src of sources) {
+      const text = String(src || '').trim();
+      if (!text) continue;
+      for (const re of patterns) {
+        const m = text.match(re);
+        if (!m) continue;
+        const season = parseInt(m[1], 10);
+        if (Number.isFinite(season) && season >= 1 && season <= 99) return season;
+      }
+    }
+    return null;
+  },
+
+  parse(rawTitle, parentPath = '') {
     const title = String(rawTitle || '').trim();
-    if (!title) {
+    const path = String(parentPath || '').trim();
+    if (!title && !path) {
       return { season: null, episode: null, match: false, label: null };
     }
 
@@ -27,6 +50,10 @@ const EpisodeMeta = {
     for (const re of patterns) {
       const m = base.match(re);
       if (!m) continue;
+      if (re.source.includes('(\\d{1,3})(?:[\\s._-]|$)')) {
+        const prefix = base.slice(0, m.index).toLowerCase();
+        if (/\bseason[\s._-]*$/i.test(prefix)) continue;
+      }
       if (m.length >= 3) {
         season = parseInt(m[1], 10);
         episode = parseInt(m[2], 10);
@@ -50,12 +77,24 @@ const EpisodeMeta = {
       }
     }
 
+    if (season == null) {
+      const hinted = this.extractSeasonHint(base, path);
+      if (hinted != null) {
+        season = hinted;
+        if (match || episode != null) match = true;
+      }
+    }
+
     let label = null;
     if (match) {
       if (season != null && episode != null) {
         label = `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
       } else if (episode != null) {
-        label = `Ep ${episode}`;
+        label = season != null
+          ? `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+          : `Ep ${episode}`;
+      } else if (season != null) {
+        label = `S${String(season).padStart(2, '0')}`;
       }
     }
 
@@ -70,8 +109,8 @@ const EpisodeMeta = {
     return [...items].sort((a, b) => {
       const ta = a.display_name || a.name || '';
       const tb = b.display_name || b.name || '';
-      const ma = this.parse(ta);
-      const mb = this.parse(tb);
+      const ma = this.parse(ta, a.parent_path || '');
+      const mb = this.parse(tb, b.parent_path || '');
       const ka = [ma.season ?? 9999, ma.episode ?? 9999, ta.toLowerCase()];
       const kb = [mb.season ?? 9999, mb.episode ?? 9999, tb.toLowerCase()];
       for (let i = 0; i < 3; i += 1) {

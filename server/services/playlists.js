@@ -149,7 +149,7 @@ function sortFileRows(rows, sortBy, sortOrder) {
   const sorted = [...rows];
   if (sortBy === 'smart') {
     sorted.sort((a, b) => {
-      const cmp = episodeMeta.compareEpisodeTitles(a.name, b.name);
+      const cmp = episodeMeta.compareEpisodeTitles(a.name, b.name, a.parent_path, b.parent_path);
       return sortOrder === 'DESC' ? -cmp : cmp;
     });
     return sorted;
@@ -167,14 +167,14 @@ function listFilesForFolderLink(userId, folder, includeSubfolders) {
   if (includeSubfolders) {
     const childPrefix = folder.path === '/' ? '/%' : `${folder.path}/%`;
     return db.prepare(`
-      SELECT id, name, created_at FROM files
+      SELECT id, name, parent_path, created_at FROM files
       WHERE user_id = ? AND is_deleted = 0 AND is_folder = 0
         AND (upload_status IS NULL OR upload_status = 'ready')
         AND (parent_path = ? OR path LIKE ?)
     `).all(userId, folder.path, childPrefix);
   }
   return db.prepare(`
-    SELECT id, name, created_at FROM files
+    SELECT id, name, parent_path, created_at FROM files
     WHERE user_id = ? AND parent_path = ? AND is_deleted = 0 AND is_folder = 0
       AND (upload_status IS NULL OR upload_status = 'ready')
   `).all(userId, folder.path);
