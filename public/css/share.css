@@ -333,6 +333,92 @@ body.share-cinema-active .share-cinema-stage {
   box-sizing: border-box;
 }
 
+.share-cinema-stage.share-stage-user-sized {
+  transition: none;
+}
+
+.share-cinema-stage.share-stage-resizing {
+  transition: none !important;
+}
+
+body.share-stage-resizing-active {
+  user-select: none;
+}
+
+body.share-stage-resizing-active[data-share-resize-axis="e"],
+body.share-stage-resizing-active[data-share-resize-axis="e"] * {
+  cursor: ew-resize !important;
+}
+
+body.share-stage-resizing-active[data-share-resize-axis="s"],
+body.share-stage-resizing-active[data-share-resize-axis="s"] * {
+  cursor: ns-resize !important;
+}
+
+body.share-stage-resizing-active[data-share-resize-axis="se"],
+body.share-stage-resizing-active[data-share-resize-axis="se"] * {
+  cursor: nwse-resize !important;
+}
+
+.share-resize-overlay {
+  position: fixed;
+  z-index: 10000;
+  touch-action: none;
+  pointer-events: auto;
+  box-sizing: border-box;
+  background: rgba(74, 158, 255, 0.06);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.share-resize-overlay-e {
+  cursor: ew-resize;
+  border-right: 2px solid transparent;
+}
+
+.share-resize-overlay-s,
+.share-resize-overlay-ps {
+  cursor: ns-resize;
+  border-bottom: 2px solid transparent;
+}
+
+.share-resize-overlay-se {
+  cursor: nwse-resize;
+}
+
+.share-resize-overlay-e:hover,
+.share-resize-overlay-s:hover,
+.share-resize-overlay-ps:hover,
+.share-resize-overlay-se:hover {
+  background: rgba(74, 158, 255, 0.14);
+  box-shadow: 0 0 12px rgba(74, 158, 255, 0.35);
+}
+
+.share-resize-overlay-e:hover {
+  border-right-color: rgba(74, 158, 255, 0.85);
+}
+
+.share-resize-overlay-s:hover,
+.share-resize-overlay-ps:hover {
+  border-bottom-color: rgba(74, 158, 255, 0.85);
+}
+
+.share-resize-overlay-se::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid rgba(255, 255, 255, 0.35);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 0 0 3px 0;
+  pointer-events: none;
+}
+
+.share-resize-overlay-se:hover::after {
+  border-color: rgba(74, 158, 255, 0.95);
+}
+
 .share-viewer-stage {
   width: 100%;
   min-height: 200px;

@@ -1,5 +1,5 @@
-const CACHE = 'vault-share-v7';
-const LEGACY_CACHES = ['vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
+const CACHE = 'vault-share-v8';
+const LEGACY_CACHES = ['vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
 
 const STATIC_ASSETS = [
   '/css/explorer.css',

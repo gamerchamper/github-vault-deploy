@@ -340,13 +340,19 @@ const ShareViewer = {
     }
     const dockStats = document.getElementById('share-dock-stats');
     if (dockStats) dockStats.innerHTML = '';
+    if (typeof ShareStageLayout !== 'undefined') ShareStageLayout.onClose();
     this.resetCinemaStage();
     document.body.classList.remove('share-cinema-active', 'share-player-fullscreen');
   },
 
   setCinemaMode(active) {
     document.body.classList.toggle('share-cinema-active', !!active);
-    if (!active) this.resetCinemaStage();
+    if (!active) {
+      if (typeof ShareStageLayout !== 'undefined') ShareStageLayout.onClose();
+      this.resetCinemaStage();
+    } else if (typeof ShareStageLayout !== 'undefined') {
+      ShareStageLayout.onOpen();
+    }
   },
 
   setPlayerFullscreen(active) {
@@ -379,6 +385,10 @@ const ShareViewer = {
 
   fitCinemaStage(video) {
     if (!video || !document.body.classList.contains('share-cinema-active')) return;
+    if (typeof ShareStageLayout !== 'undefined' && ShareStageLayout.isUserSized()) {
+      ShareStageLayout.applySaved();
+      return;
+    }
     this._fitVideoEl = video;
 
     const apply = () => {
@@ -415,6 +425,7 @@ const ShareViewer = {
       stage.style.setProperty('--share-stage-height', `${Math.round(h)}px`);
       stage.classList.toggle('share-stage-capped', capped);
       stage.classList.add('share-stage-fitted');
+      if (typeof ShareStageLayout !== 'undefined') ShareStageLayout.syncOverlays();
     };
 
     const runFit = () => apply();
