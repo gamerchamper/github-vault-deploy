@@ -67,8 +67,12 @@
         document.title = playlist.title + ' — GitHub Vault';
         document.getElementById('share-title').textContent = playlist.title;
         document.getElementById('share-desc').textContent = playlist.description || '';
-        document.getElementById('share-stats').textContent =
-          `${playlist.item_count || 0} items`;
+        document.getElementById('share-stats').textContent = (() => {
+          const parts = [`${playlist.item_count || 0} items`];
+          const totalDur = (playlist.items || []).reduce((sum, f) => sum + (Number(f.hls_duration_sec) || 0), 0);
+          if (totalDur > 0) parts.push(PlaylistQueue.formatHlsDuration(totalDur));
+          return parts.join(' · ');
+        })();
         const cover = document.getElementById('share-cover');
         if (playlist.cover_thumbnail_id) {
           cover.innerHTML = `<img src="/api/public/playlist/${token}/thumbnail?file=${playlist.cover_thumbnail_id}" alt="">`;
@@ -98,7 +102,7 @@
           <div class="playlist-queue-thumb">${file.has_thumbnail ? `<img src="/api/public/playlist/${token}/thumbnail?file=${file.id}" alt="">` : (i + 1)}</div>
           <div class="playlist-queue-body">
             <span class="playlist-queue-name">${file.name}</span>
-            <span class="playlist-queue-meta">${formatSize(file.size)}</span>
+            <span class="playlist-queue-meta">${PlaylistQueue.itemMetaParts(file, i).join(' · ')}</span>
           </div>`;
         btn.onclick = () => playItem(file.id);
         list.appendChild(btn);

@@ -365,4 +365,30 @@ describe('playlists routes', function () {
     expect(pl.body.items[0].hls_duration_sec).to.be.closeTo(10.5, 0.01);
     expect(pl.body.items[0].hls_segment_count).to.equal(2);
   });
+
+  it('includes hls duration on public playlist share', async function () {
+    const repo = seedTestRepo(db, user.id, { full_name: 'test/vault-share-hls-repo', name: 'vault-share-hls-repo' });
+    const hlsFile = seedTestFile(db, user.id, {
+      id: 'pl-share-hls-1',
+      name: 'shared-stream.mp4',
+      has_hls: 1,
+    });
+    db.prepare(`
+      INSERT INTO hls_segments (file_id, segment_index, duration, repo_id, repo_path, sha, size)
+      VALUES (?, 0, 6.0, ?, 'path/0.ts', 'sha0', 100),
+             (?, 1, 4.5, ?, 'path/1.ts', 'sha1', 100)
+    `).run(hlsFile.id, repo.id, hlsFile.id, repo.id);
+
+    const created = await request(app).post('/api/playlists').send({ title: 'Shared HLS playlist' });
+    const id = created.body.id;
+    await request(app).post(`/api/playlists/${id}/items`).send({ file_ids: [hlsFile.id] });
+    const shared = await request(app).post(`/api/playlists/${id}/share`);
+    const token = shared.body.token;
+
+    db.prepare('UPDATE playlists SET visibility = ? WHERE id = ?').run('public', id);
+
+    const publicPlaylist = playlistsService.getByShareToken(token);
+    expect(publicPlaylist.items[0].hls_duration_sec).to.be.closeTo(10.5, 0.01);
+    expect(publicPlaylist.total_hls_duration_sec).to.be.closeTo(10.5, 0.01);
+  });
 });

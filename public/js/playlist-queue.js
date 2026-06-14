@@ -79,6 +79,35 @@ const PlaylistQueue = {
     return `${this.itemLabel(file)} ${file.name || ''}`.toLowerCase();
   },
 
+  formatHlsDuration(seconds) {
+    if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return '';
+    const total = Math.round(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  },
+
+  itemDurationLabel(file) {
+    const dur = Number(file?.hls_duration_sec) || 0;
+    if (dur > 0) return this.formatHlsDuration(dur);
+    return '';
+  },
+
+  totalHlsDuration(items = this.items) {
+    return (items || []).reduce((sum, file) => sum + (Number(file.hls_duration_sec) || 0), 0);
+  },
+
+  itemMetaParts(file, index) {
+    const parts = [`${index + 1}`];
+    const duration = this.itemDurationLabel(file);
+    if (duration) parts.push(duration);
+    else if (Number(file?.has_hls) > 0 || Number(file?.hls_segment_count) > 0) parts.push('HLS');
+    if (file?.size) parts.push(formatSize(file.size));
+    return parts;
+  },
+
   setProgress(fileId, data) {
     this.progressMap.set(fileId, { ...this.getProgress(fileId), ...data });
   },

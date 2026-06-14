@@ -100,6 +100,8 @@ const SharePlaylist = {
     if (title) title.textContent = pl.title || 'Playlist';
     if (meta) {
       const parts = [`${pl.items?.length || 0} items`];
+      const totalDur = PlaylistQueue.totalHlsDuration(pl.items);
+      if (totalDur > 0) parts.push(PlaylistQueue.formatHlsDuration(totalDur));
       if (pl.total_bytes) parts.push(formatSize(pl.total_bytes));
       meta.textContent = parts.join(' · ');
     }
@@ -208,10 +210,7 @@ const SharePlaylist = {
       name.textContent = PlaylistQueue.itemLabel(file);
       const meta = document.createElement('span');
       meta.className = 'playlist-queue-meta';
-      const metaParts = [`${idx + 1}`];
-      if (file.has_hls) metaParts.push('HLS');
-      metaParts.push(formatSize(file.size));
-      meta.textContent = metaParts.join(' · ');
+      meta.textContent = PlaylistQueue.itemMetaParts(file, idx).join(' · ');
       body.append(name, meta);
 
       if (file.display_name?.trim() && file.display_name.trim() !== file.name) {

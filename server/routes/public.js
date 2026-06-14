@@ -564,6 +564,9 @@ router.get('/playlist/:token/info', async (req, res) => {
     const hlsSegCount = file.has_hls
       ? (db.prepare('SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?').get(file.id)?.n || 0)
       : 0;
+    const hlsDuration = file.has_hls
+      ? (db.prepare('SELECT COALESCE(SUM(duration), 0) as total FROM hls_segments WHERE file_id = ?').get(file.id)?.total || 0)
+      : 0;
     res.json({
       id: file.id,
       name: file.name,
@@ -577,6 +580,7 @@ router.get('/playlist/:token/info', async (req, res) => {
       client_stream: clientStream,
       hls_available: !!file.has_hls,
       hls_segment_count: hlsSegCount,
+      hls_duration_sec: Number(hlsDuration) || 0,
       ...sharePublisherMeta(file.user_id, file),
     });
   } catch (err) {

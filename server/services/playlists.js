@@ -734,6 +734,10 @@ function getByShareToken(token, req = null) {
   `).all(row.id).map(fileRowToItem);
 
   playlist.items = items;
+  playlist.total_hls_duration_sec = items.reduce(
+    (sum, item) => sum + (Number(item.hls_duration_sec) || 0),
+    0
+  );
   return playlist;
 }
 
