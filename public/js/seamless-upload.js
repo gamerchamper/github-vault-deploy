@@ -118,7 +118,7 @@ const SeamlessUpload = {
     });
 
     try {
-      await AdaptiveConcurrency.mapAdaptive(partIndices, pool, async (partIndex) => {
+      await AdaptiveConcurrency.map(partIndices, pool, async (partIndex) => {
         const start = partIndex * partSize;
         const end = Math.min(start + partSize, session.file.size);
         const slice = session.file.slice(start, end);
@@ -128,6 +128,7 @@ const SeamlessUpload = {
           slice,
           init.jobId
         );
+        pool.recordBytes(slice.size);
         if (onProgress) {
           onProgress({
             id: init.jobId,
