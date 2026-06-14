@@ -211,6 +211,7 @@ const ShareViewer = {
 
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
       this.initVideoPlyr(video);
+      this.syncDurationStat(video);
       video.play().catch(() => {});
     });
     this.hls.on(Hls.Events.FRAG_BUFFERED, () => {
@@ -614,9 +615,7 @@ const ShareViewer = {
       });
       this.startClientProgressUI(info);
       await ShareClientStream.playMedia(video, videoWrap);
-      if (Number.isFinite(video.duration) && video.duration > 0) {
-        this.setStat('share-stat-duration', this.formatDuration(video.duration));
-      }
+      this.syncDurationStat(video);
       this.onMediaReady(video, videoWrap, loading);
     } catch (err) {
       loading.classList.add('hidden');
@@ -636,9 +635,7 @@ const ShareViewer = {
       });
       this.startClientProgressUI(info);
       await ShareClientStream.playMedia(audio, wrap);
-      if (Number.isFinite(audio.duration) && audio.duration > 0) {
-        this.setStat('share-stat-duration', this.formatDuration(audio.duration));
-      }
+      this.syncDurationStat(audio);
       this.onMediaReady(audio, wrap, loading);
     } catch (err) {
       loading.classList.add('hidden');
@@ -880,6 +877,11 @@ const ShareViewer = {
 
     this.startPlaybackStats(el);
 
+    this.syncDurationStat(el);
+    const syncDuration = () => this.syncDurationStat(el);
+    el.addEventListener('loadedmetadata', syncDuration);
+    el.addEventListener('durationchange', syncDuration);
+
     if (this.currentFile?.id && (this.currentMediaType === 'video' || this.currentMediaType === 'audio')) {
       PlaybackMemory.detach(el);
       PlaybackMemory.track(el, this.currentFile, {
@@ -906,7 +908,6 @@ const ShareViewer = {
     this.setStat('share-stat-progress', '0%');
     this.setStat('share-stat-stage', 'Starting');
     this.setStat('share-stat-speed', '—');
-    this.setStat('share-stat-duration', '—');
     this.setStat('share-stat-buffered', '0%');
     this.setBar(0);
     if (file) {
@@ -914,6 +915,30 @@ const ShareViewer = {
       const segCount = this._hlsMode === 'hls' ? file.hls_segment_count : null;
       this.setStat('share-stat-chunks', segCount ? `0 / ${segCount}` : file.chunk_count ? `0 / ${file.chunk_count}` : '—');
     }
+    this.syncDurationStat();
+  },
+
+  effectiveDuration(el = null) {
+    if (typeof PlaybackMemory !== 'undefined') {
+      return PlaybackMemory.effectiveDuration(this.currentFile, el, this.lastServerStatus);
+    }
+    const hls = Number(this.currentFile?.hls_duration_sec);
+    if (hls > 0) return hls;
+    if (this.lastServerStatus?.duration_sec > 0) return this.lastServerStatus.duration_sec;
+    if (el?.duration && Number.isFinite(el.duration) && el.duration > 0) return el.duration;
+    return 0;
+  },
+
+  syncDurationStat(el = null) {
+    const dur = this.effectiveDuration(el);
+    this.setStat('share-stat-duration', dur > 0 ? this.formatDuration(dur) : '—');
+  },
+
+  mergeFileMeta(info) {
+    if (!info?.id || !this.currentFile || info.id !== this.currentFile.id) return;
+    Object.assign(this.currentFile, info);
+    const media = document.querySelector('#share-viewer .share-video-el, #share-viewer .share-audio-el');
+    this.syncDurationStat(media);
   },
 
   formatDuration(seconds) {
@@ -1020,9 +1045,7 @@ const ShareViewer = {
     const file = this.currentFile;
     if (!file) return;
 
-    if (status.duration_sec) {
-      this.setStat('share-stat-duration', this.formatDuration(status.duration_sec));
-    }
+    this.syncDurationStat();
 
     const video = document.querySelector('#share-viewer .share-video-el');
     const isBuffering = video?.buffered?.length > 0;
@@ -1083,8 +1106,8 @@ const ShareViewer = {
       bufferedBytes = this.lastServerStatus.bytes_ready;
       bufferedPct = Math.round((bufferedBytes / file.size) * 100);
     } else if (el.buffered.length > 0 && file.size > 0) {
-      const knownDuration = this.lastServerStatus?.duration_sec || el.duration;
-      if (knownDuration && isFinite(knownDuration) && knownDuration > 0) {
+      const knownDuration = this.effectiveDuration(el);
+      if (knownDuration > 0) {
         const bufferedEnd = el.buffered.end(el.buffered.length - 1);
         bufferedPct = Math.min(100, Math.round((bufferedEnd / knownDuration) * 100));
         bufferedBytes = Math.round((bufferedPct / 100) * file.size);
@@ -1092,6 +1115,8 @@ const ShareViewer = {
     } else {
       return;
     }
+
+    this.syncDurationStat(el);
 
     this.setStat('share-stat-buffered', `${bufferedPct}%`);
     this.setStat('share-stat-stage', el.paused ? 'Paused' : 'Playing');

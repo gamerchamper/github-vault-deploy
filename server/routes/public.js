@@ -24,6 +24,18 @@ function sharePublisherMeta(userId, file = null) {
   };
 }
 
+function hlsFileMeta(fileId, hasHls) {
+  if (!hasHls) {
+    return { hls_segment_count: 0, hls_duration_sec: 0 };
+  }
+  const hlsSegCount = db.prepare('SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?').get(fileId)?.n || 0;
+  const hlsDuration = db.prepare('SELECT COALESCE(SUM(duration), 0) as total FROM hls_segments WHERE file_id = ?').get(fileId)?.total || 0;
+  return {
+    hls_segment_count: hlsSegCount,
+    hls_duration_sec: Number(hlsDuration) || 0,
+  };
+}
+
 async function clientInfoFromRequest(req) {
   const ip = geoip.getClientIp(req);
   const userAgent = String(req.headers['user-agent'] || '').slice(0, 512);
@@ -80,7 +92,6 @@ router.get('/share/:token/info', async (req, res) => {
     if (shared.is_folder && fileId) {
       const file = storage.resolveSharedFile(req.params.token, fileId);
       if (!file) return res.status(404).json({ error: 'Share not found' });
-      const hlsSegCount = file.has_hls ? (db.prepare('SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?').get(file.id)?.n || 0) : 0;
       return res.json({
         id: file.id,
         name: file.name,
@@ -92,7 +103,7 @@ router.get('/share/:token/info', async (req, res) => {
         parent_folder: shared.name,
         client_stream: clientStream,
         hls_available: !!(file.has_hls),
-        hls_segment_count: hlsSegCount,
+        ...hlsFileMeta(file.id, file.has_hls),
         ...sharePublisherMeta(shared.user_id, file),
       });
     }
@@ -114,7 +125,6 @@ router.get('/share/:token/info', async (req, res) => {
     }
 
     const sharedHasHls = !!(shared.has_hls);
-    const hlsSegCount = sharedHasHls ? (db.prepare('SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?').get(shared.id)?.n || 0) : 0;
     res.json({
       id: shared.id,
       name: shared.name,
@@ -125,7 +135,7 @@ router.get('/share/:token/info', async (req, res) => {
       is_folder: false,
       client_stream: clientStream,
       hls_available: sharedHasHls,
-      hls_segment_count: hlsSegCount,
+      ...hlsFileMeta(shared.id, sharedHasHls),
       ...sharePublisherMeta(shared.user_id, shared),
     });
   } catch (err) {

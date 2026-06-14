@@ -164,7 +164,7 @@
   <script src="/js/chunk-blocks.js?v=1.0.2"></script>
   <script src="/js/download-manager.js?v=1.0.0"></script>
   <script src="/js/share-stage-layout.js?v=1.1.5"></script>
-  <script src="/js/share-viewer.js?v=1.0.6"></script>
+  <script src="/js/share-viewer.js?v=1.0.7"></script>
   <script src="/js/share-presence.js?v=1.0.0"></script>
   <script src="/js/share-shoutbox.js?v=1.0.1"></script>
   <script src="/js/share-playlist.js?v=1.0.6"></script>
@@ -463,6 +463,7 @@
           .then((manifest) => {
             if (manifest?.hls_playlist_url) info.hls_playlist_url = manifest.hls_playlist_url;
             if (manifest?.hls_segment_count != null) info.hls_segment_count = manifest.hls_segment_count;
+            if (manifest?.hls_duration_sec != null) info.hls_duration_sec = manifest.hls_duration_sec;
             shareCurrentFile = info;
             ShareViewer.mount(info, token);
             ShareShoutbox.init(token, info.id);
@@ -504,8 +505,10 @@
           .then((manifest) => {
             if (manifest?.hls_playlist_url) info.hls_playlist_url = manifest.hls_playlist_url;
             if (manifest?.hls_segment_count != null) info.hls_segment_count = manifest.hls_segment_count;
+            if (manifest?.hls_duration_sec != null) info.hls_duration_sec = manifest.hls_duration_sec;
             document.getElementById('share-dl-hls').classList.remove('hidden');
             document.getElementById('share-dl-hls-github').classList.remove('hidden');
+            ShareViewer.mergeFileMeta(info);
           })
           .catch(() => {
             document.getElementById('share-dl-hls').classList.remove('hidden');

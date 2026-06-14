@@ -21,8 +21,14 @@ function jobKey(userId, fileId) {
 }
 
 function attachDuration(status, userId, fileId) {
-  const durationSec = streamCache.getDurationSec(userId, fileId)
+  let durationSec = streamCache.getDurationSec(userId, fileId)
     || cache.get(userId, fileId)?.meta?.duration_sec;
+  if (!durationSec) {
+    const row = db.prepare(
+      'SELECT COALESCE(SUM(duration), 0) AS total FROM hls_segments WHERE file_id = ?'
+    ).get(fileId);
+    if (row?.total > 0) durationSec = row.total;
+  }
   if (durationSec) status.duration_sec = durationSec;
   return status;
 }
