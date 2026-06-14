@@ -911,6 +911,7 @@ const Viewer = {
     this.hidePanels();
     document.getElementById('media-viewer').classList.add('hidden');
     document.getElementById('media-viewer')?.classList.remove('viewer-has-playlist');
+    if (typeof ViewerPanelLayout !== 'undefined') ViewerPanelLayout.onViewerClose();
     PlaylistPlayer?.hide?.();
     this.activePlaylist = null;
     this.currentFile = null;

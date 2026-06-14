@@ -1,22 +1,38 @@
 /**
- * Draggable window-style resize for the media viewer panel (right + bottom edges).
+ * Window-style resize for the media viewer panel (right + bottom edges).
  * Persists size/position across media switches via localStorage.
  */
 const ViewerPanelLayout = {
   STORAGE_KEY: 'vault-viewer-panel-layout',
   MIN_W: 380,
   MIN_H: 260,
-  HANDLE_SIZE: 10,
+  EDGE_PX: 14,
   viewer: null,
   panel: null,
-  drag: null,
+  activeAxis: null,
+  boundDocMove: null,
+  boundDocDown: null,
+  listenersAttached: false,
 
   init() {
+    this.boundDocMove = (e) => this.onDocumentMove(e);
+    this.boundDocDown = (e) => this.onDocumentDown(e);
+
     this.viewer = document.getElementById('media-viewer');
     this.panel = this.viewer?.querySelector('.viewer-panel');
     if (!this.panel || this.panel.dataset.layoutReady) return;
     this.panel.dataset.layoutReady = '1';
-    this.ensureHandles();
+
+    this.panel.querySelector('.viewer-resize-se')?.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.resetLayout();
+      if (typeof Viewer !== 'undefined' && Viewer.currentMediaType === 'video') {
+        const video = document.getElementById('viewer-video');
+        if (video) Viewer.fitModalToVideo(video);
+      }
+    });
+
     window.addEventListener('resize', () => this.onWindowResize());
   },
 
@@ -54,7 +70,14 @@ const ViewerPanelLayout = {
     let top = layout.top ?? Math.round((window.innerHeight - height) / 2);
     left = Math.min(Math.max(margin, left), window.innerWidth - width - margin);
     top = Math.min(Math.max(margin, top), window.innerHeight - height - margin);
-    return { ...layout, width: Math.round(width), height: Math.round(height), left: Math.round(left), top: Math.round(top), userSized: true };
+    return {
+      ...layout,
+      width: Math.round(width),
+      height: Math.round(height),
+      left: Math.round(left),
+      top: Math.round(top),
+      userSized: true,
+    };
   },
 
   captureCurrent() {
@@ -104,14 +127,32 @@ const ViewerPanelLayout = {
   },
 
   onViewerOpen() {
+    if (!this.boundDocMove) this.init();
     if (!this.panel) this.init();
-    if (!this.panel) return;
+    if (!this.panel || !this.boundDocMove) return;
+    this.viewer?.classList.add('viewer-resize-enabled');
+    if (!this.listenersAttached) {
+      document.addEventListener('mousemove', this.boundDocMove);
+      document.addEventListener('mousedown', this.boundDocDown);
+      this.listenersAttached = true;
+    }
+
     const saved = this.read();
     if (saved?.userSized) {
       this.apply(saved);
     } else {
       this.clearInlineLayout();
     }
+  },
+
+  onViewerClose() {
+    this.viewer?.classList.remove('viewer-resize-enabled');
+    if (this.listenersAttached) {
+      document.removeEventListener('mousemove', this.boundDocMove);
+      document.removeEventListener('mousedown', this.boundDocDown);
+      this.listenersAttached = false;
+    }
+    this.clearCursor();
   },
 
   applySaved() {
@@ -125,35 +166,89 @@ const ViewerPanelLayout = {
     if (next) this.save(next);
   },
 
-  ensureHandles() {
-    for (const axis of ['e', 's', 'se']) {
-      const handle = document.createElement('div');
-      handle.className = `viewer-resize-handle viewer-resize-${axis}`;
-      handle.dataset.axis = axis;
-      handle.title = axis === 'se' ? 'Drag to resize · double-click to reset' : 'Drag to resize';
-      handle.addEventListener('pointerdown', (e) => this.onPointerDown(e, axis));
-      handle.addEventListener('dblclick', (e) => {
-        if (axis !== 'se') return;
-        e.preventDefault();
-        e.stopPropagation();
-        this.resetLayout();
-        if (typeof Viewer !== 'undefined' && Viewer.currentMediaType === 'video') {
-          const video = document.getElementById('viewer-video');
-          if (video) Viewer.fitModalToVideo(video);
-        }
-      });
-      this.panel.appendChild(handle);
-    }
+  isViewerOpen() {
+    return this.viewer && !this.viewer.classList.contains('hidden');
   },
 
-  onPointerDown(e, axis) {
-    if (e.button !== 0) return;
+  hitTest(e) {
+    if (!this.panel) return null;
+    const panelRect = this.panel.getBoundingClientRect();
+    const edge = this.EDGE_PX;
+    const x = e.clientX;
+    const y = e.clientY;
+
+    if (x < panelRect.left - 2 || x > panelRect.right + 2 || y < panelRect.top || y > panelRect.bottom + 2) {
+      return null;
+    }
+
+    const nearRight = x >= panelRect.right - edge;
+    let nearBottom = y >= panelRect.bottom - edge;
+
+    const playerWrap = this.panel.querySelector('.viewer-player-wrap:not(.hidden)');
+    if (playerWrap) {
+      const playerRect = playerWrap.getBoundingClientRect();
+      if (y >= playerRect.bottom - 10 && y <= playerRect.bottom + 8
+        && x >= playerRect.left && x <= playerRect.right) {
+        nearBottom = true;
+      }
+    }
+
+    const mainColumn = this.panel.querySelector('.viewer-main-column');
+    if (!nearBottom && mainColumn) {
+      const mainRect = mainColumn.getBoundingClientRect();
+      if (y >= mainRect.bottom - edge && y <= mainRect.bottom + 4
+        && x >= mainRect.left && x <= mainRect.right) {
+        nearBottom = true;
+      }
+    }
+
+    if (nearRight && nearBottom) return 'se';
+    if (nearRight) return 'e';
+    if (nearBottom) return 's';
+    return null;
+  },
+
+  cursorForAxis(axis) {
+    if (axis === 'e') return 'ew-resize';
+    if (axis === 's') return 'ns-resize';
+    if (axis === 'se') return 'nwse-resize';
+    return '';
+  },
+
+  setCursor(axis) {
+    document.body.classList.remove('viewer-cursor-ew', 'viewer-cursor-ns', 'viewer-cursor-nwse');
+    if (axis === 'e') document.body.classList.add('viewer-cursor-ew');
+    else if (axis === 's') document.body.classList.add('viewer-cursor-ns');
+    else if (axis === 'se') document.body.classList.add('viewer-cursor-nwse');
+    this.panel?.classList.toggle('viewer-panel-edge-e', axis === 'e' || axis === 'se');
+    this.panel?.classList.toggle('viewer-panel-edge-s', axis === 's' || axis === 'se');
+    this.panel?.classList.toggle('viewer-panel-edge-se', axis === 'se');
+  },
+
+  clearCursor() {
+    if (this.activeAxis) return;
+    document.body.classList.remove('viewer-cursor-ew', 'viewer-cursor-ns', 'viewer-cursor-nwse');
+    this.panel?.classList.remove('viewer-panel-edge-e', 'viewer-panel-edge-s', 'viewer-panel-edge-se');
+  },
+
+  onDocumentMove(e) {
+    if (!this.isViewerOpen() || this.activeAxis) return;
+    const axis = this.hitTest(e);
+    if (axis) this.setCursor(axis);
+    else this.clearCursor();
+  },
+
+  onDocumentDown(e) {
+    if (!this.isViewerOpen() || e.button !== 0 || this.activeAxis) return;
+    const axis = this.hitTest(e);
+    if (!axis) return;
+
     e.preventDefault();
     e.stopPropagation();
+    this.startResize(e, axis);
+  },
 
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-
+  startResize(e, axis) {
     let layout = this.read()?.userSized ? this.read() : this.captureCurrent();
     layout = this.apply(layout);
 
@@ -164,9 +259,11 @@ const ViewerPanelLayout = {
     const startL = layout.left;
     const startT = layout.top;
 
+    this.activeAxis = axis;
     this.panel.classList.add('viewer-panel-resizing');
     document.body.classList.add('viewer-panel-resizing-active');
     document.body.dataset.viewerResizeAxis = axis;
+    this.setCursor(axis);
 
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
@@ -184,20 +281,25 @@ const ViewerPanelLayout = {
       });
     };
 
-    const onUp = (ev) => {
-      handle.releasePointerCapture(ev.pointerId);
-      handle.removeEventListener('pointermove', onMove);
-      handle.removeEventListener('pointerup', onUp);
-      handle.removeEventListener('pointercancel', onUp);
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      this.activeAxis = null;
       this.panel.classList.remove('viewer-panel-resizing');
       document.body.classList.remove('viewer-panel-resizing-active');
       delete document.body.dataset.viewerResizeAxis;
+      this.clearCursor();
       const finalLayout = this.captureCurrent();
       this.save(finalLayout);
     };
 
-    handle.addEventListener('pointermove', onMove);
-    handle.addEventListener('pointerup', onUp);
-    handle.addEventListener('pointercancel', onUp);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   },
 };
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => ViewerPanelLayout.init());
+} else {
+  ViewerPanelLayout.init();
+}
