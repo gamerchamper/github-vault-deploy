@@ -1,6 +1,30 @@
 const MediaPlayer = {
   CONTROLS_AUDIO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings'],
-  CONTROLS_VIDEO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
+  CONTROLS_VIDEO: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'airplay', 'fullscreen'],
+
+  /** Prepare a <video> for browser-native enhancement (Edge VSR, RTX VSR, HW decode). */
+  configureVideoElement(video, options = {}) {
+    if (!video || video.tagName !== 'VIDEO') return video;
+
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.playsInline = true;
+    video.setAttribute('x-webkit-airplay', 'allow');
+    video.disableRemotePlayback = false;
+    if (!video.getAttribute('preload')) video.setAttribute('preload', 'auto');
+    video.classList.add('vault-video-enhanced');
+
+    if ('disablePictureInPicture' in video) {
+      video.disablePictureInPicture = false;
+    }
+
+    const wrap = video.closest('.viewer-player-wrap, .share-video-player, .details-preview-media');
+    if (options.enhancerWrap !== false && wrap) {
+      wrap.classList.add('vault-video-enhanced-wrap');
+    }
+
+    return video;
+  },
 
   plyrOptions(isAudio) {
     const options = {
@@ -9,6 +33,7 @@ const MediaPlayer = {
       settings: ['speed'],
     };
     if (!isAudio) {
+      options.playsinline = true;
       options.fullscreen = { enabled: true, iosNative: true, fallback: true };
     }
     return options;
@@ -16,7 +41,14 @@ const MediaPlayer = {
 
   createPlyr(el, isAudio, hooks = {}) {
     if (typeof Plyr === 'undefined') return null;
+    if (!isAudio) this.configureVideoElement(el);
     const plyr = new Plyr(el, this.plyrOptions(isAudio));
+    if (!isAudio) {
+      const media = plyr.media || el;
+      if (media && media !== el) this.configureVideoElement(media);
+      const wrapper = plyr.elements?.container?.querySelector?.('.plyr__video-wrapper');
+      if (wrapper) wrapper.classList.add('vault-video-enhanced-wrap');
+    }
     if (hooks.onProgress) plyr.on('progress', hooks.onProgress);
     if (hooks.onTimeupdate) plyr.on('timeupdate', hooks.onTimeupdate);
     if (hooks.onPlay) plyr.on('play', hooks.onPlay);
@@ -149,6 +181,7 @@ const MediaPlayer = {
   },
 
   attachStreamPlayback(el, hooks = {}) {
+    if (el?.tagName === 'VIDEO') this.configureVideoElement(el);
     el.preload = 'auto';
     let ready = false;
     const handlers = [];
@@ -198,8 +231,8 @@ const MediaPlayer = {
 
   buildVideoPlayerHtml() {
     return `
-      <div class="viewer-player-wrap share-video-player">
-        <video class="share-video-el" playsinline webkit-playsinline preload="auto"></video>
+      <div class="viewer-player-wrap share-video-player vault-video-enhanced-wrap">
+        <video class="share-video-el vault-video-enhanced" playsinline webkit-playsinline preload="auto" x-webkit-airplay="allow"></video>
       </div>
     `;
   },

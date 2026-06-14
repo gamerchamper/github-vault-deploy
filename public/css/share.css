@@ -606,6 +606,27 @@ body.share-cinema-active .share-media-area-full {
 }
 
 .share-video-player { padding: var(--space-sm) 0; width: 100%; }
+
+/* Browser video enhancement compatibility (Edge VSR, RTX VSR, Safari HW decode) */
+.share-video-player .vault-video-enhanced,
+.share-video-player .plyr__video-wrapper .vault-video-enhanced,
+body.share-cinema-active .share-video-player .plyr__video-wrapper video,
+body.share-cinema-active .share-video-player .share-video-el {
+  transform: none;
+  filter: none;
+  opacity: 1;
+  -webkit-backface-visibility: visible;
+  backface-visibility: visible;
+}
+
+.vault-video-enhanced-wrap .plyr__video-wrapper,
+.share-video-player.vault-video-enhanced-wrap .plyr__video-wrapper {
+  filter: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transform: none;
+}
+
 .share-video-player .plyr--video { max-height: none; width: 100%; }
 .share-video-player .plyr__video-wrapper {
   height: auto !important;

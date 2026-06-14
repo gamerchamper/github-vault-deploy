@@ -102,6 +102,28 @@
   max-height: calc(100vh - 220px);
 }
 
+/* Browser video enhancement compatibility (Edge VSR, RTX VSR, Safari HW decode) */
+.vault-video-enhanced,
+.plyr__video-wrapper .vault-video-enhanced {
+  transform: none;
+  filter: none;
+  opacity: 1;
+  -webkit-backface-visibility: visible;
+  backface-visibility: visible;
+}
+
+.vault-video-enhanced-wrap .plyr__video-wrapper {
+  filter: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transform: none;
+}
+
+.vault-video-enhanced-wrap .plyr__video-wrapper video {
+  transform: none !important;
+  filter: none !important;
+}
+
 .viewer-audio-player {
   max-width: 720px;
   margin: 0 auto;
