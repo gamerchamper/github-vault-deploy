@@ -46,12 +46,17 @@ const MediaPlayer = {
     }
   },
 
-  applyBoostVolume(media, graph, level) {
+  resumeVolumeGraph(graph) {
+    if (!graph?.ctx || graph.ctx.state !== 'suspended') return;
+    graph.ctx.resume().catch(() => {});
+  },
+
+  applyBoostVolume(media, graph, level, { resume = false } = {}) {
     const v = Math.max(0, Math.min(this.VOLUME_MAX, Number(level) || 0));
     if (graph) {
       media.volume = 1;
-      graph.gain.gain.value = v;
-      if (graph.ctx.state === 'suspended') graph.ctx.resume().catch(() => {});
+      graph.gain.gain.value = media.muted ? 0 : v;
+      if (resume) this.resumeVolumeGraph(graph);
     } else {
       media.volume = Math.min(1, v);
     }
@@ -106,10 +111,16 @@ const MediaPlayer = {
       input.max = String(max);
       input.step = '0.01';
 
-      const graph = this.ensureVolumeGraph(media);
+      let graph = null;
       const tooltip = this.ensureVolumeTooltip(input);
       let level = this.readStoredVolume();
       let dragging = false;
+
+      const bindGraph = ({ resume = false } = {}) => {
+        if (!graph) graph = this.ensureVolumeGraph(media);
+        if (graph && resume) this.resumeVolumeGraph(graph);
+        return graph;
+      };
 
       const showTooltip = () => {
         if (!tooltip) return;
@@ -122,8 +133,10 @@ const MediaPlayer = {
         tooltip?.classList.remove('plyr__tooltip--visible');
       };
 
-      const setVolume = (value, { persist = true, showTip = false } = {}) => {
-        level = this.applyBoostVolume(media, graph, value);
+      const setVolume = (value, { persist = true, showTip = false, resume = false, forceGraph = false } = {}) => {
+        const needsGraph = forceGraph || resume || value > 1;
+        const g = needsGraph ? bindGraph({ resume }) : graph;
+        level = this.applyBoostVolume(media, g, value, { resume });
         this.syncBoostVolumeUi(input, level, tooltip);
         if (persist) this.writeStoredVolume(level);
         if (showTip) showTooltip();
@@ -131,18 +144,24 @@ const MediaPlayer = {
 
       setVolume(level, { persist: false });
 
+      plyr.on('play', () => {
+        bindGraph({ resume: true });
+        setVolume(level, { persist: false, resume: true, forceGraph: true });
+      });
+
       input.addEventListener('input', (e) => {
         e.stopImmediatePropagation();
-        setVolume(parseFloat(input.value), { showTip: true });
+        setVolume(parseFloat(input.value), { showTip: true, resume: true, forceGraph: true });
       }, true);
 
       input.addEventListener('change', (e) => {
         e.stopImmediatePropagation();
-        setVolume(parseFloat(input.value), { showTip: true });
+        setVolume(parseFloat(input.value), { showTip: true, resume: true, forceGraph: true });
       }, true);
 
       input.addEventListener('pointerdown', () => {
         dragging = true;
+        bindGraph({ resume: true });
         showTooltip();
       });
       input.addEventListener('pointerup', () => {
@@ -173,17 +192,18 @@ const MediaPlayer = {
           }
           const fromSlider = parseFloat(input.value);
           if (Number.isFinite(fromSlider) && Math.abs(fromSlider - level) > 0.001) {
-            setVolume(fromSlider, { persist: false });
+            setVolume(fromSlider, { persist: false, resume: !!graph });
             return;
           }
-          setVolume(level, { persist: false });
+          setVolume(level, { persist: false, resume: !!graph });
         });
       });
 
       plyr.on('destroy', () => {
         tooltip?.remove();
+        const active = graph || this.getVolumeGraphs().get(media);
         this.getVolumeGraphs().delete(media);
-        graph?.ctx?.close?.().catch(() => {});
+        active?.ctx?.close?.().catch(() => {});
       });
     };
 
@@ -403,46 +423,56 @@ const MediaPlayer = {
 
   initAudioViz(viz, audioEl, canvas) {
     if (!canvas || typeof AudioContext === 'undefined') return viz;
-
-    if (!viz.source) {
-      try {
-        const graph = this.ensureVolumeGraph(audioEl);
-        const ctx = graph?.ctx || new AudioContext();
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.82;
-
-        if (graph) {
-          graph.gain.disconnect();
-          graph.gain.connect(analyser);
-          analyser.connect(ctx.destination);
-          graph.output = analyser;
-          viz.source = graph.source;
-          viz.gain = graph.gain;
-        } else {
-          const source = ctx.createMediaElementSource(audioEl);
-          source.connect(analyser);
-          analyser.connect(ctx.destination);
-          viz.source = source;
-        }
-
-        viz.ctx = ctx;
-        viz.analyser = analyser;
-        viz.data = new Uint8Array(analyser.frequencyBinCount);
-      } catch {
-        return viz;
-      }
-    }
-
+    viz._audioEl = audioEl;
+    viz._canvas = canvas;
+    viz._wired = false;
     this.drawAudioViz(viz, audioEl, canvas);
     return viz;
   },
 
-  resumeAudioViz(viz, audioEl, canvas) {
-    if (viz.ctx?.state === 'suspended') {
-      viz.ctx.resume().catch(() => {});
+  wireAudioViz(viz, audioEl, canvas) {
+    if (!viz || viz._wired || !audioEl) return viz;
+
+    try {
+      const graph = this.ensureVolumeGraph(audioEl);
+      const ctx = graph?.ctx || new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.82;
+
+      if (graph) {
+        graph.gain.disconnect();
+        graph.gain.connect(analyser);
+        analyser.connect(ctx.destination);
+        graph.output = analyser;
+        viz.source = graph.source;
+        viz.gain = graph.gain;
+      } else {
+        const source = ctx.createMediaElementSource(audioEl);
+        source.connect(analyser);
+        analyser.connect(ctx.destination);
+        viz.source = source;
+      }
+
+      viz.ctx = ctx;
+      viz.analyser = analyser;
+      viz.data = new Uint8Array(analyser.frequencyBinCount);
+      viz._wired = true;
+    } catch {
+      return viz;
     }
-    this.drawAudioViz(viz, audioEl, canvas);
+
+    return viz;
+  },
+
+  resumeAudioViz(viz, audioEl, canvas) {
+    const el = audioEl || viz?._audioEl;
+    const cvs = canvas || viz?._canvas;
+    this.wireAudioViz(viz, el, cvs);
+    const graph = el ? this.getVolumeGraphs().get(el) : null;
+    if (graph) this.resumeVolumeGraph(graph);
+    else if (viz?.ctx?.state === 'suspended') viz.ctx.resume().catch(() => {});
+    this.drawAudioViz(viz, el, cvs);
   },
 
   drawAudioViz(viz, audioEl, canvas) {
