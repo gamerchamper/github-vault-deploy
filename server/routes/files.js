@@ -29,6 +29,7 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 * 1024 } });
 const chunkUpload = multer({ dest: uploadDir, limits: { fileSize: 100 * 1024 * 1024 } });
+const thumbUpload = multer({ dest: uploadDir, limits: { fileSize: 8 * 1024 * 1024, files: 50 } });
 const router = express.Router();
 
 const viewMode = require('../services/view-mode');
@@ -835,7 +836,10 @@ router.post('/hls-convert/:id', async (req, res) => {
     const fileId = req.params.id;
     const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, req.user.id);
     if (!file) return res.status(404).json({ error: 'File not found' });
-    if (file.has_hls) return res.json({ success: true, message: 'Already has HLS' });
+    if (file.has_hls) {
+      const state = hlsConvert.analyzeHlsSegmentState(fileId, file.size);
+      if (state.recoverable) return res.json({ success: true, message: 'Already has HLS' });
+    }
     if (!file.mime_type?.startsWith('video/') && !file.name?.endsWith('.mp4')) {
       return res.status(400).json({ error: 'Only video files can be converted to HLS' });
     }
@@ -1047,6 +1051,132 @@ router.post('/refresh-thumbnail/:id', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/thumbnail/:id/upload', thumbUpload.single('thumbnail'), async (req, res) => {
+  const fileId = req.params.id;
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No image provided' });
+    const buffer = fs.readFileSync(req.file.path);
+    fs.unlinkSync(req.file.path);
+    const result = await storage.setCustomThumbnail(req.user.id, fileId, buffer);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/thumbnail-batch/upload', thumbUpload.array('thumbnails', 50), async (req, res) => {
+  try {
+    let fileIds = [];
+    try {
+      fileIds = JSON.parse(req.body.fileIds || '[]');
+    } catch {
+      return res.status(400).json({ error: 'Invalid fileIds payload' });
+    }
+    if (!Array.isArray(fileIds) || !fileIds.length) {
+      return res.status(400).json({ error: 'No files selected' });
+    }
+    const uploads = req.files || [];
+    if (!uploads.length) return res.status(400).json({ error: 'No images provided' });
+    if (fileIds.length !== uploads.length) {
+      return res.status(400).json({
+        error: `Expected ${fileIds.length} image(s), received ${uploads.length}`,
+      });
+    }
+
+    const names = db.prepare(`
+      SELECT id, name FROM files
+      WHERE user_id = ? AND is_folder = 0 AND id IN (${fileIds.map(() => '?').join(',')})
+    `).all(req.user.id, ...fileIds);
+    const nameById = new Map(names.map((row) => [row.id, row.name]));
+
+    const taskId = uuidv4();
+    const title = fileIds.length === 1
+      ? `Setting thumbnail for ${nameById.get(fileIds[0]) || 'file'}`
+      : `Setting thumbnails (${fileIds.length} files)`;
+
+    tasks.create(req.user.id, {
+      id: taskId,
+      type: 'thumbnail-upload',
+      title,
+      payload: { fileIds, done: 0, total: fileIds.length },
+    });
+
+    (async () => {
+      const errors = [];
+      try {
+        for (let i = 0; i < fileIds.length; i++) {
+          const id = fileIds[i];
+          const label = nameById.get(id) || 'file';
+          tasks.update(taskId, req.user.id, {
+            status: 'processing',
+            phase: 'upload',
+            percent: Math.round((i / fileIds.length) * 100),
+            title: fileIds.length === 1
+              ? `Setting thumbnail for ${label}`
+              : `Setting thumbnail for ${label} (${i + 1}/${fileIds.length})`,
+            done: i,
+            total: fileIds.length,
+            currentName: label,
+            error: null,
+          });
+          const buffer = fs.readFileSync(uploads[i].path);
+          try {
+            await storage.setCustomThumbnail(req.user.id, id, buffer);
+            tasks.appendLog(taskId, req.user.id, `Updated thumbnail for ${label}`);
+          } catch (err) {
+            errors.push(`${label}: ${err.message}`);
+            tasks.appendLog(taskId, req.user.id, `Failed ${label}: ${err.message}`);
+          } finally {
+            try { fs.unlinkSync(uploads[i].path); } catch {}
+          }
+        }
+        if (errors.length) {
+          tasks.update(taskId, req.user.id, {
+            status: 'error',
+            phase: 'upload',
+            percent: 100,
+            done: fileIds.length,
+            total: fileIds.length,
+            error: errors.length === fileIds.length
+              ? errors[0]
+              : `${errors.length} of ${fileIds.length} thumbnail(s) failed`,
+            lastLog: errors.join('; '),
+            resumable: false,
+          });
+        } else {
+          tasks.update(taskId, req.user.id, {
+            status: 'done',
+            phase: 'done',
+            percent: 100,
+            done: fileIds.length,
+            total: fileIds.length,
+            error: null,
+            lastLog: `Updated ${fileIds.length} thumbnail(s)`,
+            resumable: false,
+          });
+        }
+      } catch (err) {
+        for (const upload of uploads) {
+          try { if (upload?.path && fs.existsSync(upload.path)) fs.unlinkSync(upload.path); } catch {}
+        }
+        tasks.update(taskId, req.user.id, {
+          status: 'error',
+          error: err.message,
+          resumable: false,
+        });
+      }
+    })();
+
+    res.json({ taskId, count: fileIds.length });
+  } catch (err) {
+    for (const upload of req.files || []) {
+      try { if (upload?.path && fs.existsSync(upload.path)) fs.unlinkSync(upload.path); } catch {}
+    }
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1432,7 +1562,8 @@ router.get('/favorites', (req, res) => {
   try {
     const rows = db.prepare(`
       SELECT id, name, path, size, mime_type, is_folder, parent_path, chunk_count, has_thumbnail, has_hls, created_at, is_favorite,
-        (SELECT COUNT(*) FROM hls_segments WHERE file_id = files.id) AS hls_segment_count
+        (SELECT COUNT(*) FROM hls_segments WHERE file_id = files.id) AS hls_segment_count,
+        (SELECT COALESCE(SUM(duration), 0) FROM hls_segments WHERE file_id = files.id) AS hls_duration_sec
       FROM files
       WHERE user_id = ? AND (upload_status IS NULL OR upload_status = 'ready') AND is_deleted = 0 AND is_favorite = 1
       ORDER BY name ASC

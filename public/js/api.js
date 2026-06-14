@@ -115,6 +115,32 @@ const API = {
         throw err;
       }
     },
+    uploadThumbnail: async (id, imageFile) => {
+      const form = new FormData();
+      form.append('thumbnail', imageFile, imageFile.name);
+      const res = await fetch(`/api/files/thumbnail/${id}/upload`, {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Thumbnail upload failed' }));
+        throw new Error(err.error || 'Thumbnail upload failed');
+      }
+      return res.json();
+    },
+    uploadThumbnailBatch: async (form) => {
+      const res = await fetch('/api/files/thumbnail-batch/upload', {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Thumbnail batch upload failed' }));
+        throw new Error(err.error || 'Thumbnail batch upload failed');
+      }
+      return res.json();
+    },
     plan: (size, chunkSize, { convertHls = false, mimeType = null, fileName = null } = {}) =>
       API.post('/api/files/plan', { size, chunkSize, convertHls, mimeType, fileName }),
     details: (id) => API.get(`/api/files/details/${id}`),

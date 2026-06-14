@@ -437,6 +437,33 @@ class Explorer {
     }
   }
 
+  formatHlsDuration(seconds) {
+    if (!seconds || !Number.isFinite(seconds)) return '0:00';
+    const total = Math.round(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  hlsFileOverlay(file) {
+    if (!file || file.is_folder || file.pending) return '';
+    const hasHls = Number(file.has_hls) > 0 || Number(file.hls_segment_count) > 0;
+    if (!hasHls) return '';
+    const dur = Number(file.hls_duration_sec) || 0;
+    const durationLabel = this.formatHlsDuration(dur);
+    const broken = this.isHlsIncomplete(file);
+    const brokenClass = broken ? ' hls-duration-broken' : '';
+    const title = broken
+      ? `HLS may be incomplete — ${durationLabel} (${file.hls_segment_count || 0} segment(s))`
+      : `HLS duration ${durationLabel}`;
+    return `<div class="hls-file-badges" title="${this.escape(title)}">`
+      + `<span class="hls-duration-badge${brokenClass}">${durationLabel}</span>`
+      + '<span class="hls-file-badge">m3u8</span>'
+      + '</div>';
+  }
+
   fileItemHtml(file) {
     if (file._trashGroupHeader) {
       const collapsed = this.trashCollapsed.has(file._trashGroupPath);
@@ -453,9 +480,10 @@ class Explorer {
       ? ThumbCache.resolveUrl(file.id, file.thumbVersion)
       : '';
     const hasHls = !isPending && !file.is_folder && (file.has_hls || (file.hls_segment_count > 0));
+    const hlsOverlay = hasHls ? this.hlsFileOverlay(file) : '';
     const iconHtml = !isPending && file.has_thumbnail
-      ? `<div class="file-icon-wrap"><img class="file-thumb" src="${thumbSrc}" alt="" loading="lazy" decoding="async">${hasHls ? '<span class="hls-file-badge">m3u8</span>' : ''}</div>`
-      : `<div class="file-icon-wrap"><div class="file-icon">${isPending ? '⏳' : getFileIcon(file.name, file.is_folder)}</div>${hasHls ? '<span class="hls-file-badge">m3u8</span>' : ''}${file.is_favorite ? '<span class="favorite-badge" title="Favorite">★</span>' : ''}</div>`;
+      ? `<div class="file-icon-wrap"><img class="file-thumb" src="${thumbSrc}" alt="" loading="lazy" decoding="async">${hlsOverlay}</div>`
+      : `<div class="file-icon-wrap"><div class="file-icon">${isPending ? '⏳' : getFileIcon(file.name, file.is_folder)}</div>${hlsOverlay}${file.is_favorite ? '<span class="favorite-badge" title="Favorite">★</span>' : ''}</div>`;
 
     const label = this.displayName(file);
     const title = label !== file.name ? file.name : '';
@@ -598,6 +626,14 @@ class Explorer {
     return file && !file.is_folder ? [file] : [];
   }
 
+  isHlsIncomplete(file) {
+    if (!file || file.is_folder) return false;
+    const count = Number(file.hls_segment_count) || 0;
+    if (!count && !Number(file.has_hls)) return false;
+    const min = Math.max(1, Math.ceil((file.size || 0) / (40 * 1024 * 1024)));
+    return count < min;
+  }
+
   isHlsEligible(file) {
     if (!file || file.is_folder) return false;
     return Number(file.has_hls) > 0 || Number(file.hls_segment_count) > 0;
@@ -606,7 +642,7 @@ class Explorer {
   isVideoEligibleForHls(file) {
     return !!file && !file.is_folder
       && (file.mime_type?.startsWith('video/') || /\.mp4$/i.test(file.name || ''))
-      && Number(file.has_hls) <= 0;
+      && (Number(file.has_hls) <= 0 || this.isHlsIncomplete(file));
   }
 
   hideSelectionActionsMenu() {
@@ -626,6 +662,33 @@ class Explorer {
 
   async verifyHlsSelected() {
     return VerifyHls.runForSelection();
+  }
+
+  async uploadThumbnailSelected() {
+    return ThumbUpload.runForSelection();
+  }
+
+  async refreshThumbnailsSelected() {
+    const targets = this.getSelectedFileObjects();
+    if (!targets.length) {
+      App.toast('Select at least one file', 'error');
+      return;
+    }
+    let done = 0;
+    let failed = 0;
+    for (const file of targets) {
+      try {
+        await this.refreshThumbnail(file, { quiet: true });
+        done += 1;
+      } catch (err) {
+        failed += 1;
+        App.toast(`${file.name}: ${err.message || 'Refresh failed'}`, 'error');
+      }
+    }
+    if (done) {
+      App.toast(`Refreshed ${done} thumbnail(s)${failed ? ` (${failed} failed)` : ''}`, failed ? 'error' : 'success');
+      await this.refresh({ filesOnly: true });
+    }
   }
 
   async hlsConvertSelected() {
@@ -662,6 +725,8 @@ class Explorer {
   runBulkAction(action) {
     this.hideSelectionActionsMenu();
     if (action === 'verify-hls') return this.verifyHlsSelected();
+    if (action === 'upload-thumb') return this.uploadThumbnailSelected();
+    if (action === 'refresh-thumb') return this.refreshThumbnailsSelected();
     if (action === 'verify-file') return this.verifyFileSelected();
     if (action === 'hls-convert') return this.hlsConvertSelected();
     if (action === 'delete') return this.deleteSelected();
@@ -871,6 +936,7 @@ class Explorer {
       file.has_thumbnail ? 1 : 0,
       file.has_hls ? 1 : 0,
       file.hls_segment_count || 0,
+      file.hls_duration_sec || 0,
       file.is_favorite ? 1 : 0,
       file._inPlaylist ? (file._playlistIndex ?? file.position ?? '') : '',
       file._trash ? 1 : 0,
@@ -1080,6 +1146,8 @@ class Explorer {
       const hlsTargets = fileTargets.filter((f) => this.isHlsEligible(f));
       const videoTargets = fileTargets.filter((f) => this.isVideoEligibleForHls(f));
       const verifyHlsItem = actionsMenu.querySelector('[data-bulk-action="verify-hls"]');
+      const uploadThumbItem = actionsMenu.querySelector('[data-bulk-action="upload-thumb"]');
+      const refreshThumbItem = actionsMenu.querySelector('[data-bulk-action="refresh-thumb"]');
       const verifyFileItem = actionsMenu.querySelector('[data-bulk-action="verify-file"]');
       const hlsConvertItem = actionsMenu.querySelector('[data-bulk-action="hls-convert"]');
       const deleteItem = actionsMenu.querySelector('[data-bulk-action="delete"]');
@@ -1089,15 +1157,28 @@ class Explorer {
           ? `Verify HLS (${hlsTargets.length} files)`
           : 'Verify HLS';
       }
+      if (uploadThumbItem) {
+        uploadThumbItem.disabled = fileTargets.length === 0;
+        uploadThumbItem.textContent = fileTargets.length > 1
+          ? `Set custom thumbnails (${fileTargets.length} files)`
+          : 'Set custom thumbnail';
+      }
+      if (refreshThumbItem) {
+        refreshThumbItem.disabled = fileTargets.length === 0;
+        refreshThumbItem.textContent = fileTargets.length > 1
+          ? `Refresh thumbnails (${fileTargets.length} files)`
+          : 'Refresh thumbnail';
+      }
       if (verifyFileItem) {
         verifyFileItem.disabled = fileTargets.length !== 1;
         verifyFileItem.textContent = 'Verify file';
       }
       if (hlsConvertItem) {
         hlsConvertItem.disabled = videoTargets.length === 0;
+        const reconvert = videoTargets.some((f) => this.isHlsIncomplete(f));
         hlsConvertItem.textContent = videoTargets.length > 1
-          ? `Convert to HLS (${videoTargets.length} files)`
-          : 'Convert to HLS';
+          ? (reconvert ? `Re-convert to HLS (${videoTargets.length} files)` : `Convert to HLS (${videoTargets.length} files)`)
+          : (reconvert ? 'Re-convert to HLS' : 'Convert to HLS');
       }
       if (deleteItem) {
         deleteItem.textContent = trash ? 'Delete forever' : 'Delete';
@@ -1117,18 +1198,14 @@ class Explorer {
     for (const file of files) await this.downloadFile(file);
   }
 
-  async refreshThumbnail(file) {
+  async refreshThumbnail(file, opts = {}) {
     if (!file || file.is_folder) return;
     try {
-      App.toast(`Refreshing thumbnail for ${file.name}...`);
+      if (!opts.quiet) App.toast(`Refreshing thumbnail for ${file.name}...`);
       await API.files.refreshThumbnail(file.id);
-      file.has_thumbnail = 1;
-      file.thumbVersion = Date.now();
-      const el = document.querySelector(`#file-grid .file-item[data-id="${file.id}"] img.file-thumb`);
-      const url = await ThumbCache.prefetch(file.id, file.thumbVersion);
-      if (el) el.src = url;
-      App.toast(`Thumbnail updated for ${file.name}`, 'success');
-      await this.refresh({ filesOnly: true });
+      await ThumbUpload.applyThumbnailToFile(file);
+      if (!opts.quiet) App.toast(`Thumbnail updated for ${file.name}`, 'success');
+      if (!opts.quiet) await this.refresh({ filesOnly: true });
     } catch (err) {
       let msg = err.message || 'Refresh failed';
       if (msg === 'Not Found') {
@@ -1341,6 +1418,7 @@ class Explorer {
     const detailsItem = menu.querySelector('[data-action="details"]');
     const shareItem = menu.querySelector('[data-action="share"]');
     const thumbItem = menu.querySelector('[data-action="refresh-thumb"]');
+    const uploadThumbItem = menu.querySelector('[data-action="upload-thumb"]');
     const verifyItem = menu.querySelector('[data-action="verify-file"]');
     const verifyHlsItem = menu.querySelector('[data-action="verify-hls"]');
     const hlsItem = menu.querySelector('[data-action="hls-convert"]');
@@ -1353,8 +1431,20 @@ class Explorer {
     detailsItem.style.display = file.is_folder ? 'none' : '';
     shareItem.style.display = file.is_folder ? 'none' : '';
     if (thumbItem) thumbItem.style.display = file.is_folder ? 'none' : '';
+    if (uploadThumbItem) uploadThumbItem.style.display = file.is_folder ? 'none' : '';
+    if (thumbItem && fileTargets.length > 1) {
+      thumbItem.textContent = `Refresh thumbnails (${fileTargets.length} files)`;
+    } else if (thumbItem) {
+      thumbItem.textContent = 'Refresh thumbnail';
+    }
+    if (uploadThumbItem && fileTargets.length > 1) {
+      uploadThumbItem.textContent = `Set custom thumbnails (${fileTargets.length} files)...`;
+    } else if (uploadThumbItem) {
+      uploadThumbItem.textContent = 'Set custom thumbnail...';
+    }
     if (verifyItem) verifyItem.style.display = file.is_folder ? 'none' : '';
     const actionTargets = this.getActionTargets(file);
+    const fileTargets = actionTargets.filter((f) => !f.is_folder);
     const hlsTargets = actionTargets.filter((f) => this.isHlsEligible(f));
     const videoTargets = actionTargets.filter((f) => this.isVideoEligibleForHls(f));
     if (verifyHlsItem) {
@@ -1374,9 +1464,10 @@ class Explorer {
       const showConvert = videoTargets.length > 0;
       hlsItem.style.display = showConvert ? '' : 'none';
       hlsItem.classList.remove('hidden');
+      const reconvert = videoTargets.some((f) => this.isHlsIncomplete(f));
       hlsItem.textContent = videoTargets.length > 1
-        ? `Convert to HLS (${videoTargets.length} files)`
-        : 'Convert to HLS';
+        ? (reconvert ? `Re-convert to HLS (${videoTargets.length} files)` : `Convert to HLS (${videoTargets.length} files)`)
+        : (reconvert ? 'Re-convert to HLS' : 'Convert to HLS');
     }
 
     const playlistDetail = this.viewMode === 'playlist-detail' && file._inPlaylist;
@@ -1390,6 +1481,7 @@ class Explorer {
       detailsItem.style.display = 'none';
       shareItem.style.display = 'none';
       if (thumbItem) thumbItem.style.display = 'none';
+      if (uploadThumbItem) uploadThumbItem.style.display = 'none';
       if (verifyItem) verifyItem.style.display = 'none';
       if (verifyHlsItem) verifyHlsItem.style.display = 'none';
       if (hlsItem) hlsItem.style.display = 'none';

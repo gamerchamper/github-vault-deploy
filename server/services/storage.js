@@ -1132,6 +1132,10 @@ async function refreshThumbnail(userId, fileId) {
     throw new Error('Could not find or generate a thumbnail for this file');
   }
 
+  return commitThumbnail(userId, file, fileId, thumbBuffer);
+}
+
+async function commitThumbnail(userId, file, fileId, thumbBuffer) {
   await metadata.saveThumbnail(userId, fileId, thumbBuffer, file.name);
   db.prepare('UPDATE files SET has_thumbnail = 1 WHERE id = ?').run(fileId);
 
@@ -1165,6 +1169,25 @@ async function refreshThumbnail(userId, fileId) {
   await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, true);
 
   return { id: fileId, has_thumbnail: true };
+}
+
+async function setCustomThumbnail(userId, fileId, imageBuffer) {
+  const file = db.prepare(
+    'SELECT * FROM files WHERE id = ? AND user_id = ? AND is_folder = 0'
+  ).get(fileId, userId);
+  if (!file) throw new Error('File not found');
+  if (file.upload_status && file.upload_status !== 'ready') {
+    throw new Error('Cannot set thumbnail while upload is in progress');
+  }
+  if (!metadata.getMetadataRepo(userId)) {
+    throw new Error('Metadata repository not configured');
+  }
+  if (!imageBuffer?.length) throw new Error('No image provided');
+
+  const thumbBuffer = await thumbnails.toThumbJpeg(imageBuffer);
+  if (!thumbBuffer) throw new Error('Invalid or unsupported image file');
+
+  return commitThumbnail(userId, file, fileId, thumbBuffer);
 }
 
 async function downloadFileWithProgress(userId, fileId, onProgress, view = null) {
@@ -1272,6 +1295,14 @@ function getFileDetails(userId, fileId, req = null) {
     reposUsed[c.full_name] = (reposUsed[c.full_name] || 0) + 1;
   }
 
+  const hlsSegmentCount = db.prepare(
+    'SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?'
+  ).get(fileId)?.n || 0;
+  const hlsDurationSec = db.prepare(
+    'SELECT COALESCE(SUM(duration), 0) as s FROM hls_segments WHERE file_id = ?'
+  ).get(fileId)?.s || 0;
+  const hlsMinSegments = require('./capacity').estimateMinHlsSegmentCount(file.size);
+
   return {
     file: {
       id: file.id,
@@ -1283,10 +1314,14 @@ function getFileDetails(userId, fileId, req = null) {
       is_folder: !!file.is_folder,
       chunk_count: file.chunk_count,
       has_thumbnail: !!file.has_thumbnail,
+      has_hls: !!file.has_hls,
+      hls_playlist_path: file.hls_playlist_path || null,
       encryption_mode: file.encryption_mode || 'whole',
       share_token: file.share_token,
       created_at: file.created_at,
-      hls_segment_count: file.hls_segment_count || 0,
+      hls_segment_count: hlsSegmentCount,
+      hls_duration_sec: Number(hlsDurationSec) || 0,
+      hls_min_segments: hlsMinSegments,
     },
     chunks: chunks.map(c => ({
       index: c.chunk_index,
@@ -1685,7 +1720,8 @@ function listFiles(userId, parentPath, view = null, opts = {}) {
   const offset = Math.max(parseInt(opts.offset, 10) || 0, 0);
   const rows = db.prepare(`
     SELECT id, name, path, size, mime_type, is_folder, parent_path, chunk_count, has_thumbnail, has_hls, created_at,
-      (SELECT COUNT(*) FROM hls_segments WHERE file_id = files.id) AS hls_segment_count
+      (SELECT COUNT(*) FROM hls_segments WHERE file_id = files.id) AS hls_segment_count,
+      (SELECT COALESCE(SUM(duration), 0) FROM hls_segments WHERE file_id = files.id) AS hls_duration_sec
     FROM files
     WHERE user_id = ? AND parent_path = ?
       AND (upload_status IS NULL OR upload_status = 'ready')
@@ -1720,6 +1756,7 @@ function listFiles(userId, parentPath, view = null, opts = {}) {
       view_chunks_available: file.chunk_count,
       view_chunks_total: file.chunk_count,
       hls_segment_count: file.hls_segment_count || 0,
+      hls_duration_sec: Number(file.hls_duration_sec) || 0,
     }));
     metadata.warmThumbnailsBackground(userId, files);
     return {
@@ -1753,6 +1790,7 @@ function listFiles(userId, parentPath, view = null, opts = {}) {
       view_chunks_available: stats.chunks_available,
       view_chunks_total: stats.chunks_total,
       hls_segment_count: file.hls_segment_count || 0,
+      hls_duration_sec: Number(file.hls_duration_sec) || 0,
     };
   });
   return {
@@ -2355,6 +2393,7 @@ module.exports = {
   createFolder,
   moveItems,
   refreshThumbnail,
+  setCustomThumbnail,
   getStorageStats,
   getFileDetails,
   createShareToken,

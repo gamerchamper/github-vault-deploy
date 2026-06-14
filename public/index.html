@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.1">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.2">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.0">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -106,6 +106,8 @@
             <span class="ribbon-caret" aria-hidden="true">▾</span>
           </button>
           <div id="selection-actions-menu" class="selection-actions-menu hidden" role="menu">
+            <button type="button" class="context-item" data-bulk-action="upload-thumb" role="menuitem">Set custom thumbnails</button>
+            <button type="button" class="context-item" data-bulk-action="refresh-thumb" role="menuitem">Refresh thumbnails</button>
             <button type="button" class="context-item" data-bulk-action="verify-hls" role="menuitem">Verify HLS</button>
             <button type="button" class="context-item" data-bulk-action="verify-file" role="menuitem">Verify file</button>
             <button type="button" class="context-item" data-bulk-action="hls-convert" role="menuitem">Convert to HLS</button>
@@ -969,6 +971,7 @@
       <div class="context-item" data-action="add-to-playlist">Add to playlist</div>
       <div class="context-item" data-action="link-folder-to-playlist">Link folder to playlist</div>
       <div class="context-item" data-action="refresh-thumb">Refresh thumbnail</div>
+      <div class="context-item" data-action="upload-thumb">Set custom thumbnail...</div>
       <div class="context-item" data-action="verify-file">Verify file</div>
       <div class="context-item" data-action="verify-hls" style="display:none">Verify HLS</div>
       <div class="context-item hls-convert-item" data-action="hls-convert" style="display:none">Convert to HLS</div>
@@ -1039,7 +1042,7 @@
 
   <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
   <script src="/js/media-player.js?v=1.0.0"></script>
-  <script src="/js/api.js?v=1.0.1"></script>
+  <script src="/js/api.js?v=1.0.2"></script>
   <script src="/js/playback-memory.js?v=1.0.0"></script>
   <script src="/js/pdf-viewer.js?v=1.0.0"></script>
   <script src="/js/image-viewer.js?v=1.0.0"></script>
@@ -1051,10 +1054,11 @@
   <script src="/js/adaptive-concurrency.js?v=1.0.0"></script>
   <script src="/js/verify-repair.js?v=1.0.0"></script>
   <script src="/js/verify-hls.js?v=1.0.1"></script>
+  <script src="/js/thumb-upload.js?v=1.0.1"></script>
   <script src="/js/upload-manager.js?v=1.0.0"></script>
   <script src="/js/chunk-blocks.js?v=1.0.0"></script>
   <script src="/js/download-manager.js?v=1.0.0"></script>
-  <script src="/js/tasks.js?v=1.0.0"></script>
+  <script src="/js/tasks.js?v=1.0.1"></script>
   <script src="/js/audio-queue.js?v=1.0.0"></script>
   <script src="/js/playlist-queue.js?v=1.0.0"></script>
   <script src="/js/playlist-player.js?v=1.0.0"></script>
@@ -1062,10 +1066,10 @@
   <script src="/js/viewer.js?v=1.0.0"></script>
   <script src="/js/viewers.js?v=1.0.0"></script>
   <script src="/js/bandwidth.js?v=1.0.0"></script>
-  <script src="/js/explorer.js?v=1.0.1"></script>
+  <script src="/js/explorer.js?v=1.0.4"></script>
   <script src="/js/upload-center.js?v=1.0.0"></script>
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
-  <script src="/js/app.js?v=1.0.1"></script>
+  <script src="/js/app.js?v=1.0.4"></script>
 </body>
 </html>

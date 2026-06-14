@@ -4,6 +4,7 @@ const REPO_CAPACITY_BYTES = parseInt(process.env.REPO_CAPACITY_GB || '1', 10) * 
 const ENCRYPT_OVERHEAD_FACTOR = 1.02;
 const HLS_OVERHEAD_FACTOR = 1.02;
 const AVG_HLS_SEGMENT_BYTES = 512 * 1024;
+const MAX_HLS_SEGMENT_BYTES = 40 * 1024 * 1024;
 
 function estimateEncryptedUploadBytes(fileSize) {
   return Math.ceil(fileSize * ENCRYPT_OVERHEAD_FACTOR);
@@ -11,6 +12,17 @@ function estimateEncryptedUploadBytes(fileSize) {
 
 function estimateHlsBytes(fileSize) {
   return Math.ceil(fileSize * HLS_OVERHEAD_FACTOR);
+}
+
+function estimateHlsSegmentCount(fileSize) {
+  const hlsBytes = estimateHlsBytes(fileSize);
+  return Math.max(1, Math.ceil(hlsBytes / AVG_HLS_SEGMENT_BYTES));
+}
+
+/** Lower bound for valid HLS (assumes very high bitrate, large 6s segments). */
+function estimateMinHlsSegmentCount(fileSize) {
+  if (!fileSize || fileSize <= 0) return 1;
+  return Math.max(1, Math.ceil(fileSize / MAX_HLS_SEGMENT_BYTES));
 }
 
 function getRepoEffectiveBytes(repo) {
@@ -256,6 +268,9 @@ module.exports = {
   HLS_OVERHEAD_FACTOR,
   estimateEncryptedUploadBytes,
   estimateHlsBytes,
+  estimateHlsSegmentCount,
+  estimateMinHlsSegmentCount,
+  AVG_HLS_SEGMENT_BYTES,
   getRepoEffectiveBytes,
   projectUploadStorage,
   checkUploadFits,

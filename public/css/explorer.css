@@ -1370,10 +1370,37 @@ body::before {
   margin-bottom: 6px;
 }
 
-.hls-file-badge {
+.hls-file-badges {
   position: absolute;
   bottom: -2px;
   right: -2px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  pointer-events: none;
+  max-width: calc(100% + 4px);
+}
+
+.hls-duration-badge {
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.hls-duration-badge.hls-duration-broken {
+  background: #c42b1c;
+}
+
+.hls-file-badge {
+  position: static;
   background: #107c10;
   color: #fff;
   font-size: 9px;

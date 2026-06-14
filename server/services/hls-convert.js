@@ -11,7 +11,7 @@ const storage = require('./storage');
 const crypto = require('./crypto');
 const { recordBytes } = require('./bandwidth');
 const capacity = require('./capacity');
-const { REPO_CAPACITY_BYTES } = capacity;
+const { REPO_CAPACITY_BYTES, estimateMinHlsSegmentCount } = capacity;
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -54,12 +54,59 @@ async function cancelConversion(userId, fileId) {
       job.ffmpegChild.kill('SIGTERM');
     }
   }
-  capacity.releaseHlsReserve(userId, fileId);
+  clearHlsState(userId, fileId);
+}
+
+function clearHlsState(userId, fileId, { releaseReserve = true } = {}) {
   db.prepare('DELETE FROM hls_segments WHERE file_id = ?').run(fileId);
   db.prepare(`
     UPDATE files SET has_hls = 0, hls_playlist_repo_id = NULL, hls_playlist_path = NULL
     WHERE id = ? AND user_id = ?
   `).run(fileId, userId);
+  if (releaseReserve) capacity.releaseHlsReserve(userId, fileId);
+}
+
+function analyzeHlsSegmentState(fileId, fileSize) {
+  const rows = db.prepare(
+    'SELECT segment_index FROM hls_segments WHERE file_id = ? ORDER BY segment_index'
+  ).all(fileId);
+  const indices = rows.map((r) => r.segment_index);
+  const count = indices.length;
+  const minComplete = estimateMinHlsSegmentCount(fileSize);
+
+  let gaps = [];
+  let hasIndexZero = false;
+  if (count > 0) {
+    const set = new Set(indices);
+    hasIndexZero = set.has(0);
+    const maxIdx = indices[indices.length - 1];
+    for (let i = 0; i <= maxIdx; i++) {
+      if (!set.has(i)) gaps.push(i);
+    }
+  }
+
+  const contiguous = gaps.length === 0;
+  const meetsMinimum = count >= minComplete;
+  const recoverable = count > 0 && hasIndexZero && contiguous && meetsMinimum;
+
+  return { count, minComplete, gaps, hasIndexZero, contiguous, meetsMinimum, recoverable };
+}
+
+function assertHlsUploadComplete(fileId, fileSize, expectedTotal) {
+  const state = analyzeHlsSegmentState(fileId, fileSize);
+  if (expectedTotal != null && state.count !== expectedTotal) {
+    throw new Error(`HLS upload incomplete: ${state.count}/${expectedTotal} segments saved`);
+  }
+  if (!state.recoverable) {
+    const detail = state.count < state.minComplete
+      ? `${state.count} segments (expected at least ${state.minComplete} for this file size)`
+      : state.gaps.length
+        ? `gaps at index(es) ${formatIndexList(state.gaps)}`
+        : !state.hasIndexZero
+          ? 'missing segment 0'
+          : 'segment sequence incomplete';
+    throw new Error(`HLS conversion incomplete — ${detail}`);
+  }
 }
 
 function ensureDir(dir) {
@@ -373,7 +420,16 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file) { hlsLog('File not found'); throw new Error('File not found'); }
   if (!file.encryption_meta) { hlsLog(`No encryption_meta (has_hls=${file.has_hls})`); throw new Error('File has no encryption metadata'); }
-  if (file.has_hls) { hlsLog('Already has HLS'); return { fileId, hls: true, alreadyConverted: true }; }
+  if (file.has_hls) {
+    const existing = analyzeHlsSegmentState(fileId, file.size);
+    if (existing.recoverable) {
+      hlsLog('Already has HLS');
+      return { fileId, hls: true, alreadyConverted: true };
+    }
+    hlsLog(`Invalid HLS state (${existing.count} segments) — clearing and re-converting`);
+    clearHlsState(userId, fileId, { releaseReserve: false });
+    file.has_hls = 0;
+  }
   hlsLog(`File: ${file.name}, size=${file.size}, mime=${file.mime_type}`);
 
   const chunkSample = db.prepare('SELECT chunk_iv FROM chunks WHERE file_id = ? LIMIT 1').get(fileId);
@@ -387,9 +443,18 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
   const existingSegments = db.prepare(
     'SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?'
   ).get(fileId);
-  const hasPartialSegments = existingSegments?.n > 0;
+  let hasPartialSegments = existingSegments?.n > 0;
   if (hasPartialSegments) {
-    hlsLog(`Found ${existingSegments.n} existing HLS segments — resuming interrupted conversion`);
+    const partial = analyzeHlsSegmentState(fileId, file.size);
+    if (partial.recoverable) {
+      hlsLog(`Found ${partial.count} existing HLS segments — resuming interrupted conversion`);
+    } else {
+      hlsLog(
+        `Partial HLS not recoverable (${partial.count} segments, min ${partial.minComplete}) — re-running FFmpeg`
+      );
+      clearHlsState(userId, fileId, { releaseReserve: false });
+      hasPartialSegments = false;
+    }
   }
 
   const repos = db.prepare(`
@@ -458,6 +523,8 @@ async function convertFile(userId, fileId, onProgress, taskId = null) {
 
     await uploadSegmentsParallel(userId, fileId, segments, repos, job, onProgress, taskId);
     hlsLog(`Uploaded ${total} segments`);
+
+    assertHlsUploadComplete(fileId, file.size, total);
 
     if (onProgress) onProgress({ phase: 'playlist', percent: 92, lastLog: 'Uploading m3u8 playlist...' });
     hlsLog('Uploading m3u8 playlist...');
@@ -725,6 +792,8 @@ function hasHls(fileId) {
 module.exports = {
   convertFile,
   cancelConversion,
+  clearHlsState,
+  analyzeHlsSegmentState,
   getJob,
   getHlsSegments,
   getHlsSegmentCount,

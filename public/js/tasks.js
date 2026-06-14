@@ -411,6 +411,12 @@ const TaskPanel = {
       App.toast(msg, task.valid === false ? 'error' : 'success');
       explorer.refresh({ filesOnly: true });
     }
+    if (task.type === 'thumbnail-upload') {
+      App.toast(task.total > 1
+        ? `Updated ${task.total} custom thumbnail(s)`
+        : 'Custom thumbnail updated', 'success');
+      explorer.refresh({ filesOnly: true });
+    }
   },
 
   ensurePoll() {
@@ -518,6 +524,14 @@ const TaskPanel = {
       }
       return 'Verifying HLS...';
     }
+    if (task.type === 'thumbnail-upload') {
+      if (task.status === 'error') return task.error || 'Thumbnail upload failed';
+      if (task.lastLog) return task.lastLog;
+      if (task.total > 1) {
+        return `Setting thumbnails (${(task.done || 0) + 1}/${task.total})`;
+      }
+      return task.currentName ? `Setting thumbnail for ${task.currentName}` : 'Setting thumbnail...';
+    }
     if (task.type === 'delete') {
       if (task.total > 1) return `Removing from GitHub (${task.done || 0}/${task.total})`;
       return 'Removing chunks from GitHub repos...';
@@ -587,6 +601,10 @@ const TaskPanel = {
       if (task.segmentsTotal) rows.push(['Segments', `${task.segmentsDone || 0} / ${task.segmentsTotal}`]);
       if (task.missing?.length) rows.push(['Missing', task.missing.join(', ')]);
       if (task.issues?.length) rows.push(['Issues', task.issues.join('; ')]);
+    }
+    if (task.type === 'thumbnail-upload') {
+      if (task.total) rows.push(['Files', `${task.done || 0} / ${task.total}`]);
+      if (task.currentName) rows.push(['Current', task.currentName]);
     }
     if (task.error) rows.push(['Error', task.error]);
     return rows;
@@ -707,7 +725,7 @@ const TaskPanel = {
       return `
         <div class="task-item task-${task.status}${expanded ? ' task-expanded' : ''}" data-task-id="${task.id}">
           <div class="task-item-header">
-            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : (task.type === 'verify-repair' || task.type === 'verify-hls') ? '🔍' : '🗑️'}</span>
+            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : task.type === 'thumbnail-upload' ? '🖼️' : (task.type === 'verify-repair' || task.type === 'verify-hls') ? '🔍' : '🗑️'}</span>
             <span class="task-title" title="${this.escape(task.title)}">${this.escape(task.title)}</span>
             <span class="task-percent">${cancelled ? 'Cancelled' : failed && !resumable ? 'Failed' : done ? 'Done' : `${percent}%`}</span>
             <button type="button" class="task-expand-btn" title="${expanded ? 'Hide details' : 'Show debug log'}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>

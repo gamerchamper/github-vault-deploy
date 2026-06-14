@@ -1147,7 +1147,16 @@ const App = {
       if (action === 'share') App.shareFile(file);
       if (action === 'download' && !file.is_folder) explorer.downloadFile(file);
       if (action === 'move') explorer.showMoveDialog([...explorer.selected]);
-      if (action === 'refresh-thumb' && !file.is_folder) explorer.refreshThumbnail(file);
+      if (action === 'refresh-thumb') {
+        const targets = explorer.getActionTargets(file).filter((f) => !f.is_folder);
+        if (targets.length > 1) explorer.refreshThumbnailsSelected();
+        else if (!file.is_folder) explorer.refreshThumbnail(file);
+      }
+      if (action === 'upload-thumb') {
+        const targets = explorer.getActionTargets(file).filter((f) => !f.is_folder);
+        if (targets.length > 1) explorer.uploadThumbnailSelected();
+        else if (!file.is_folder) ThumbUpload.runForFile(file);
+      }
       if (action === 'verify-file' && !file.is_folder) explorer.verifyFileSelected();
       if (action === 'verify-hls') explorer.verifyHlsSelected();
       if (action === 'hls-convert') explorer.hlsConvertSelected();
@@ -1748,6 +1757,9 @@ const App = {
             <span>Size</span><span>${formatSize(d.file.size)}</span>
             <span>Type</span><span>${d.file.mime_type || 'unknown'}</span>
             <span>Chunks</span><span>${d.file.chunk_count}</span>
+            ${d.file.has_hls || d.file.hls_segment_count ? `
+            <span>HLS</span><span>${d.file.has_hls ? 'Ready' : 'Incomplete'} — ${d.file.hls_segment_count} segment(s)${d.file.hls_duration_sec ? `, ${explorer.formatHlsDuration(d.file.hls_duration_sec)}` : ''}${d.file.hls_min_segments > 1 ? ` (expected ≥${d.file.hls_min_segments})` : ''}</span>
+            ` : ''}
             <span>Encryption</span><span>${d.file.encryption_mode || 'chunk'}</span>
             <span>Created</span><span>${new Date(d.file.created_at).toLocaleString()}</span>
           </div>
