@@ -270,6 +270,58 @@ body.share-cinema-active .share-hero {
   display: none;
 }
 
+/* Cinema: square panels, edge-to-edge (no rounded cards or gaps) */
+body.share-cinema-active::before {
+  display: none;
+}
+
+body.share-cinema-active .share-app-frame,
+body.share-cinema-active.share-shoutbox-open .share-app-frame,
+body.share-cinema-active.share-playlist-active .share-app-frame,
+body.share-cinema-active.share-rail-stack .share-app-frame {
+  gap: 0 !important;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+body.share-cinema-active.share-shoutbox-open .share-shell,
+body.share-cinema-active.share-playlist-active .share-shell {
+  padding-right: 0 !important;
+  margin-right: 0 !important;
+}
+
+body.share-cinema-active .share-cinema-dock {
+  align-items: stretch;
+  border-radius: 0;
+  padding: var(--space-md) var(--space-md) var(--space-lg);
+}
+
+body.share-cinema-active .share-cinema-dock > *,
+body.share-cinema-active .share-stage-controls,
+body.share-cinema-active .share-dock-hls {
+  width: 100%;
+  max-width: none;
+}
+
+body.share-cinema-active .share-shoutbox,
+body.share-cinema-active .share-shoutbox.shoutbox-open,
+body.share-cinema-active .share-playlist-panel,
+body.share-cinema-active .share-right-rail,
+body.share-cinema-active.share-rail-stack .share-shoutbox.shoutbox-open,
+body.share-cinema-active.share-rail-stack .share-playlist-panel:not(.hidden),
+body.share-cinema-active.share-rail-stack-grid .share-playlist-panel:not(.hidden),
+body.share-cinema-active.share-rail-stack-grid .share-shoutbox.shoutbox-open,
+body.share-cinema-active.share-rail-stack-column .share-playlist-panel:not(.hidden),
+body.share-cinema-active.share-rail-stack-column .share-shoutbox.shoutbox-open {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+body.share-cinema-active.share-rail-stack-grid .share-right-rail.share-right-rail-open,
+body.share-cinema-active.share-rail-stack-column .share-right-rail.share-right-rail-open {
+  gap: 0;
+}
+
 /* Cinema streaming layout — video fills viewport, controls docked below */
 .share-cinema-layout {
   width: 100%;
@@ -407,7 +459,7 @@ body.share-rail-stack .share-playlist-panel:not(.hidden) {
   max-height: min(36vh, 320px);
   border-left: none;
   border-top: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: 0;
 }
 
 /* Stacked + wide: playlist and shoutbox side-by-side below the player */
@@ -423,7 +475,7 @@ body.share-rail-stack-grid.share-playlist-active .share-playlist-panel:not(.hidd
   grid-column: 1;
   grid-row: 1;
   max-height: min(38vh, 340px);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   border-top: 1px solid var(--glass-border);
 }
 
@@ -433,7 +485,7 @@ body.share-rail-stack-grid.share-shoutbox-open .share-shoutbox.shoutbox-open {
   min-height: 260px;
   max-height: min(38vh, 340px) !important;
   border-left: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
 }
 
 body.share-rail-stack-grid:not(.share-playlist-active) .share-shoutbox.shoutbox-open,
@@ -452,7 +504,7 @@ body.share-rail-stack-column .share-playlist-panel:not(.hidden) {
   flex: 0 0 auto;
   order: 1;
   max-height: min(32vh, 280px);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-radius: 0;
 }
 
 body.share-rail-stack-column .share-shoutbox.shoutbox-open {
@@ -462,7 +514,7 @@ body.share-rail-stack-column .share-shoutbox.shoutbox-open {
   max-height: min(40vh, 360px) !important;
   border-left: none;
   border-top: 1px solid var(--glass-border);
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  border-radius: 0;
 }
 
 body.share-rail-stack.share-shoutbox-open .shoutbox-open-btn {
@@ -1405,7 +1457,7 @@ body.share-playlist-active .share-playlist-panel .playlist-panel-list {
 
   backdrop-filter: blur(16px);
   border-left: 0 solid var(--glass-border);
-  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
+  border-radius: 0;
   display: flex;
   flex-direction: column;
   box-shadow: none;
@@ -1773,7 +1825,7 @@ body.share-embed-mode #share-folder-meta { display: none; }
     max-height: min(36vh, 280px);
     border-left: none;
     border-top: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-radius: 0;
   }
 
   .share-shoutbox {
@@ -1830,13 +1882,13 @@ body.share-embed-mode #share-folder-meta { display: none; }
     max-height: 50vh;
     border-left: none;
     border-top: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
+    border-radius: 0;
+    box-shadow: none;
     padding: 0;
   }
 
   body.share-cinema-active .share-shoutbox.shoutbox-open {
-    border-radius: var(--radius-lg);
+    border-radius: 0;
   }
 
   .shoutbox-open-btn {
