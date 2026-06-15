@@ -1,6 +1,7 @@
 const TaskPanel = {
   tasks: new Map(),
   pollTimer: null,
+  countdownTimer: null,
   doneTimers: new Map(),
   expandedTaskId: null,
   panelExpanded: false,
@@ -24,6 +25,7 @@ const TaskPanel = {
       await UploadManager.restoreInterrupted();
       this.render();
       this.ensurePoll();
+      this.ensureCountdownTick();
       this.bindActions();
       this.bindPanelChrome();
     } catch (err) {
@@ -389,6 +391,58 @@ const TaskPanel = {
   track(taskId) {
     this.fetchOne(taskId);
     this.ensurePoll();
+    this.ensureCountdownTick();
+  },
+
+  hasAutoRepoCountdown() {
+    return [...this.tasks.values()].some(
+      (t) => t.type === 'auto-repo' && t.status === 'pending' && t.phase === 'countdown',
+    );
+  },
+
+  ensureCountdownTick() {
+    if (this.countdownTimer) return;
+    if (!this.hasAutoRepoCountdown()) return;
+    this.countdownTimer = setInterval(() => {
+      if (this.hasAutoRepoCountdown()) {
+        this.scheduleRender();
+      } else {
+        this.stopCountdownTick();
+      }
+    }, 1000);
+  },
+
+  stopCountdownTick() {
+    if (!this.countdownTimer) return;
+    clearInterval(this.countdownTimer);
+    this.countdownTimer = null;
+  },
+
+  formatCountdown(nextRunAt) {
+    if (!nextRunAt) return 'Due now';
+    const ms = Date.parse(nextRunAt) - Date.now();
+    if (!Number.isFinite(ms) || ms <= 0) return 'Due now';
+    const totalSec = Math.ceil(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) {
+      return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+    return `${m}:${String(s).padStart(2, '0')}`;
+  },
+
+  autoRepoBarPercent(task) {
+    if (task.status === 'processing' && task.phase === 'creating') {
+      return task.percent || 0;
+    }
+    if (!task.nextRunAt) return 0;
+    const next = Date.parse(task.nextRunAt);
+    if (!Number.isFinite(next)) return 0;
+    const intervalMs = Math.max(1, task.intervalMinutes || 60) * 60 * 1000;
+    const start = next - intervalMs;
+    const elapsed = Date.now() - start;
+    return Math.min(100, Math.max(0, Math.round((elapsed / intervalMs) * 100)));
   },
 
   async fetchOne(taskId) {
@@ -408,6 +462,18 @@ const TaskPanel = {
     if (task.type === 'backup-sync' && (task.status === 'processing' || task.status === 'pending')) {
       App.ensureBackupPoll();
       if (App.lastBackupSync) App.renderBackupWidget(App.lastBackupSync);
+    }
+
+    if (task.type === 'auto-repo') {
+      this.ensureCountdownTick();
+    }
+
+    if (prev?.status === 'processing' && task.status === 'pending' && task.type === 'auto-repo') {
+      App.loadRepos();
+      App.loadStats();
+      if (task.lastLog) {
+        App.toast(task.lastLog, task.error || task.partial ? 'error' : 'success');
+      }
     }
 
     if (prev?.status === 'processing' && task.status === 'done') {
@@ -643,6 +709,27 @@ const TaskPanel = {
       }
       return 'Creating storage repos...';
     }
+    if (task.type === 'auto-repo') {
+      if (task.status === 'processing' && task.phase === 'creating') {
+        const failed = task.errorCount || task.errors?.length || 0;
+        const name = task.currentName || (task.currentRepo ? task.currentRepo.split('/').pop() : '');
+        let line = `${task.done || 0}/${task.total || '?'} complete`;
+        if (failed) line += ` · ${failed} failed`;
+        if (name) line += ` · ${name}`;
+        return line;
+      }
+      if (task.status === 'pending' && task.phase === 'countdown') {
+        const countdown = this.formatCountdown(task.nextRunAt);
+        const repos = task.total || Math.ceil((task.gbPerRun || 1) / (App.getRepoCapacityGb?.() || 1));
+        const gb = task.gbPerRun || repos * (App.getRepoCapacityGb?.() || 1);
+        if (countdown === 'Due now') {
+          return `Due now — next run creates ${repos} repo${repos === 1 ? '' : 's'} (~${gb} GB)`;
+        }
+        return `Next run in ${countdown} · ${repos} repo${repos === 1 ? '' : 's'} (~${gb} GB)`;
+      }
+      if (task.lastLog) return task.lastLog;
+      return 'Auto storage expansion';
+    }
     return task.phase || 'Working...';
   },
 
@@ -772,6 +859,12 @@ const TaskPanel = {
       const paused = task.status === 'paused';
       const done = task.status === 'done';
       const processing = task.status === 'processing' || task.status === 'pending';
+      const isAutoCountdown = task.type === 'auto-repo'
+        && task.status === 'pending'
+        && task.phase === 'countdown';
+      const isAutoCreating = task.type === 'auto-repo'
+        && task.status === 'processing'
+        && task.phase === 'creating';
       const clientActive = task.type === 'upload'
         && typeof UploadManager !== 'undefined'
         && UploadManager.active.has(task.id);
@@ -789,7 +882,20 @@ const TaskPanel = {
         ? (task.percent || 0)
         : failed
           ? 100
-          : (task.percent || 0);
+          : isAutoCountdown
+            ? this.autoRepoBarPercent(task)
+            : (task.percent || 0);
+      const percentLabel = cancelled
+        ? 'Cancelled'
+        : failed && !resumable
+          ? 'Failed'
+          : done
+            ? 'Done'
+            : isAutoCountdown
+              ? this.formatCountdown(task.nextRunAt)
+              : isAutoCreating
+                ? `${task.percent || 0}%`
+                : `${percent}%`;
 
       const actions = resumable ? `
         <div class="task-actions">
@@ -802,7 +908,7 @@ const TaskPanel = {
           <button class="task-btn task-btn-pause" data-task-id="${task.id}">Pause</button>
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
-      ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair' || task.type === 'verify-hls' || task.type === 'repo-batch') ? `
+      ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair' || task.type === 'verify-hls' || task.type === 'repo-batch' || isAutoCreating) ? `
         <div class="task-actions">
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
@@ -826,14 +932,14 @@ const TaskPanel = {
       return `
         <div class="task-item task-${task.status}${expanded ? ' task-expanded' : ''}" data-task-id="${task.id}">
           <div class="task-item-header">
-            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : task.type === 'thumbnail-upload' ? '🖼️' : task.type === 'repo-batch' ? '📀' : (task.type === 'verify-repair' || task.type === 'verify-hls') ? '🔍' : '🗑️'}</span>
+            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : task.type === 'thumbnail-upload' ? '🖼️' : task.type === 'repo-batch' ? '📀' : task.type === 'auto-repo' ? '⏱️' : (task.type === 'verify-repair' || task.type === 'verify-hls') ? '🔍' : '🗑️'}</span>
             <span class="task-title" title="${this.escape(task.title)}">${this.escape(task.title)}</span>
-            <span class="task-percent">${cancelled ? 'Cancelled' : failed && !resumable ? 'Failed' : done ? 'Done' : `${percent}%`}</span>
+            <span class="task-percent">${percentLabel}</span>
             <button type="button" class="task-expand-btn" title="${expanded ? 'Hide details' : 'Show debug log'}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>
             ${failed ? `<button type="button" class="task-dismiss-icon task-btn-dismiss" data-task-id="${task.id}" title="Dismiss" aria-label="Dismiss">×</button>` : ''}
           </div>
           <div class="task-detail">${this.escape(detail)}${task.lastLog && !expanded ? ` · <span class="task-last-log">${this.escape(task.lastLog)}</span>` : ''}</div>
-          <div class="task-bar ${failed && !resumable ? 'task-bar-error' : failed && resumable ? 'task-bar-paused' : ''}">
+          <div class="task-bar ${failed && !resumable ? 'task-bar-error' : failed && resumable ? 'task-bar-paused' : isAutoCountdown ? 'task-bar-countdown' : ''}">
             <div class="task-bar-fill" data-bar="${percent}"></div>
           </div>
           ${expanded ? this.renderDebug(task) : ''}

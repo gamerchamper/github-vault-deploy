@@ -365,7 +365,11 @@ const API = {
 
   cache: {
     stats: () => API.get('/api/cache/stats'),
+    listEntries: () => API.get('/api/cache/entries'),
     clear: () => API.delete('/api/cache'),
+    removeEntry: (id) => API.delete(`/api/cache/entries/${encodeURIComponent(id)}`),
+    setConfig: ({ maxGb, idleRetentionDays } = {}) =>
+      API.patch('/api/cache/config', { maxGb, idleRetentionDays }),
     setMaxGb: (maxGb) => API.patch('/api/cache/config', { maxGb }),
   },
 

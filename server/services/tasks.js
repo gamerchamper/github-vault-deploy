@@ -46,6 +46,8 @@ function update(taskId, userId, patch) {
     'segmentsDone', 'segmentsTotal',
     'seamlessPartSize', 'seamlessPartsTotal', 'seamlessPartsDone', 'seamlessPartsReceived', 'hlsTaskId',
     'linkedAccountId', 'source', 'capacityGbAdded', 'errors', 'partial',
+    'nextRunAt', 'lastRunAt', 'intervalMinutes', 'gbPerRun', 'persistent',
+    'errorCount',
   ];
 
   for (const key of payloadKeys) {
@@ -121,6 +123,7 @@ function cleanupStaleTasksAllUsers() {
     FROM tasks
     WHERE status IN ('processing', 'pending')
       AND updated_at < ?
+      AND type != 'auto-repo'
   `).all(cutoff);
 
   let cleaned = 0;
@@ -226,6 +229,14 @@ async function cancelTask(taskId, userId) {
   }
 
   if (row.type === 'repo-batch') {
+    try {
+      require('./repo-batch').cancelBatch(taskId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (row.type === 'auto-repo') {
     try {
       require('./repo-batch').cancelBatch(taskId);
     } catch {

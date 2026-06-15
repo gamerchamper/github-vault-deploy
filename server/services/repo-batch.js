@@ -128,7 +128,10 @@ function resolveBatchCount({ gb, count }) {
 function hasActiveBatchTask(userId) {
   const row = db.prepare(`
     SELECT id FROM tasks
-    WHERE user_id = ? AND type = 'repo-batch' AND status IN ('processing', 'pending')
+    WHERE user_id = ? AND (
+      (type = 'repo-batch' AND status IN ('processing', 'pending'))
+      OR (type = 'auto-repo' AND status = 'processing')
+    )
     LIMIT 1
   `).get(userId);
   return !!row;
@@ -143,7 +146,8 @@ function accountLabel(userId, linkedAccountId) {
   return account ? `@${account.username}` : 'linked account';
 }
 
-async function runBatchCreate(userId, taskId, { count, linkedAccountId = null, source = 'manual' } = {}) {
+async function runBatchCreate(userId, taskId, { count, linkedAccountId = null, source = 'manual', persistent = false } = {}) {
+  activeUsers.add(userId);
   const repos = [];
   const errors = [];
   let nextSuffix = maxStorageRepoSuffix(userId, {
@@ -152,6 +156,7 @@ async function runBatchCreate(userId, taskId, { count, linkedAccountId = null, s
   }) + 1;
 
   tasks.update(taskId, userId, {
+    status: 'processing',
     phase: 'creating',
     percent: 0,
     done: 0,
@@ -164,15 +169,28 @@ async function runBatchCreate(userId, taskId, { count, linkedAccountId = null, s
   for (let i = 0; i < count; i += 1) {
     if (isCancelled(taskId)) {
       tasks.appendLog(taskId, userId, `Cancelled after ${repos.length}/${count} repos`);
-      tasks.update(taskId, userId, {
-        status: 'error',
-        phase: 'cancelled',
+      const cancelPatch = {
         error: 'Cancelled',
         resumable: false,
         done: repos.length,
         total: count,
         percent: count ? Math.round((repos.length / count) * 100) : 100,
-      });
+      };
+      if (persistent) {
+        tasks.update(taskId, userId, {
+          ...cancelPatch,
+          status: 'pending',
+          phase: 'countdown',
+          currentRepo: null,
+          lastLog: `Cancelled — ${repos.length}/${count} repos created`,
+        });
+      } else {
+        tasks.update(taskId, userId, {
+          ...cancelPatch,
+          status: 'error',
+          phase: 'cancelled',
+        });
+      }
       cancelledTasks.delete(taskId);
       activeUsers.delete(userId);
       return { repos, errors, cancelled: true };
@@ -194,11 +212,13 @@ async function runBatchCreate(userId, taskId, { count, linkedAccountId = null, s
         total: count,
         currentRepo: repo.full_name,
         currentName: repo.name,
+        errorCount: errors.length,
       });
     } catch (err) {
       const message = err.response?.data?.message || err.message;
       errors.push({ index: i + 1, error: message });
       tasks.appendLog(taskId, userId, `Failed repo ${i + 1}/${count}: ${message}`, { error: true });
+      tasks.update(taskId, userId, { errorCount: errors.length });
       nextSuffix += 1;
     }
   }
@@ -210,21 +230,47 @@ async function runBatchCreate(userId, taskId, { count, linkedAccountId = null, s
   const partial = errors.length > 0 && repos.length > 0;
   const failed = repos.length === 0 && errors.length > 0;
 
-  tasks.update(taskId, userId, {
-    status: failed ? 'error' : 'done',
-    phase: failed ? 'failed' : 'complete',
-    percent: 100,
-    done: repos.length,
-    total: count,
-    error: failed ? (errors[0]?.error || 'Repository creation failed') : null,
-    resumable: false,
-    currentRepo: failed
-      ? null
-      : `Added ${capacityGbAdded} GB (${repos.length} repo${repos.length === 1 ? '' : 's'})`,
-    capacityGbAdded,
-    errors,
-    partial,
-  });
+  const summary = failed
+    ? (errors[0]?.error || 'Repository creation failed')
+    : partial
+      ? `Created ${repos.length}/${count} repos (+${capacityGbAdded} GB) — ${errors.length} failed`
+      : `Created ${repos.length} repo${repos.length === 1 ? '' : 's'} (+${capacityGbAdded} GB)`;
+
+  if (persistent) {
+    tasks.update(taskId, userId, {
+      status: 'pending',
+      phase: 'countdown',
+      percent: 0,
+      done: 0,
+      total: count,
+      error: failed ? summary : null,
+      resumable: false,
+      currentRepo: null,
+      currentName: null,
+      capacityGbAdded,
+      errors,
+      partial,
+      lastLog: summary,
+      source,
+      errorCount: errors.length,
+    });
+  } else {
+    tasks.update(taskId, userId, {
+      status: failed ? 'error' : 'done',
+      phase: failed ? 'failed' : 'complete',
+      percent: 100,
+      done: repos.length,
+      total: count,
+      error: failed ? (errors[0]?.error || 'Repository creation failed') : null,
+      resumable: false,
+      currentRepo: failed
+        ? null
+        : `Added ${capacityGbAdded} GB (${repos.length} repo${repos.length === 1 ? '' : 's'})`,
+      capacityGbAdded,
+      errors,
+      partial,
+    });
+  }
 
   return { repos, errors, capacity_gb_added: capacityGbAdded };
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.18">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.20">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.2">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -929,6 +929,7 @@
 
   <!-- Cache Disk Context Menu -->
   <div id="cache-context-menu" class="context-menu hidden">
+    <div class="context-item" data-action="cache-files">View cached files…</div>
     <div class="context-item" data-action="cache-settings">Cache settings…</div>
     <div class="context-item" data-action="clear-cache">Clear disk</div>
   </div>
@@ -1036,11 +1037,45 @@
         <p class="modal-desc">Local disk cache stores decrypted files and streaming segments for faster playback and repeat downloads.</p>
         <label class="form-label" for="cache-max-gb">Maximum cache size (GB)</label>
         <input type="number" id="cache-max-gb" class="form-input" min="0.1" max="1024" step="0.5" value="10">
+        <label class="form-label" for="cache-idle-days">Remove unused files after (days)</label>
+        <input type="number" id="cache-idle-days" class="form-input" min="1" max="365" step="1" value="30">
         <p class="form-hint" id="cache-settings-usage"></p>
+        <p class="form-hint">Stale entries are cleaned automatically during server maintenance. Lowering the size limit evicts oldest entries immediately.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-secondary" data-close="cache-settings-modal">Cancel</button>
         <button type="button" id="btn-save-cache-settings" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cached Files Browser -->
+  <div id="cache-files-modal" class="modal hidden">
+    <div class="modal-content modal-content-wide">
+      <div class="modal-header">
+        <h2>Cached files</h2>
+        <button class="modal-close" data-close="cache-files-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" id="cache-files-summary">Loading cached files…</p>
+        <div class="cache-files-table-wrap">
+          <table class="cache-files-table" id="cache-files-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Size</th>
+                <th>Last used</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="cache-files-list"></tbody>
+          </table>
+        </div>
+        <p class="form-hint" id="cache-files-empty" hidden>No cached files yet. Downloads and streams are cached here for faster repeat access.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" data-close="cache-files-modal">Close</button>
       </div>
     </div>
   </div>
@@ -1131,7 +1166,7 @@
 
   <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
   <script src="/js/media-player.js?v=1.0.8"></script>
-  <script src="/js/api.js?v=1.0.7"></script>
+  <script src="/js/api.js?v=1.0.8"></script>
   <script src="/js/playback-memory.js?v=1.0.1"></script>
   <script src="/js/pdf-viewer.js?v=1.0.0"></script>
   <script src="/js/image-viewer.js?v=1.0.0"></script>
@@ -1149,7 +1184,7 @@
   <script src="/js/chunk-blocks.js?v=1.0.0"></script>
   <script src="/js/share-download.js?v=1.0.2"></script>
   <script src="/js/download-manager.js?v=1.0.3"></script>
-  <script src="/js/tasks.js?v=1.0.5"></script>
+  <script src="/js/tasks.js?v=1.0.6"></script>
   <script src="/js/audio-queue.js?v=1.0.0"></script>
   <script src="/js/playlist-queue.js?v=1.0.3"></script>
   <script src="/js/playlist-player.js?v=1.0.4"></script>
@@ -1164,6 +1199,6 @@
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
   <script src="/js/local-upload.js?v=1.0.2"></script>
-  <script src="/js/app.js?v=1.0.11"></script>
+  <script src="/js/app.js?v=1.0.13"></script>
 </body>
 </html>

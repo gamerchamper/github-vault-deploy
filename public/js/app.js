@@ -771,7 +771,7 @@ const App = {
 
     const free = Math.max(0, cache.max - cache.used);
     const maxGb = cache.maxGb || Math.round((cache.max / (1024 ** 3)) * 10) / 10;
-    el.title = 'Right-click for cache options';
+    el.title = 'Right-click for cache options (view files, settings, clear)';
     el.innerHTML = `
       <div class="drive-header">
         <span class="drive-icon">💿</span>
@@ -798,29 +798,142 @@ const App = {
   openCacheSettings(cache) {
     const modal = document.getElementById('cache-settings-modal');
     const input = document.getElementById('cache-max-gb');
+    const idleInput = document.getElementById('cache-idle-days');
     const usage = document.getElementById('cache-settings-usage');
     const maxGb = cache?.maxGb || Math.round(((cache?.max || 0) / (1024 ** 3)) * 10) / 10;
     if (input) input.value = maxGb || 10;
+    if (idleInput) idleInput.value = String(cache?.idleRetentionDays || 30);
     if (usage && cache) {
-      usage.textContent = `Currently using ${formatSize(cache.used)} of ${formatSize(cache.max)}. Lowering the limit may evict oldest entries.`;
+      usage.textContent = `Currently using ${formatSize(cache.used)} of ${formatSize(cache.max)}. Unused files older than ${cache.idleRetentionDays || 30} days are removed automatically.`;
     }
     modal?.classList.remove('hidden');
   },
 
+  cacheTypeLabel(type) {
+    const labels = {
+      decrypted: 'Decrypted file',
+      faststart: 'Fast-start stream',
+      encrypted_chunk: 'Encrypted chunk',
+      thumbnail: 'Thumbnail',
+      manifest: 'HLS manifest',
+      lookup: 'Lookup',
+    };
+    return labels[type] || type;
+  },
+
+  formatCacheLastUsed(ts) {
+    if (!ts) return '—';
+    try {
+      const date = new Date(ts);
+      const diffMs = Date.now() - date.getTime();
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return 'Just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 48) return `${hours}h ago`;
+      const days = Math.floor(hours / 24);
+      if (days < 14) return `${days}d ago`;
+      return date.toLocaleString();
+    } catch {
+      return '—';
+    }
+  },
+
+  async openCacheFilesModal() {
+    const modal = document.getElementById('cache-files-modal');
+    const summary = document.getElementById('cache-files-summary');
+    const list = document.getElementById('cache-files-list');
+    const empty = document.getElementById('cache-files-empty');
+    const table = document.getElementById('cache-files-table');
+    if (!modal || !list) return;
+
+    modal.classList.remove('hidden');
+    summary.textContent = 'Loading cached files…';
+    list.innerHTML = '';
+    empty?.classList.add('hidden');
+    table?.classList.remove('hidden');
+
+    try {
+      const data = await API.cache.listEntries();
+      this.lastCacheEntries = data.entries || [];
+      summary.textContent = `${data.count || 0} cached item${data.count === 1 ? '' : 's'} · ${formatSize(data.used || 0)} on disk`;
+      this.renderCacheFilesList();
+    } catch (err) {
+      summary.textContent = 'Could not load cached files';
+      this.toast(err.message, 'error');
+    }
+  },
+
+  renderCacheFilesList() {
+    const list = document.getElementById('cache-files-list');
+    const empty = document.getElementById('cache-files-empty');
+    const table = document.getElementById('cache-files-table');
+    if (!list) return;
+
+    const entries = this.lastCacheEntries || [];
+    if (!entries.length) {
+      list.innerHTML = '';
+      empty?.classList.remove('hidden');
+      table?.classList.add('hidden');
+      return;
+    }
+
+    empty?.classList.add('hidden');
+    table?.classList.remove('hidden');
+    list.innerHTML = entries.map((entry) => `
+      <tr data-cache-id="${this.escapeHtml(entry.id)}">
+        <td class="cache-files-name" title="${this.escapeHtml(entry.name)}">${this.escapeHtml(entry.name)}</td>
+        <td>${this.escapeHtml(this.cacheTypeLabel(entry.type))}</td>
+        <td>${formatSize(entry.size)}</td>
+        <td title="${entry.last_accessed ? new Date(entry.last_accessed).toLocaleString() : ''}">${this.formatCacheLastUsed(entry.last_accessed)}</td>
+        <td class="cache-files-actions">
+          <button type="button" class="btn-secondary btn-compact" data-remove-cache="${this.escapeHtml(entry.id)}">Remove</button>
+        </td>
+      </tr>
+    `).join('');
+  },
+
+  async removeCacheEntry(entryId, btn) {
+    if (!confirm('Remove this item from the cache disk?')) return;
+    if (btn) App.setButtonLoading(btn, true);
+    try {
+      const result = await API.cache.removeEntry(entryId);
+      this.lastCacheEntries = (this.lastCacheEntries || []).filter((e) => e.id !== entryId);
+      this.renderCacheFilesList();
+      const summary = document.getElementById('cache-files-summary');
+      const used = (this.lastCacheEntries || []).reduce((sum, e) => sum + (e.size || 0), 0);
+      if (summary) {
+        summary.textContent = `${this.lastCacheEntries.length} cached item${this.lastCacheEntries.length === 1 ? '' : 's'} · ${formatSize(used)} on disk`;
+      }
+      this.toast(`Removed ${result.name || 'cache entry'} (${formatSize(result.freed)})`, 'success');
+      await this.loadStats();
+    } catch (err) {
+      this.toast(err.message, 'error');
+    } finally {
+      if (btn) App.setButtonLoading(btn, false);
+    }
+  },
+
   async saveCacheSettings() {
     const input = document.getElementById('cache-max-gb');
+    const idleInput = document.getElementById('cache-idle-days');
     const btn = document.getElementById('btn-save-cache-settings');
     const maxGb = parseFloat(input?.value);
+    const idleRetentionDays = parseInt(idleInput?.value, 10);
     if (!Number.isFinite(maxGb)) {
       this.toast('Enter a valid cache size', 'error');
+      return;
+    }
+    if (!Number.isFinite(idleRetentionDays) || idleRetentionDays < 1) {
+      this.toast('Enter a valid idle retention period', 'error');
       return;
     }
 
     await App.withButton(btn, async () => {
       try {
-        await API.cache.setMaxGb(maxGb);
+        await API.cache.setConfig({ maxGb, idleRetentionDays });
         document.getElementById('cache-settings-modal')?.classList.add('hidden');
-        this.toast(`Cache limit set to ${maxGb} GB`, 'success');
+        this.toast(`Cache settings saved (${maxGb} GB max, ${idleRetentionDays} day idle cleanup)`, 'success');
         await this.loadStats();
       } catch (err) {
         this.toast(err.message, 'error');
@@ -921,7 +1034,7 @@ const App = {
 
     await App.withButton(btn, async () => {
       try {
-        const { settings } = await API.settings.update({
+        const { settings, autoRepoTaskId } = await API.settings.update({
           auto_repo_enabled: enabled,
           auto_repo_interval_minutes: intervalMinutes,
           auto_repo_gb: gb,
@@ -934,6 +1047,13 @@ const App = {
           lastRun.textContent = settings.auto_repo_last_run_at
             ? `Last auto run: ${new Date(settings.auto_repo_last_run_at).toLocaleString()}`
             : 'Last auto run: never';
+        }
+        if (settings.auto_repo_enabled && autoRepoTaskId) {
+          TaskPanel.track(autoRepoTaskId);
+          TaskPanel.setExpanded(true);
+        } else if (!settings.auto_repo_enabled && this.currentUser?.id) {
+          TaskPanel.removeLocal(`auto-repo-${this.currentUser.id}`);
+          TaskPanel.stopCountdownTick();
         }
         this.toast('Settings saved', 'success');
       } catch (err) {
@@ -1276,8 +1396,15 @@ const App = {
       const action = e.target.dataset.action;
       if (!action) return;
       this.hideCacheContextMenu();
+      if (action === 'cache-files') this.openCacheFilesModal();
       if (action === 'clear-cache') this.clearCacheDisk();
       if (action === 'cache-settings') this.openCacheSettings(this.lastCacheStats);
+    });
+
+    document.getElementById('cache-files-list')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-remove-cache]');
+      if (!btn) return;
+      this.removeCacheEntry(btn.dataset.removeCache, btn);
     });
 
     document.getElementById('btn-save-cache-settings')?.addEventListener('click', () => {

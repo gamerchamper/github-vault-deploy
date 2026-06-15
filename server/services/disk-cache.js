@@ -5,30 +5,56 @@ const cacheDir = path.join(__dirname, '../../data/cache');
 const indexPath = path.join(cacheDir, 'index.json');
 const configPath = path.join(cacheDir, 'config.json');
 
-function loadMaxBytes() {
+function loadConfig() {
+  const defaults = {
+    maxGb: parseFloat(process.env.CACHE_DISK_GB) || 10,
+    idleRetentionDays: parseInt(process.env.CACHE_IDLE_RETENTION_DAYS || '30', 10),
+  };
   if (fs.existsSync(configPath)) {
     try {
       const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       const gb = parseFloat(cfg.maxGb);
-      if (gb > 0) return Math.round(gb * 1024 * 1024 * 1024);
+      if (gb > 0) defaults.maxGb = gb;
+      const days = parseInt(cfg.idleRetentionDays, 10);
+      if (Number.isFinite(days) && days >= 1) defaults.idleRetentionDays = days;
     } catch { /* fall through */ }
   }
-  return Math.round((parseFloat(process.env.CACHE_DISK_GB) || 10) * 1024 * 1024 * 1024);
+  return defaults;
 }
 
-let maxBytes = loadMaxBytes();
+let config = loadConfig();
+let maxBytes = Math.round(config.maxGb * 1024 * 1024 * 1024);
 
 function getMaxBytes() {
   return maxBytes;
 }
 
-function setMaxGb(gb) {
-  const parsed = parseFloat(gb);
-  if (!Number.isFinite(parsed) || parsed < 0.1 || parsed > 1024) {
-    throw new Error('Cache size must be between 0.1 and 1024 GB');
+function getConfig() {
+  return { ...config };
+}
+
+function setConfig({ maxGb, idleRetentionDays } = {}) {
+  const next = { ...config };
+
+  if (maxGb != null) {
+    const parsed = parseFloat(maxGb);
+    if (!Number.isFinite(parsed) || parsed < 0.1 || parsed > 1024) {
+      throw new Error('Cache size must be between 0.1 and 1024 GB');
+    }
+    next.maxGb = parsed;
   }
-  maxBytes = Math.round(parsed * 1024 * 1024 * 1024);
-  fs.writeFileSync(configPath, JSON.stringify({ maxGb: parsed }, null, 2));
+
+  if (idleRetentionDays != null) {
+    const days = parseInt(idleRetentionDays, 10);
+    if (!Number.isFinite(days) || days < 1 || days > 365) {
+      throw new Error('Idle retention must be between 1 and 365 days');
+    }
+    next.idleRetentionDays = days;
+  }
+
+  fs.writeFileSync(configPath, JSON.stringify(next, null, 2));
+  config = next;
+  maxBytes = Math.round(config.maxGb * 1024 * 1024 * 1024);
 
   const index = loadIndex();
   while (totalSize(index.entries) > maxBytes && index.entries.length) {
@@ -42,6 +68,10 @@ function setMaxGb(gb) {
   }
   saveIndex(index);
   return getStats();
+}
+
+function setMaxGb(gb) {
+  return setConfig({ maxGb: gb });
 }
 const TOUCH_SAVE_DEBOUNCE_MS = 3000;
 
@@ -405,6 +435,74 @@ function clearAll(userId) {
   return { freed, entries: toRemove.length };
 }
 
+function mapEntrySummary(entry) {
+  return {
+    id: entry.id,
+    name: entry.name || entry.file_id || 'Unknown',
+    type: entry.type,
+    size: entry.size,
+    last_accessed: entry.last_accessed,
+    file_id: entry.file_id,
+  };
+}
+
+function listEntries(userId) {
+  reconcile();
+  const index = loadIndex();
+  const entries = index.entries
+    .filter((e) => String(e.user_id) === String(userId))
+    .sort((a, b) => b.last_accessed - a.last_accessed)
+    .map(mapEntrySummary);
+  const used = totalSize(index.entries.filter((e) => String(e.user_id) === String(userId)));
+  return { entries, count: entries.length, used };
+}
+
+function removeEntry(userId, entryId) {
+  const index = loadIndex();
+  const entry = index.entries.find(
+    (e) => e.id === entryId && String(e.user_id) === String(userId),
+  );
+  if (!entry) throw new Error('Cache entry not found');
+  evictEntry(entry);
+  index.entries = index.entries.filter((e) => e.id !== entryId);
+  saveIndex(index);
+  return { freed: entry.size, name: entry.name || entry.file_id };
+}
+
+function evictStaleEntries(options = {}) {
+  reconcile();
+  const retentionDays = options.retentionDays ?? config.idleRetentionDays ?? 30;
+  const maxAgeMs = Math.max(1, retentionDays) * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - maxAgeMs;
+  const userId = options.userId ?? null;
+
+  const index = loadIndex();
+  const stale = index.entries.filter((entry) => {
+    if (entry.last_accessed >= cutoff) return false;
+    if (userId != null && String(entry.user_id) !== String(userId)) return false;
+    return true;
+  });
+
+  let freed = 0;
+  for (const entry of stale) {
+    freed += entry.size;
+    evictEntry(entry);
+  }
+
+  if (stale.length) {
+    const staleIds = new Set(stale.map((e) => e.id));
+    index.entries = index.entries.filter((e) => !staleIds.has(e.id));
+    saveIndex(index);
+  }
+
+  return {
+    evicted: stale.length,
+    freed,
+    retentionDays,
+    cutoff,
+  };
+}
+
 function getStats(userId = null) {
   const index = loadIndex();
   let entries = index.entries;
@@ -417,17 +515,13 @@ function getStats(userId = null) {
     used,
     max: maxBytes,
     maxGb: Math.round((maxBytes / (1024 * 1024 * 1024)) * 100) / 100,
+    idleRetentionDays: config.idleRetentionDays,
     percent: maxBytes > 0 ? Math.round((used / maxBytes) * 1000) / 10 : 0,
     entries: entries.length,
     items: entries
       .sort((a, b) => b.last_accessed - a.last_accessed)
       .slice(0, 20)
-      .map((e) => ({
-        name: e.name,
-        type: e.type,
-        size: e.size,
-        last_accessed: e.last_accessed,
-      })),
+      .map((e) => mapEntrySummary(e)),
   };
 }
 
@@ -441,14 +535,20 @@ if (!fs.existsSync(indexPath)) {
 module.exports = {
   cacheDir,
   getMaxBytes,
+  getConfig,
+  setConfig,
   setMaxGb,
   register,
   touch,
   removeByFile,
   removeType,
+  removeEntry,
   prepareSpace,
   clearAll,
   getStats,
+  listEntries,
+  evictStaleEntries,
   scan,
+  reconcile,
   entryId,
 };

@@ -122,6 +122,13 @@ function runMaintenance() {
     console.warn('[maintenance] chunk session cleanup failed:', err.message);
   }
 
+  try {
+    const diskCache = require('./disk-cache');
+    stats.cache_stale = diskCache.evictStaleEntries();
+  } catch (err) {
+    console.warn('[maintenance] cache stale eviction failed:', err.message);
+  }
+
   lastRunAt = Date.now();
   lastStats = stats;
 
