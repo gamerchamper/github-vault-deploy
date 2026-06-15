@@ -182,37 +182,36 @@ const ShareDownload = {
   },
 
   async exportShare(token, file, onProgress, options = {}) {
-    const hadSession = ShareClientStream.token === token
+    const reuseSession = ShareClientStream.token === token
       && ShareClientStream.fileId === file.id
-      && ShareClientStream.manifest;
+      && !!ShareClientStream.manifest;
 
     ShareStreamLog?.info('download:export-start', {
       fileId: file.id,
-      hadSession,
+      reuseSession,
       size: file.size,
     });
 
+    await ShareClientStream.load(token, file.id, onProgress);
+
+    if (onProgress) {
+      onProgress(this.downloadProgress({
+        stage: 'starting',
+        total_segments: ShareClientStream.manifest?.chunks?.length || file.chunk_count || 0,
+      }));
+    }
+
+    const size = ShareClientStream.manifest?.size || file.size || 0;
+    const name = ShareClientStream.manifest?.name || file.name;
+    const dirHandle = options.dirHandle ?? null;
+
+    ShareStreamLog?.info('download:export-mode', {
+      size,
+      split: size > this.singleMaxBytes(),
+      dir: !!dirHandle,
+    });
+
     try {
-      if (hadSession) ShareClientStream.beginDownloadSession(onProgress);
-      await ShareClientStream.load(token, file.id, onProgress);
-
-      if (onProgress) {
-        onProgress(this.downloadProgress({
-          stage: 'starting',
-          total_segments: ShareClientStream.manifest?.chunks?.length || file.chunk_count || 0,
-        }));
-      }
-
-      const size = ShareClientStream.manifest?.size || file.size || 0;
-      const name = ShareClientStream.manifest?.name || file.name;
-      const dirHandle = options.dirHandle ?? null;
-
-      ShareStreamLog?.info('download:export-mode', {
-        size,
-        split: size > this.singleMaxBytes(),
-        dir: !!dirHandle,
-      });
-
       if (size <= this.singleMaxBytes()) {
         if (onProgress) {
           onProgress(this.downloadProgress({
@@ -234,14 +233,12 @@ const ShareDownload = {
         };
       }
 
-      return this.exportSplitZips(name, size, onProgress, { dirHandle });
+      return await this.exportSplitZips(name, size, onProgress, { dirHandle });
     } catch (err) {
       ShareStreamLog?.error('download:export-failed', {
         message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || String(err)),
       });
       throw err;
-    } finally {
-      if (hadSession) ShareClientStream.endDownloadSession();
     }
   },
 
@@ -355,6 +352,10 @@ const ShareDownload = {
           progress: Math.round(((i + 1) / totalChunks) * 100),
           percent: Math.round(((i + 1) / totalChunks) * 100),
         }));
+      }
+
+      if (ShareClientStream.shouldYieldForPlayback()) {
+        await this.sleep(120);
       }
     }
 

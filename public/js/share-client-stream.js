@@ -867,7 +867,7 @@ const ShareClientStream = {
         this.chunks[index] = this.CHUNK_ON_DISK;
       } else {
         this.chunks[index] = dec;
-        await ShareMediaCache.putChunk(this.cacheKey(), index, dec);
+        ShareMediaCache.putChunk(this.cacheKey(), index, dec).catch(() => {});
       }
       this.syncCompleted();
       this.pool.recordBytes(dec.byteLength || dec.length);
@@ -1227,18 +1227,31 @@ const ShareClientStream = {
   },
 
   beginDownloadSession(onProgress) {
+    this._downloadDepth = (this._downloadDepth || 0) + 1;
+    if (this._downloadDepth > 1) return;
+
     this._playbackOnProgress = this.onProgress;
     if (onProgress) this.onProgress = onProgress;
     if (this.stream?.mseUrl) this._streamProtected = true;
+
+    const media = document.querySelector('.share-video-el, .share-audio-el');
+    this._yieldForPlayback = !!(media && !media.paused && media.readyState >= 2);
+
     this.log('info', 'download:begin', {
       stream: !!this.stream,
       appendIndex: this.stream?.appendIndex ?? null,
       protected: !!this._streamProtected,
+      yieldForPlayback: this._yieldForPlayback,
     });
   },
 
   endDownloadSession() {
+    if (!this._downloadDepth) return;
+    this._downloadDepth -= 1;
+    if (this._downloadDepth > 0) return;
+
     this._streamProtected = false;
+    this._yieldForPlayback = false;
     if (this._playbackOnProgress) {
       this.onProgress = this._playbackOnProgress;
       this._playbackOnProgress = null;
@@ -1246,9 +1259,17 @@ const ShareClientStream = {
     this.log('info', 'download:end', ShareStreamLog?.streamSnapshot?.() || {});
   },
 
+  shouldYieldForPlayback() {
+    if (!this._yieldForPlayback) return false;
+    const media = document.querySelector('.share-video-el, .share-audio-el');
+    return !!(media && !media.paused);
+  },
+
   abort() {
     this.log('info', 'session:abort', {});
     this._streamProtected = false;
+    this._yieldForPlayback = false;
+    this._downloadDepth = 0;
     this._playbackOnProgress = null;
     this.abortController?.abort();
     this.pool?.stop();

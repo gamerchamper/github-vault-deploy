@@ -108,7 +108,7 @@ const DownloadManager = {
     }
 
     try {
-      const result = await ShareDownload.exportShare(token, file, (status) => {
+      const onProgress = (status) => {
         job.status = status;
         if (job.blocks) {
           ChunkBlocks.update(job.blocks, ChunkBlocks.fromDownloadStatus(status));
@@ -120,7 +120,15 @@ const DownloadManager = {
           }
         }
         this.renderItem(job);
-      }, { dirHandle: job.saveDir });
+      };
+
+      ShareClientStream.beginDownloadSession(onProgress);
+      let result;
+      try {
+        result = await ShareDownload.exportShare(token, file, onProgress, { dirHandle: job.saveDir });
+      } finally {
+        ShareClientStream.endDownloadSession();
+      }
 
       job.pendingParts = result.pendingParts || [];
       job.savedFiles = result.savedFiles || [];
@@ -157,7 +165,7 @@ const DownloadManager = {
         message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || String(err)),
       });
       this.render();
-      this.notifyDownload(err.message, 'error');
+      this.notifyDownload(job.error, 'error');
     }
   },
 
