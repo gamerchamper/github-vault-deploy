@@ -6,7 +6,7 @@
   <title><!-- SHARE_PAGE_TITLE --> — GitHub Vault</title>
   <!-- SHARE_EMBED_META -->
   <link rel="stylesheet" href="/css/explorer.css?v=1.0.17">
-  <link rel="stylesheet" href="/css/share.css?v=1.1.7">
+  <link rel="stylesheet" href="/css/share.css?v=1.1.8">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.2">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <!-- SHARE_EMBED_BOOT -->
@@ -32,7 +32,6 @@
         <div id="share-top-dock-meta" class="share-top-dock-meta hidden"></div>
         <div id="share-top-dock-extra" class="share-top-dock-extra"></div>
         <div id="share-top-dock-actions" class="share-top-dock-actions hidden">
-          <span id="share-client-badge" class="share-client-badge hidden">Decrypted in your browser</span>
           <button id="share-dl-hls" class="btn-secondary hidden" type="button">HLS .m3u8</button>
           <button id="share-dl-hls-github" class="btn-secondary hidden" type="button" title="Open the raw m3u8 playlist from GitHub">M3U8 (GitHub)</button>
           <button id="share-download" class="btn-primary" type="button">Download</button>
@@ -92,10 +91,10 @@
           </div>
         </div>
         <div id="share-dock-stats" class="share-dock-stats"></div>
-        <div id="download-panel" class="download-panel hidden">
+        <div id="download-panel" class="download-panel share-download-panel hidden">
           <div class="download-panel-header">
             <span class="download-panel-title">Downloads</span>
-            <span class="download-panel-hint">Works offline from cached chunks · large files split into ~1 GB zips</span>
+            <span class="download-panel-hint">Cached chunks · large files split into ~1 GB zips</span>
           </div>
           <div id="download-list" class="download-list vault-scroll"></div>
         </div>
@@ -162,7 +161,7 @@
   <script src="/js/playback-memory.js?v=1.0.1"></script>
   <script src="/js/playlist-queue.js?v=1.0.3"></script>
   <script src="/js/chunk-blocks.js?v=1.0.2"></script>
-  <script src="/js/download-manager.js?v=1.0.0"></script>
+  <script src="/js/download-manager.js?v=1.0.1"></script>
   <script src="/js/share-stage-layout.js?v=1.1.5"></script>
   <script src="/js/share-viewer.js?v=1.0.7"></script>
   <script src="/js/share-presence.js?v=1.0.0"></script>
@@ -275,7 +274,6 @@
         const pills = [];
         if (info.size) pills.push(formatSize(info.size));
         if (info.chunk_count != null) pills.push(`${info.chunk_count} chunks`);
-        pills.push(shareStreamModeLabel(info));
         if (topMeta) {
           topMeta.innerHTML = pills.map((p) => `<span class="share-top-dock-pill">${escapeHtml(p)}</span>`).join('');
         }
@@ -334,9 +332,6 @@
         }
         if (dockTitle) dockTitle.textContent = fileOrInfo.name || '';
       }
-
-      const badge = document.getElementById('share-client-badge');
-      if (badge) badge.classList.toggle('hidden', !state.clientStream);
     }
 
     function showError(message) {

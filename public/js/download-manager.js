@@ -234,7 +234,7 @@ const DownloadManager = {
     const el = document.querySelector(`.download-item[data-job-id="${job.id}"]`);
     if (!el) return;
     const status = job.status;
-    const percent = job.error ? 0 : (status?.percent ?? 0);
+    const percent = job.error ? 0 : job.done ? 100 : (status?.percent ?? 0);
     const detail = job.error
       ? job.error
       : job.done
@@ -245,12 +245,37 @@ const DownloadManager = {
           ? `${this.stageLabel(status.stage)} · ${status.fetched ?? status.segments ?? 0} / ${status.total || status.total_segments || job.total} ${status.stage === 'caching' ? 'parts' : 'chunks'}`
           : 'Preparing...';
 
+    el.classList.toggle('download-item-done', !!job.done && !job.error);
+    el.classList.toggle('download-item-error', !!job.error);
+
     const fill = el.querySelector('.download-bar-fill');
     if (fill) fill.style.width = `${percent}%`;
     const detailEl = el.querySelector('.download-detail');
     if (detailEl) detailEl.textContent = detail;
     const pctEl = el.querySelector('.download-percent');
     if (pctEl) pctEl.textContent = job.error ? 'Failed' : job.done ? 'Done' : `${percent}%`;
+
+    if (job.done || job.error) {
+      el.querySelector('.download-chunk-blocks')?.remove();
+      el.querySelector('.download-bar')?.remove();
+      if (job.blocks) {
+        ChunkBlocks.destroy(job.blocks);
+        job.blocks = null;
+      }
+    } else if (job.blocks && status) {
+      ChunkBlocks.update(job.blocks, ChunkBlocks.fromDownloadStatus(status));
+    }
+  },
+
+  jobProgressHtml(job) {
+    if (job.done || job.error) return '';
+    const status = job.status;
+    const percent = status?.percent ?? 0;
+    return `
+          <div class="download-chunk-blocks chunk-blocks-wrap"></div>
+          <div class="download-bar">
+            <div class="download-bar-fill" data-bar="${percent}" style="width: ${percent}%;"></div>
+          </div>`;
   },
 
   render() {
@@ -283,10 +308,7 @@ const DownloadManager = {
             ${job.done || job.error ? `<button type="button" class="download-dismiss" data-job-id="${job.id}" title="Dismiss">×</button>` : ''}
           </div>
           <div class="download-detail">${this.escape(detail)}</div>
-          <div class="download-chunk-blocks chunk-blocks-wrap"></div>
-          <div class="download-bar">
-            <div class="download-bar-fill" data-bar="${percent}"></div>
-          </div>
+          ${this.jobProgressHtml(job)}
         </div>
       `;
     }).join('');

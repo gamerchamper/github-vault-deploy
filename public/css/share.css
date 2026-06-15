@@ -2123,6 +2123,217 @@ body.share-embed-mode .share-app-frame {
   padding: var(--space-md);
 }
 
+body.share-cinema-active .share-cinema-dock > .share-download-panel {
+  width: 100%;
+  max-width: none;
+}
+
+/* Share cinema dock — download panel (inline, matches dock theme) */
+.share-cinema-dock .share-download-panel {
+  position: static;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--glass-border);
+  box-shadow: none;
+  background: var(--bg-secondary);
+  z-index: auto;
+  overflow: hidden;
+}
+
+.share-cinema-dock .share-download-panel .download-panel-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.share-cinema-dock .share-download-panel .download-panel-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.share-cinema-dock .share-download-panel .download-panel-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  line-height: 1.35;
+}
+
+.share-cinema-dock .share-download-panel .download-list {
+  padding: 0;
+  gap: 0;
+  max-height: min(220px, 32vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-secondary);
+}
+
+.share-cinema-dock .share-download-panel .download-item {
+  background: var(--bg-primary);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.share-cinema-dock .share-download-panel .download-item:last-child {
+  border-bottom: none;
+}
+
+.share-cinema-dock .share-download-panel .download-item-done,
+.share-cinema-dock .share-download-panel .download-item-error {
+  border-color: var(--border);
+}
+
+.share-cinema-dock .share-download-panel .download-item-header {
+  margin-bottom: 0;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.share-cinema-dock .share-download-panel .download-icon {
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.share-cinema-dock .share-download-panel .download-item-error .download-icon {
+  color: var(--danger, #f14c4c);
+}
+
+.share-cinema-dock .share-download-panel .download-item-done .download-icon {
+  color: var(--accent);
+}
+
+.share-cinema-dock .share-download-panel .download-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.share-cinema-dock .share-download-panel .download-percent {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.share-cinema-dock .share-download-panel .download-item-done .download-percent,
+.share-cinema-dock .share-download-panel .download-item-error .download-percent {
+  color: var(--text-secondary);
+}
+
+.share-cinema-dock .share-download-panel .download-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.share-cinema-dock .share-download-panel .download-dismiss:hover {
+  color: var(--text-primary);
+}
+
+.share-cinema-dock .share-download-panel .download-detail {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 2px 0 0 26px;
+  line-height: 1.4;
+}
+
+.share-cinema-dock .share-download-panel .download-item-done .download-detail,
+.share-cinema-dock .share-download-panel .download-item-error .download-detail {
+  margin-bottom: 0;
+}
+
+.share-cinema-dock .share-download-panel .download-bar {
+  height: 3px;
+  background: var(--bg-hover);
+  border-radius: 0;
+  overflow: hidden;
+  margin: var(--space-sm) 0 0;
+}
+
+.share-cinema-dock .share-download-panel .download-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  border-radius: 0;
+  transition: width 0.25s ease;
+}
+
+.share-cinema-dock .share-download-panel .download-item .chunk-blocks-wrap {
+  margin: var(--space-sm) 0 0;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  contain: layout style;
+}
+
+.share-cinema-dock .share-download-panel .download-item .chunk-blocks-header {
+  display: flex;
+  align-items: center;
+  padding: 4px var(--space-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.share-cinema-dock .share-download-panel .download-item .chunk-blocks-label {
+  display: none;
+}
+
+.share-cinema-dock .share-download-panel .download-item .chunk-blocks-meta {
+  width: 100%;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.share-cinema-dock .share-download-panel .download-item .chunk-blocks-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-height: 40px;
+  padding: 4px;
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: none;
+  border-radius: 0;
+  align-content: flex-start;
+}
+
+.share-cinema-dock .share-download-panel .download-item .chunk-block {
+  flex: 1 0 6px;
+  height: 6px;
+  min-width: 4px;
+  max-width: none;
+  border-radius: 0;
+}
+
+.share-cinema-dock .share-download-panel .download-item-done .download-detail {
+  color: var(--text-secondary);
+}
+
 /* Embed mode */
 body.share-embed-mode { padding: 0; }
 body.share-embed-mode .share-hero,
