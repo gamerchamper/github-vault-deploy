@@ -207,8 +207,15 @@ const ShareViewer = {
       this.hlsFallbackTimer = null;
     }
     if (this.hls) {
+      const media = this.hls.media;
+      try { this.hls.detachMedia(); } catch { /* ignore */ }
       this.hls.destroy();
       this.hls = null;
+      if (media) {
+        media.pause();
+        media.removeAttribute('src');
+        try { media.load(); } catch { /* ignore */ }
+      }
     }
   },
 
@@ -351,16 +358,16 @@ const ShareViewer = {
   destroy(options = {}) {
     const token = this.currentToken;
     const fileId = this.currentFile?.id;
+    this.stopStatusPoll();
+    this.stopPlaybackStats();
+    this.stopMediaElements();
+    this.destroyHls();
     if (token && fileId
       && typeof ShareClientStream !== 'undefined'
       && ShareClientStream.token === token
       && ShareClientStream.fileId === fileId) {
       ShareClientStream.abort();
     }
-    this.destroyHls();
-    this.stopStatusPoll();
-    this.stopPlaybackStats();
-    this.stopMediaElements();
     MediaPlayer.stopAudioViz(this.audioViz);
     this.audioViz = null;
     if (this.plyr) {
@@ -831,7 +838,7 @@ const ShareViewer = {
         this.playDirectStream(info, token, video, videoWrap, loading);
       }
 
-      if (this.clientStream) {
+      if (this.clientStream && this._hlsMode !== 'hls') {
         ShareClientStream.load(token, info.id).catch((err) => {
           ShareStreamLog?.warn('session:warm-failed', {
             message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : err.message,

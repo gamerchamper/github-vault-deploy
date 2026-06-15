@@ -124,6 +124,18 @@ const ShareClientStream = {
     if (typeof ShareStreamLog !== 'undefined') ShareStreamLog[level](event, data);
   },
 
+  detachBlobFromMedia(url) {
+    if (!url) return;
+    document.querySelectorAll('#share-viewer video, #share-viewer audio, .share-video-el, .share-audio-el')
+      .forEach((el) => {
+        if (el.src === url) {
+          el.pause();
+          el.removeAttribute('src');
+          try { el.load(); } catch { /* ignore */ }
+        }
+      });
+  },
+
   resetStream(options = {}) {
     const force = options.force === true;
     if (this._streamProtected && !force) {
@@ -140,6 +152,7 @@ const ShareClientStream = {
     });
     this.stopStreamPump();
     if (this.stream?.mseUrl) {
+      this.detachBlobFromMedia(this.stream.mseUrl);
       URL.revokeObjectURL(this.stream.mseUrl);
     }
     if (this.stream?.mediaSource && this.stream.mediaSource.readyState === 'open') {
@@ -1020,10 +1033,10 @@ const ShareClientStream = {
   },
 
   revokeBlobUrl() {
-    if (this.blobUrl) {
-      URL.revokeObjectURL(this.blobUrl);
-      this.blobUrl = null;
-    }
+    if (!this.blobUrl) return;
+    this.detachBlobFromMedia(this.blobUrl);
+    URL.revokeObjectURL(this.blobUrl);
+    this.blobUrl = null;
   },
 
   waitForMediaReady(mediaEl, timeoutMs = 120000) {
