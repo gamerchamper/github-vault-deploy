@@ -137,21 +137,54 @@ const ShareDownload = {
     return this.triggerSaveAnchor(blob, filename);
   },
 
-  buildManifest(fileName, totalSize, totalParts) {
+  payloadPartName(partNum) {
+    return `payload.part${String(partNum).padStart(3, '0')}.bin`;
+  },
+
+  payloadPartNames(totalParts) {
+    return Array.from({ length: totalParts }, (_, i) => this.payloadPartName(i + 1));
+  },
+
+  quoteFileName(name) {
+    return `"${String(name).replace(/"/g, '""')}"`;
+  },
+
+  combineCommands(fileName, totalParts) {
+    const parts = this.payloadPartNames(totalParts);
+    const out = this.quoteFileName(fileName);
+    const concat = parts.join('+');
+    const unixParts = parts.join(' ');
+    return {
+      parts,
+      unix: `cat ${unixParts} > ${out}`,
+      unixGlob: `cat payload.part*.bin > ${out}`,
+      windowsCmd: `copy /b ${concat} ${out}`,
+      windowsPowerShell: `cmd /c 'copy /b ${concat} ${out}'`,
+    };
+  },
+
+  buildManifest(fileName, totalSize, totalParts, useDirectory = true) {
+    const cmds = this.combineCommands(fileName, totalParts);
     return {
       format: 'github-vault-split-v1',
       original_name: fileName,
       total_size: totalSize,
       part_size: this.ZIP_PART_SIZE,
       total_parts: totalParts,
-      combine_unix: `cat payload.part*.bin > ${fileName}`,
-      combine_windows: `copy /b payload.part001.bin+payload.part002.bin+... ${fileName}`,
-      note: 'Extract each zip, then combine payload.part*.bin files in numeric order.',
+      payload_files: cmds.parts,
+      combine_unix: cmds.unix,
+      combine_unix_glob: cmds.unixGlob,
+      combine_windows_cmd: cmds.windowsCmd,
+      combine_windows_powershell: cmds.windowsPowerShell,
+      note: useDirectory
+        ? 'Run the combine command from the folder containing payload.part*.bin files.'
+        : 'Extract each zip, then run the combine command in that folder.',
     };
   },
 
   buildReadme(fileName, totalSize, totalParts, useDirectory) {
     const sizeStr = typeof formatSize === 'function' ? formatSize(totalSize) : `${totalSize} bytes`;
+    const cmds = this.combineCommands(fileName, totalParts);
     const lines = [
       'GitHub Vault — split offline download',
       '',
@@ -159,24 +192,36 @@ const ShareDownload = {
       `Total size: ${sizeStr}`,
       `Parts: ${totalParts} ${useDirectory ? 'payload file(s)' : 'zip file(s)'}, ~1 GB each`,
       '',
+      'Payload files (in order):',
+      ...cmds.parts.map((p) => `  - ${p}`),
+      '',
     ];
     if (useDirectory) {
       lines.push(
         'Payload files are saved directly in your chosen folder.',
-        'Combine payload.part*.bin files in numeric order:',
+        'Open Command Prompt in that folder, or use the PowerShell line below.',
       );
     } else {
       lines.push(
-        '1. Extract every .zip',
-        '2. Combine the payload.part*.bin files in order:',
+        '1. Extract every .zip into one folder',
+        '2. Open Command Prompt in that folder (or use PowerShell below)',
       );
     }
     lines.push(
       '',
-      `   Linux/macOS: cat payload.part*.bin > ${fileName}`,
-      `   Windows:     copy /b payload.part001.bin+payload.part002.bin+... ${fileName}`,
+      'Linux / macOS (Terminal):',
+      `  ${cmds.unix}`,
+      `  (or: ${cmds.unixGlob})`,
       '',
-      'See manifest.json for details.',
+      'Windows — Command Prompt (cmd.exe):',
+      '  Do NOT paste into PowerShell; open cmd.exe or use the PowerShell line below.',
+      `  ${cmds.windowsCmd}`,
+      '',
+      'Windows — PowerShell:',
+      '  PowerShell aliases "copy" to Copy-Item; use cmd /c instead:',
+      `  ${cmds.windowsPowerShell}`,
+      '',
+      'See manifest.json for the same commands and file list.',
     );
     return lines.join('\n');
   },
@@ -273,7 +318,7 @@ const ShareDownload = {
           savedFiles.push(await this.writeTextToDirectory(
             dirHandle,
             'manifest.json',
-            JSON.stringify(this.buildManifest(fileName, totalSize, totalParts), null, 2),
+            JSON.stringify(this.buildManifest(fileName, totalSize, totalParts, true), null, 2),
           ));
         }
         savedFiles.push(await this.writePartsToDirectory(dirHandle, payloadName, partBuffers, partSize));
@@ -286,7 +331,7 @@ const ShareDownload = {
           });
           entries.push({
             name: 'manifest.json',
-            data: ShareZip.utf8(JSON.stringify(this.buildManifest(fileName, totalSize, totalParts), null, 2)),
+            data: ShareZip.utf8(JSON.stringify(this.buildManifest(fileName, totalSize, totalParts, false), null, 2)),
           });
         }
         entries.push({
