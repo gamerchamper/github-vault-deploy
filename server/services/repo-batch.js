@@ -330,6 +330,7 @@ module.exports = {
   createStorageRepo,
   maxStorageRepoSuffix,
   hasActiveBatchTask,
+  accountLabel,
   runBatchCreate,
   startBatchCreate,
 };
