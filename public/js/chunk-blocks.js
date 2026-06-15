@@ -320,8 +320,8 @@ const ChunkBlocks = {
 
   fromDownloadStatus(status) {
     return {
-      completed: status?.fetched || 0,
-      total: status?.total || 0,
+      completed: status?.fetched ?? status?.segments ?? 0,
+      total: status?.total ?? status?.total_segments ?? 0,
       stage: status?.stage || 'fetching',
     };
   },

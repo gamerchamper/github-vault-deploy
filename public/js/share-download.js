@@ -14,15 +14,20 @@ const ShareDownload = {
   },
 
   triggerSave(blob, filename) {
-    const url = URL.createObjectURL(blob);
+    const downloadBlob = blob.slice(0, blob.size, blob.type || 'application/octet-stream');
+    const url = URL.createObjectURL(downloadBlob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     a.rel = 'noopener';
     document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    requestAnimationFrame(() => {
+      a.click();
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 120000);
+    });
   },
 
   buildManifest(fileName, totalSize, totalParts) {
@@ -58,9 +63,17 @@ const ShareDownload = {
   },
 
   async exportShare(token, file, onProgress) {
-    if (ShareClientStream.stream) ShareClientStream.resetStream();
+    const sameSession = ShareClientStream.token === token
+      && ShareClientStream.fileId === file.id
+      && ShareClientStream.manifest;
 
-    await ShareClientStream.load(token, file.id, onProgress);
+    if (sameSession) {
+      if (onProgress) ShareClientStream.onProgress = onProgress;
+      ShareClientStream.onProgress(ShareClientStream.getDownloadStatus());
+    } else {
+      if (ShareClientStream.stream) ShareClientStream.resetStream();
+      await ShareClientStream.load(token, file.id, onProgress);
+    }
 
     const size = ShareClientStream.manifest?.size || file.size || 0;
     const name = ShareClientStream.manifest?.name || file.name;

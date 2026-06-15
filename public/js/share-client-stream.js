@@ -1127,6 +1127,12 @@ const ShareClientStream = {
     return this.fetchAllParallel();
   },
 
+  endDownloadSession() {
+    this.abortController?.abort();
+    this.pool?.stop();
+    this.abortController = null;
+  },
+
   abort() {
     this.abortController?.abort();
     this.pool?.stop();

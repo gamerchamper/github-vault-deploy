@@ -125,7 +125,7 @@ const DownloadManager = {
       this.render();
       if (typeof App !== 'undefined') App.toast(err.message, 'error');
     } finally {
-      ShareClientStream.abort();
+      ShareClientStream.endDownloadSession();
     }
   },
 
@@ -234,7 +234,7 @@ const DownloadManager = {
     const el = document.querySelector(`.download-item[data-job-id="${job.id}"]`);
     if (!el) return;
     const status = job.status;
-    const percent = job.error ? 0 : job.done ? 100 : (status?.percent ?? 0);
+    const percent = job.error ? 0 : job.done ? 100 : (status?.percent ?? status?.progress ?? 0);
     const detail = job.error
       ? job.error
       : job.done
@@ -270,7 +270,7 @@ const DownloadManager = {
   jobProgressHtml(job) {
     if (job.done || job.error) return '';
     const status = job.status;
-    const percent = status?.percent ?? 0;
+    const percent = status?.percent ?? status?.progress ?? 0;
     return `
           <div class="download-chunk-blocks chunk-blocks-wrap"></div>
           <div class="download-bar">
