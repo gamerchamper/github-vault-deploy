@@ -93,7 +93,13 @@ const SharePlaylist = {
   },
 
   async load() {
-    const res = await fetch(this.apiBase());
+    let res;
+    if (window.__shareBootPrefetch) {
+      res = await window.__shareBootPrefetch;
+      window.__shareBootPrefetch = null;
+    } else {
+      res = await fetch(this.apiBase());
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Playlist not found' }));
       throw new Error(err.error || 'Playlist not found');
@@ -181,6 +187,8 @@ const SharePlaylist = {
     if (coverWrap && cover) {
       if (coverId) {
         cover.src = this.thumbnailUrl(coverId);
+        cover.loading = 'eager';
+        if ('fetchPriority' in cover) cover.fetchPriority = 'high';
         coverWrap.classList.remove('hidden');
       } else {
         cover.removeAttribute('src');

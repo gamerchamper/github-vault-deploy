@@ -3,6 +3,20 @@
  */
 @import url('tokens.css');
 
+#share-file-view:not(.hidden) .share-cinema-stage {
+  min-height: clamp(200px, 52vw, 48vh);
+  aspect-ratio: 16 / 9;
+  contain: layout;
+}
+
+.share-dock-stats {
+  min-height: 3.5rem;
+}
+
+.share-dock-stats:empty {
+  min-height: 0;
+}
+
 body.share-body {
   --share-shoutbox-width: 360px;
   --share-right-rail-width: var(--share-shoutbox-width);

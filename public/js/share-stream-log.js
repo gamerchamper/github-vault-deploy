@@ -160,4 +160,3 @@ const ShareStreamLog = {
   },
 };
 
-ShareStreamLog.init();

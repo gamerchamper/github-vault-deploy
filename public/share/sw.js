@@ -1,8 +1,9 @@
-const CACHE = 'vault-share-v14';
-const LEGACY_CACHES = ['vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
+const CACHE = 'vault-share-v15';
+const LEGACY_CACHES = ['vault-share-v14', 'vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
 
 const STATIC_ASSETS = [
-  '/css/explorer.css',
+  '/css/share.css',
+  '/js/share-lazy-libs.js',
   '/js/adaptive-concurrency.js',
   '/js/share-crypto.js',
   '/js/share-media-cache.js',

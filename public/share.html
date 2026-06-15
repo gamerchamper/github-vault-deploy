@@ -5,10 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><!-- SHARE_PAGE_TITLE --> — GitHub Vault</title>
   <!-- SHARE_EMBED_META -->
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.17">
-  <link rel="stylesheet" href="/css/share.css?v=1.2.2">
-  <link rel="stylesheet" href="/css/playlists.css?v=1.0.2">
-  <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
+  <link rel="preconnect" href="/" crossorigin>
+  <link rel="stylesheet" href="/css/share.css?v=1.2.3">
+  <script>
+    (function prefetchShareApi() {
+      const parts = location.pathname.split('/').filter(Boolean);
+      const i = parts.indexOf('share');
+      if (i < 0) return;
+      const seg = parts[i + 1];
+      let token = null;
+      let playlist = false;
+      if (seg === 'p') {
+        playlist = true;
+        token = parts[i + 2];
+      } else if (seg === 'c') {
+        token = parts[i + 2];
+      } else if (seg && seg !== 'embed') {
+        token = seg;
+      }
+      if (!token) return;
+      const file = new URLSearchParams(location.search).get('file');
+      let url;
+      if (playlist) {
+        url = '/api/public/playlist/' + encodeURIComponent(token);
+      } else {
+        url = '/api/public/share/' + encodeURIComponent(token) + '/info';
+        if (file) url += '?file=' + encodeURIComponent(file);
+      }
+      window.__shareBootPrefetch = fetch(url, { credentials: 'same-origin' });
+    })();
+  </script>
   <!-- SHARE_EMBED_BOOT -->
 </head>
 <body class="share-body vault-scroll">
@@ -148,26 +174,23 @@
 
   <button id="shoutbox-open-btn" class="shoutbox-open-btn hidden" type="button" title="Open chat" aria-label="Open chat">💬</button>
 
-  <script src="/js/hls.min.js?v=1.0.0"></script>
-  <script src="/js/pdf-viewer.js?v=1.0.0"></script>
-  <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
-  <script src="/js/adaptive-concurrency.js?v=1.0.0"></script>
-  <script src="/js/share-crypto.js?v=1.0.1"></script>
-  <script src="/js/share-media-cache.js?v=1.0.0"></script>
-  <script src="/js/share-stream-log.js?v=1.0.1"></script>
-  <script src="/js/share-client-stream.js?v=1.0.5"></script>
-  <script src="/js/share-download.js?v=1.0.8"></script>
-  <script src="/js/api.js?v=1.0.0"></script>
-  <script src="/js/media-player.js?v=1.0.8"></script>
-  <script src="/js/playback-memory.js?v=1.0.1"></script>
-  <script src="/js/playlist-queue.js?v=1.0.3"></script>
-  <script src="/js/chunk-blocks.js?v=1.0.3"></script>
-  <script src="/js/download-manager.js?v=1.0.8"></script>
-  <script src="/js/share-stage-layout.js?v=1.1.5"></script>
-  <script src="/js/share-viewer.js?v=1.0.12"></script>
-  <script src="/js/share-presence.js?v=1.0.0"></script>
-  <script src="/js/share-shoutbox.js?v=1.0.2"></script>
-  <script src="/js/share-playlist.js?v=1.0.7"></script>
+  <script defer src="/js/share-lazy-libs.js?v=1.0.0"></script>
+  <script defer src="/js/adaptive-concurrency.js?v=1.0.0"></script>
+  <script defer src="/js/share-crypto.js?v=1.0.1"></script>
+  <script defer src="/js/share-media-cache.js?v=1.0.0"></script>
+  <script defer src="/js/share-client-stream.js?v=1.0.5"></script>
+  <script defer src="/js/share-download.js?v=1.0.8"></script>
+  <script defer src="/js/api.js?v=1.0.0"></script>
+  <script defer src="/js/media-player.js?v=1.0.8"></script>
+  <script defer src="/js/playback-memory.js?v=1.0.1"></script>
+  <script defer src="/js/playlist-queue.js?v=1.0.3"></script>
+  <script defer src="/js/chunk-blocks.js?v=1.0.3"></script>
+  <script defer src="/js/download-manager.js?v=1.0.8"></script>
+  <script defer src="/js/share-stage-layout.js?v=1.1.5"></script>
+  <script defer src="/js/share-viewer.js?v=1.0.13"></script>
+  <script defer src="/js/share-presence.js?v=1.0.0"></script>
+  <script defer src="/js/share-shoutbox.js?v=1.0.2"></script>
+  <script defer src="/js/share-playlist.js?v=1.0.8"></script>
   <script>
     function parseShareRoute() {
       const pathParts = location.pathname.split('/').filter(Boolean);
@@ -392,6 +415,7 @@
     }
 
     async function loadFolder(path = null) {
+      await ShareLazyLibs.loadExplorerCss().catch(() => {});
       const query = path ? `?path=${encodeURIComponent(path)}` : '';
       const res = await fetch(`/api/public/share/${token}/list${query}`);
       if (!res.ok) throw new Error('Share link not found or expired');
@@ -551,7 +575,10 @@
         if (state.isPlaylistShare && !initialFileId) {
           return null;
         }
-        const res = await fetch(`${shareApiBase()}/info${infoQs}`);
+        const res = window.__shareBootPrefetch
+          ? await window.__shareBootPrefetch
+          : await fetch(`${shareApiBase()}/info${infoQs}`);
+        window.__shareBootPrefetch = null;
         if (res.ok) {
           const info = await res.json();
           try {
@@ -585,6 +612,7 @@
 
     async function initPlaylistShare() {
       setPlaylistShareMode();
+      ShareLazyLibs.loadPlaylistsCss().catch(() => {});
       document.getElementById('share-hero')?.classList.add('hidden');
       SharePlaylist.init(token, async (fileId) => {
         updateShareFileUrl(fileId);
@@ -600,10 +628,19 @@
       applyEmbedMode();
       if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
       window.scrollTo(0, 0);
-      if ('serviceWorker' in navigator) {
+      if (ShareLazyLibs.needsStreamLog()) {
+        ShareLazyLibs.loadStreamLog().catch(() => {});
+      }
+      const registerSw = () => {
+        if (!('serviceWorker' in navigator)) return;
         navigator.serviceWorker.register('/share/sw.js', { scope: '/share/' })
           .then((reg) => reg.update())
           .catch(() => {});
+      };
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(registerSw, { timeout: 8000 });
+      } else {
+        window.addEventListener('load', registerSw, { once: true });
       }
       try {
         if (state.isPlaylistShare) {
@@ -677,7 +714,7 @@
       ShareViewer.destroy({ useBeacon: true });
     });
 
-    init();
+    window.addEventListener('DOMContentLoaded', () => { init(); });
   </script>
 </body>
 </html>

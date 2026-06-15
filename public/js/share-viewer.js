@@ -115,6 +115,24 @@ const ShareViewer = {
     return `${this.apiBase(token)}/download${this.fileParam(fileId)}`;
   },
 
+  applyVideoPoster(video, info, token) {
+    if (!video || !info?.has_thumbnail) return;
+    const poster = this.thumbnailUrl(token, info.id);
+    video.poster = poster;
+    this.preloadPoster(poster);
+  },
+
+  preloadPoster(url) {
+    if (!url || document.querySelector(`link[data-share-poster="${url}"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = 'image';
+    link.href = url;
+    link.setAttribute('data-share-poster', url);
+    if ('fetchPriority' in link) link.fetchPriority = 'high';
+    document.head.appendChild(link);
+  },
+
   hlsPlaylistUrl(token, fileId) {
     return `${this.apiBase(token)}/hls${this.fileParam(fileId)}`;
   },
@@ -139,6 +157,7 @@ const ShareViewer = {
       this.syncChunksStatLabel();
       if (info?.chunk_count) this.mountChunkBlocks(info, null);
     }
+    this.applyVideoPoster(video, info, token);
     const streamUrl = this.streamUrl(token, info.id);
     MediaPlayer.attachStreamPlayback(video, {
       onReady: () => {
@@ -150,7 +169,7 @@ const ShareViewer = {
     });
     video.src = streamUrl;
     video.load();
-    this.initVideoPlyr(video);
+    void this.initVideoPlyr(video);
     setTimeout(() => {
       videoWrap.classList.remove('hidden');
       this.onMediaReady(video, videoWrap, loading);
@@ -170,12 +189,12 @@ const ShareViewer = {
 
     const typeParam = new URL(location.href).searchParams.get('type');
     if (typeParam === 'github' && info.hls_playlist_url) {
-      this.playWithHls(info, token, video, videoWrap, loading);
+      void this.playWithHls(info, token, video, videoWrap, loading);
       return;
     }
 
     if (this.shouldUseHls(info, status)) {
-      this.playWithHls(info, token, video, videoWrap, loading);
+      void this.playWithHls(info, token, video, videoWrap, loading);
       return;
     }
 
@@ -193,8 +212,14 @@ const ShareViewer = {
     }
   },
 
-  playWithHlsUrl(info, token, video, videoWrap, loading) {
+  async playWithHlsUrl(info, token, video, videoWrap, loading) {
     this.destroyHls();
+    try {
+      await ShareLazyLibs.loadHls();
+    } catch {
+      this.playDirectStream(info, token, video, videoWrap, loading);
+      return;
+    }
     if (typeof Hls === 'undefined' || !Hls.isSupported()) {
       this.playDirectStream(info, token, video, videoWrap, loading);
       return;
@@ -208,10 +233,11 @@ const ShareViewer = {
     this.hls = new Hls({ enableWorker: true, lowLatencyMode: true });
     this.hls.loadSource(proxyUrl);
     this.hls.attachMedia(video);
+    this.applyVideoPoster(video, info, token);
     this.bindHlsSegmentTracking(info);
 
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      this.initVideoPlyr(video);
+      void this.initVideoPlyr(video);
       this.syncDurationStat(video);
       video.play().catch(() => {});
     });
@@ -247,7 +273,7 @@ const ShareViewer = {
     btnRaw.onclick = () => reload('direct');
   },
 
-  playWithHls(info, token, video, videoWrap, loading) {
+  async playWithHls(info, token, video, videoWrap, loading) {
     this.destroyHls();
     this.hlsFallbackTimer = setTimeout(() => {
       if (!this.mediaReady) {
@@ -255,6 +281,14 @@ const ShareViewer = {
         this.playDirectStream(info, token, video, videoWrap, loading);
       }
     }, 20000);
+
+    try {
+      await ShareLazyLibs.loadHls();
+    } catch {
+      clearTimeout(this.hlsFallbackTimer);
+      this.playDirectStream(info, token, video, videoWrap, loading);
+      return;
+    }
 
     if (typeof Hls === 'undefined' || !Hls.isSupported()) {
       clearTimeout(this.hlsFallbackTimer);
@@ -278,6 +312,7 @@ const ShareViewer = {
 
     this.hls.loadSource(playlistUrl);
     this.hls.attachMedia(video);
+    this.applyVideoPoster(video, info, token);
     this.bindHlsSegmentTracking(info);
 
     video.oncanplay = () => {
@@ -383,8 +418,13 @@ const ShareViewer = {
     document.body.classList.toggle('share-player-fullscreen', !!active);
   },
 
-  initVideoPlyr(video) {
+  async initVideoPlyr(video) {
     if (this.plyr || !video) return this.plyr;
+    try {
+      await ShareLazyLibs.loadPlyr();
+    } catch {
+      return null;
+    }
     this.plyr = MediaPlayer.createPlyr(video, false, {
       onEnterFullscreen: () => this.setPlayerFullscreen(true),
       onExitFullscreen: () => this.setPlayerFullscreen(false),
@@ -769,6 +809,7 @@ const ShareViewer = {
       const videoWrap = viewer.querySelector('.share-video-player');
       const video = viewer.querySelector('.share-video-el');
       const loading = document.getElementById('share-media-loading');
+      this.applyVideoPoster(video, info, token);
       const stats = this.mountStats(info);
 
       this.resetMetrics(info);
@@ -782,9 +823,9 @@ const ShareViewer = {
       this.syncChunksStatLabel();
 
       if (hasHls && useHls) {
-        this.playWithHlsUrl(info, token, video, videoWrap, loading);
+        void this.playWithHlsUrl(info, token, video, videoWrap, loading);
       } else if (hasHls && useGithub) {
-        this.playWithHls(info, token, video, videoWrap, loading);
+        void this.playWithHls(info, token, video, videoWrap, loading);
       } else {
         this.startStatusPoll(token, info);
         this.playDirectStream(info, token, video, videoWrap, loading);
@@ -851,7 +892,9 @@ const ShareViewer = {
       box.id = 'share-pdf-mount';
       box.className = 'share-pdf-viewer';
       viewer.appendChild(box);
-      PdfViewer.mount(box, this.downloadUrl(token, info.id));
+      void ShareLazyLibs.loadPdfViewer().then(() => {
+        PdfViewer.mount(box, this.downloadUrl(token, info.id));
+      }).catch(() => this.showError('Failed to load PDF viewer'));
       return;
     }
     if (previewType === 'text') {
@@ -893,20 +936,23 @@ const ShareViewer = {
       const isAudio = this.currentMediaType === 'audio';
       const canvas = wrap.querySelector('.share-audio-viz');
       if (isAudio) {
-        this.plyr = MediaPlayer.createPlyr(el, true, {
-          onProgress: () => this.updatePlaybackStats(el),
-          onTimeupdate: () => this.updatePlaybackStats(el),
-          onPlay: () => MediaPlayer.resumeAudioViz(this.audioViz, el, canvas),
-          onPause: () => MediaPlayer.drawAudioViz(this.audioViz, el, canvas),
-          onEnded: () => {
-            MediaPlayer.drawAudioViz(this.audioViz, el, canvas);
-            if (this.playlistMode && typeof SharePlaylist !== 'undefined') {
-              SharePlaylist.onMediaEnded();
-            }
-          },
-        });
+        void ShareLazyLibs.loadPlyr().then(() => {
+          if (this.plyr) return;
+          this.plyr = MediaPlayer.createPlyr(el, true, {
+            onProgress: () => this.updatePlaybackStats(el),
+            onTimeupdate: () => this.updatePlaybackStats(el),
+            onPlay: () => MediaPlayer.resumeAudioViz(this.audioViz, el, canvas),
+            onPause: () => MediaPlayer.drawAudioViz(this.audioViz, el, canvas),
+            onEnded: () => {
+              MediaPlayer.drawAudioViz(this.audioViz, el, canvas);
+              if (this.playlistMode && typeof SharePlaylist !== 'undefined') {
+                SharePlaylist.onMediaEnded();
+              }
+            },
+          });
+        }).catch(() => {});
       } else {
-        this.initVideoPlyr(el);
+        void this.initVideoPlyr(el);
       }
     }
 
