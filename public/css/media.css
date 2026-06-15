@@ -133,6 +133,14 @@ body.share-cinema-active .share-audio-player .plyr__controls,
   max-height: calc(100vh - 220px);
 }
 
+.viewer-player-wrap.vault-native-video-wrap video.vault-native-video {
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 220px);
+  object-fit: contain;
+  display: block;
+}
+
 /* Browser video enhancement compatibility (Edge VSR, RTX VSR, Safari HW decode) */
 .vault-video-enhanced,
 .plyr__video-wrapper .vault-video-enhanced {

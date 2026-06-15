@@ -230,6 +230,56 @@ const MediaPlayer = {
 
   CAST_ICON: `<svg class="icon--cast" role="presentation" focusable="false" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11zm20-7H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>`,
 
+  /** iOS / touch phones: Safari native controls work better than Plyr overlay. */
+  shouldUseNativeVideoControls() {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) return true;
+    if (/Android/i.test(ua) && typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches) {
+      return true;
+    }
+    return false;
+  },
+
+  createNativeVideoPlayer(el, hooks = {}) {
+    this.configureVideoElement(el, { enhancerWrap: false });
+    el.classList.add('vault-native-video');
+
+    const wrap = el.closest('.share-video-player, .viewer-player-wrap, .details-preview-media');
+    if (wrap) wrap.classList.add('vault-native-video-wrap');
+
+    const listeners = [];
+    const stub = {
+      native: true,
+      media: el,
+      destroy() {
+        listeners.forEach(({ ev, fn }) => el.removeEventListener(ev, fn));
+        el.classList.remove('vault-native-video');
+        wrap?.classList.remove('vault-native-video-wrap');
+      },
+      on(event, fn) {
+        el.addEventListener(event, fn);
+        listeners.push({ ev: event, fn });
+      },
+    };
+
+    const bind = (event, hook) => { if (hook) stub.on(event, hook); };
+    bind('progress', hooks.onProgress);
+    bind('timeupdate', hooks.onTimeupdate);
+    bind('play', hooks.onPlay);
+    bind('pause', hooks.onPause);
+    bind('ended', hooks.onEnded);
+    if (hooks.onEnterFullscreen) {
+      stub.on('webkitbeginfullscreen', hooks.onEnterFullscreen);
+    }
+    if (hooks.onExitFullscreen) {
+      stub.on('webkitendfullscreen', hooks.onExitFullscreen);
+    }
+    return stub;
+  },
+
   /** Prepare a <video> for browser-native enhancement (Edge VSR, RTX VSR, HW decode). */
   configureVideoElement(video, options = {}) {
     if (!video || video.tagName !== 'VIDEO') return video;
@@ -391,16 +441,32 @@ const MediaPlayer = {
   },
 
   createPlyr(el, isAudio, hooks = {}) {
-    if (typeof Plyr === 'undefined') return null;
-    if (isAudio) this.configureAudioElement(el);
-    else this.configureVideoElement(el);
-    const plyr = new Plyr(el, this.plyrOptions(isAudio));
-    if (isAudio) this.configureAudioElement(plyr.media || el);
-    else {
-      this.enableBrowserVideoActions(plyr);
-      const wrapper = plyr.elements?.container?.querySelector?.('.plyr__video-wrapper');
-      if (wrapper) wrapper.classList.add('vault-video-enhanced-wrap');
+    if (isAudio) {
+      if (typeof Plyr === 'undefined') return null;
+      this.configureAudioElement(el);
+      const plyr = new Plyr(el, this.plyrOptions(true));
+      this.configureAudioElement(plyr.media || el);
+      this.enableRemotePlayback(plyr);
+      this.enableVolumeBoost(plyr);
+      if (hooks.onProgress) plyr.on('progress', hooks.onProgress);
+      if (hooks.onTimeupdate) plyr.on('timeupdate', hooks.onTimeupdate);
+      if (hooks.onPlay) plyr.on('play', hooks.onPlay);
+      if (hooks.onPause) plyr.on('pause', hooks.onPause);
+      if (hooks.onEnded) plyr.on('ended', hooks.onEnded);
+      return plyr;
     }
+
+    if (this.shouldUseNativeVideoControls()) {
+      return this.createNativeVideoPlayer(el, hooks);
+    }
+
+    if (typeof Plyr === 'undefined') return null;
+
+    this.configureVideoElement(el);
+    const plyr = new Plyr(el, this.plyrOptions(false));
+    this.enableBrowserVideoActions(plyr);
+    const wrapper = plyr.elements?.container?.querySelector?.('.plyr__video-wrapper');
+    if (wrapper) wrapper.classList.add('vault-video-enhanced-wrap');
     this.enableRemotePlayback(plyr);
     this.enableVolumeBoost(plyr);
     if (hooks.onProgress) plyr.on('progress', hooks.onProgress);
@@ -408,8 +474,8 @@ const MediaPlayer = {
     if (hooks.onPlay) plyr.on('play', hooks.onPlay);
     if (hooks.onPause) plyr.on('pause', hooks.onPause);
     if (hooks.onEnded) plyr.on('ended', hooks.onEnded);
-    if (!isAudio && hooks.onEnterFullscreen) plyr.on('enterfullscreen', hooks.onEnterFullscreen);
-    if (!isAudio && hooks.onExitFullscreen) plyr.on('exitfullscreen', hooks.onExitFullscreen);
+    if (hooks.onEnterFullscreen) plyr.on('enterfullscreen', hooks.onEnterFullscreen);
+    if (hooks.onExitFullscreen) plyr.on('exitfullscreen', hooks.onExitFullscreen);
     return plyr;
   },
 

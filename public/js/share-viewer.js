@@ -366,7 +366,7 @@ const ShareViewer = {
   },
 
   initVideoPlyr(video) {
-    if (typeof Plyr === 'undefined' || this.plyr || !video) return this.plyr;
+    if (this.plyr || !video) return this.plyr;
     this.plyr = MediaPlayer.createPlyr(video, false, {
       onEnterFullscreen: () => this.setPlayerFullscreen(true),
       onExitFullscreen: () => this.setPlayerFullscreen(false),

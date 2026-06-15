@@ -1263,6 +1263,63 @@ body.share-cinema-active .share-video-player .share-video-el {
   pointer-events: auto;
 }
 
+/* Mobile / iOS: native controls only — no Plyr chrome */
+.share-video-player.vault-native-video-wrap,
+.viewer-player-wrap.vault-native-video-wrap {
+  background: #000;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.share-video-player.vault-native-video-wrap .share-video-el,
+.share-video-player.vault-native-video-wrap video.vault-native-video,
+.viewer-player-wrap.vault-native-video-wrap video.vault-native-video {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  width: 100%;
+  height: auto !important;
+  max-height: min(65vh, 800px);
+  object-fit: contain;
+  display: block;
+}
+
+body.share-cinema-active .share-video-player.vault-native-video-wrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: none !important;
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 0;
+}
+
+body.share-cinema-active .share-video-player.vault-native-video-wrap .share-video-el,
+body.share-cinema-active .share-video-player.vault-native-video-wrap video.vault-native-video {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100% !important;
+  max-height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+body.share-cinema-active .share-stage-fitted .share-video-player.vault-native-video-wrap,
+body.share-cinema-active .share-stage-fitted .share-video-player.vault-native-video-wrap .share-video-el,
+body.share-cinema-active .share-stage-fitted .share-video-player.vault-native-video-wrap video.vault-native-video {
+  height: 100% !important;
+  min-height: 0;
+  flex: 1;
+}
+
+body.share-cinema-active .share-cinema-stage.share-stage-capped .share-video-player.vault-native-video-wrap .share-video-el,
+body.share-cinema-active .share-cinema-stage.share-stage-capped .share-video-player.vault-native-video-wrap video.vault-native-video {
+  object-fit: cover;
+}
+
 .share-video-player .plyr--video { max-height: none; width: 100%; }
 .share-video-player .plyr__video-wrapper {
   height: auto !important;
