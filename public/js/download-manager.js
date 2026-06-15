@@ -87,6 +87,7 @@ const DownloadManager = {
       done: false,
       pendingParts: [],
       saveDir: null,
+      savedFiles: [],
     };
     this.jobs.set(jobId, job);
     this.render();
@@ -120,35 +121,37 @@ const DownloadManager = {
       }, { dirHandle: job.saveDir });
 
       job.pendingParts = result.pendingParts || [];
+      job.savedFiles = result.savedFiles || [];
       job.splitParts = result.mode === 'split' ? result.parts : null;
-      job.done = job.pendingParts.length === 0;
+      job.done = job.pendingParts.length === 0 && job.savedFiles.length > 0;
+      if (job.saveDir && job.pendingParts.length === 0 && job.savedFiles.length === 0) {
+        throw new Error('No files were saved to the selected folder');
+      }
       job.status = {
         ...ShareClientStream.getDownloadStatus(),
-        percent: 100,
-        progress: 100,
+        percent: job.done ? 100 : (job.status?.percent ?? job.status?.progress ?? 0),
+        progress: job.done ? 100 : (job.status?.progress ?? 0),
         ready: job.done,
-        stage: job.pendingParts.length ? 'caching' : (result.mode === 'split' ? 'done' : 'ready'),
+        stage: job.pendingParts.length ? 'caching' : (job.done ? 'done' : 'ready'),
       };
       this.render();
 
       if (job.pendingParts.length) {
-        const msg = `${job.pendingParts.length} zip part(s) ready — click Save below for each file`;
-        if (typeof App !== 'undefined') App.toast(msg, 'info');
-      } else {
-        const msg = result.mode === 'split'
-          ? (result.usedDirectory
-            ? `Saved ${result.parts} zip part(s) to selected folder`
-            : `Saved ${result.parts} zip part(s) — see README in part 1`)
-          : (job.saveDir ? `Saved ${file.name} to selected folder` : `Downloaded ${file.name}`);
-        if (typeof App !== 'undefined') App.toast(msg, 'success');
-        setTimeout(() => this.removeJob(job.id), 6000);
+        this.notifyDownload(`${job.pendingParts.length} zip part(s) ready — click Save below for each file`);
+      } else if (job.done) {
+        const names = job.savedFiles.map((f) => f.name).join(', ');
+        this.notifyDownload(job.saveDir
+          ? `Saved to folder: ${names}`
+          : `Downloaded ${file.name}`);
+        if (!job.saveDir) setTimeout(() => this.removeJob(job.id), 8000);
       }
     } catch (err) {
       job.error = err.message;
-      job.done = true;
+      job.done = false;
       job.pendingParts = [];
+      job.savedFiles = [];
       this.render();
-      if (typeof App !== 'undefined') App.toast(err.message, 'error');
+      this.notifyDownload(err.message, 'error');
     } finally {
       ShareClientStream.endDownloadSession();
     }
@@ -160,13 +163,30 @@ const DownloadManager = {
     if (!part) return;
     await ShareDownload.triggerSaveAnchor(part.blob, part.name);
     job.pendingParts.splice(partIndex, 1);
+    job.savedFiles.push({ name: part.name, size: part.blob.size });
     if (!job.pendingParts.length) {
       job.done = true;
       job.status = { ...job.status, stage: 'done', ready: true, percent: 100, progress: 100 };
-      if (typeof App !== 'undefined') App.toast(`Downloaded ${job.fileName}`, 'success');
-      setTimeout(() => this.removeJob(job.id), 6000);
+      this.notifyDownload(`Downloaded ${job.fileName}`);
+      setTimeout(() => this.removeJob(job.id), 8000);
     }
     this.render();
+  },
+
+  notifyDownload(message, type = 'success') {
+    if (typeof App !== 'undefined') App.toast(message, type);
+  },
+
+  formatSavedSize(size) {
+    return typeof formatSize === 'function' ? formatSize(size) : `${size} B`;
+  },
+
+  jobSavedFilesHtml(job) {
+    if (!job.savedFiles?.length) return '';
+    return `
+          <ul class="download-saved-files">
+            ${job.savedFiles.map((f) => `<li>${this.escape(f.name)} · ${this.escape(this.formatSavedSize(f.size))}</li>`).join('')}
+          </ul>`;
   },
 
   downloadUrl(job) {
@@ -292,6 +312,8 @@ const DownloadManager = {
     if (job.done || job.error || job.pendingParts?.length) {
       el.querySelector('.download-chunk-blocks')?.remove();
       el.querySelector('.download-bar')?.remove();
+      const progressEl = el.querySelector('.download-progress');
+      if (progressEl) progressEl.innerHTML = this.jobProgressHtml(job);
       if (job.blocks) {
         ChunkBlocks.destroy(job.blocks);
         job.blocks = null;
@@ -305,6 +327,16 @@ const DownloadManager = {
     if (job.error) return job.error;
     if (job.pendingParts?.length) {
       return `Click Save for each remaining zip part (${job.pendingParts.length} left)`;
+    }
+    if (job.done && job.savedFiles?.length) {
+      if (job.saveDir) {
+        const names = job.savedFiles.map((f) => f.name).join(', ');
+        return `Saved to your folder: ${names}`;
+      }
+      if (job.splitParts) {
+        return `Saved ${job.splitParts} zip part(s) — see README in part 1`;
+      }
+      return job.saveDir ? 'Saved to your selected folder' : 'Saved to your downloads folder';
     }
     if (job.done) {
       if (job.splitParts) {
@@ -332,7 +364,9 @@ const DownloadManager = {
   },
 
   jobProgressHtml(job) {
-    if (job.done || job.error || job.pendingParts?.length) return this.jobPendingPartsHtml(job);
+    if (job.error) return '';
+    if (job.done && job.savedFiles?.length) return this.jobSavedFilesHtml(job);
+    if (job.pendingParts?.length) return this.jobPendingPartsHtml(job);
     const status = job.status;
     const percent = status?.percent ?? status?.progress ?? 0;
     return `
@@ -364,7 +398,7 @@ const DownloadManager = {
             ${job.done || job.error || job.pendingParts?.length ? `<button type="button" class="download-dismiss" data-job-id="${job.id}" title="Dismiss">×</button>` : ''}
           </div>
           <div class="download-detail">${this.escape(detail)}</div>
-          ${this.jobProgressHtml(job)}
+          <div class="download-progress">${this.jobProgressHtml(job)}</div>
         </div>
       `;
     }).join('');

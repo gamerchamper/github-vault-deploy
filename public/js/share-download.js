@@ -2,6 +2,7 @@ const ShareDownload = {
   ZIP_PART_SIZE: 1024 * 1024 * 1024,
   DESKTOP_SINGLE_MAX: 768 * 1024 * 1024,
   MOBILE_SINGLE_MAX: 200 * 1024 * 1024,
+  WRITE_CHUNK: 16 * 1024 * 1024,
 
   singleMaxBytes() {
     return ShareClientStream.isLowMemoryDevice()
@@ -18,14 +19,87 @@ const ShareDownload = {
   },
 
   async pickSaveDirectory() {
-    return window.showDirectoryPicker({ mode: 'readwrite' });
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    await this.ensureDirPermission(handle);
+    return handle;
+  },
+
+  async ensureDirPermission(dirHandle) {
+    if (!dirHandle?.queryPermission) return;
+    let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') {
+      perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+    }
+    if (perm !== 'granted') {
+      throw new Error('Folder permission denied — cannot save download');
+    }
+  },
+
+  async writeTextToDirectory(dirHandle, filename, text) {
+    const data = new TextEncoder().encode(text);
+    return this.writePartsToDirectory(dirHandle, filename, [data], data.byteLength);
+  },
+
+  async writePartsToDirectory(dirHandle, filename, parts, expectedSize) {
+    await this.ensureDirPermission(dirHandle);
+    const handle = await dirHandle.getFileHandle(filename, { create: true });
+    const writable = await handle.createWritable();
+    let written = 0;
+
+    try {
+      for (const part of parts) {
+        const view = part instanceof Uint8Array ? part : new Uint8Array(part);
+        for (let offset = 0; offset < view.byteLength; offset += this.WRITE_CHUNK) {
+          const slice = view.subarray(offset, Math.min(offset + this.WRITE_CHUNK, view.byteLength));
+          await writable.write(slice);
+        }
+        written += view.byteLength;
+      }
+    } finally {
+      await writable.close();
+    }
+
+    const file = await handle.getFile();
+    if (expectedSize > 0 && file.size !== expectedSize) {
+      throw new Error(`Save failed for ${filename}: wrote ${file.size} of ${expectedSize} bytes`);
+    }
+    return { name: filename, size: file.size };
   },
 
   async writeBlobToDirectory(dirHandle, filename, blob) {
+    await this.ensureDirPermission(dirHandle);
     const handle = await dirHandle.getFileHandle(filename, { create: true });
     const writable = await handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
+
+    try {
+      for (let offset = 0; offset < blob.size; offset += this.WRITE_CHUNK) {
+        const slice = blob.slice(offset, Math.min(offset + this.WRITE_CHUNK, blob.size));
+        await writable.write(slice);
+      }
+    } finally {
+      await writable.close();
+    }
+
+    const file = await handle.getFile();
+    if (file.size !== blob.size) {
+      throw new Error(`Save failed for ${filename}: wrote ${file.size} of ${blob.size} bytes`);
+    }
+    return { name: filename, size: file.size };
+  },
+
+  downloadProgress(partial) {
+    return {
+      stage: 'starting',
+      segments: 0,
+      total_segments: 0,
+      progress: 0,
+      percent: 0,
+      mode: 'client',
+      ready: false,
+      buffered: false,
+      client_stream: true,
+      ...partial,
+    };
   },
 
   sleep(ms) {
@@ -33,7 +107,7 @@ const ShareDownload = {
   },
 
   triggerSaveAnchor(blob, filename) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -45,18 +119,22 @@ const ShareDownload = {
         setTimeout(() => {
           a.remove();
           URL.revokeObjectURL(url);
-          resolve();
+          resolve({ name: filename, size: blob.size });
         }, 500);
       });
+      a.addEventListener('error', () => {
+        URL.revokeObjectURL(url);
+        a.remove();
+        reject(new Error(`Browser blocked download for ${filename}`));
+      }, { once: true });
     });
   },
 
   async triggerSave(blob, filename, { dirHandle = null } = {}) {
     if (dirHandle) {
-      await this.writeBlobToDirectory(dirHandle, filename, blob);
-      return;
+      return this.writeBlobToDirectory(dirHandle, filename, blob);
     }
-    await this.triggerSaveAnchor(blob, filename);
+    return this.triggerSaveAnchor(blob, filename);
   },
 
   buildManifest(fileName, totalSize, totalParts) {
@@ -72,23 +150,35 @@ const ShareDownload = {
     };
   },
 
-  buildReadme(fileName, totalSize, totalParts) {
+  buildReadme(fileName, totalSize, totalParts, useDirectory) {
     const sizeStr = typeof formatSize === 'function' ? formatSize(totalSize) : `${totalSize} bytes`;
-    return [
+    const lines = [
       'GitHub Vault — split offline download',
       '',
       `Original file: ${fileName}`,
       `Total size: ${sizeStr}`,
-      `Parts: ${totalParts} zip file(s), ~1 GB each`,
+      `Parts: ${totalParts} ${useDirectory ? 'payload file(s)' : 'zip file(s)'}, ~1 GB each`,
       '',
-      '1. Extract every .zip',
-      '2. Combine the payload.part*.bin files in order:',
+    ];
+    if (useDirectory) {
+      lines.push(
+        'Payload files are saved directly in your chosen folder.',
+        'Combine payload.part*.bin files in numeric order:',
+      );
+    } else {
+      lines.push(
+        '1. Extract every .zip',
+        '2. Combine the payload.part*.bin files in order:',
+      );
+    }
+    lines.push(
       '',
       `   Linux/macOS: cat payload.part*.bin > ${fileName}`,
       `   Windows:     copy /b payload.part001.bin+payload.part002.bin+... ${fileName}`,
       '',
       'See manifest.json for details.',
-    ].join('\n');
+    );
+    return lines.join('\n');
   },
 
   async exportShare(token, file, onProgress, options = {}) {
@@ -98,7 +188,12 @@ const ShareDownload = {
 
     if (sameSession) {
       if (onProgress) ShareClientStream.onProgress = onProgress;
-      ShareClientStream.onProgress(ShareClientStream.getDownloadStatus());
+      if (onProgress) {
+        onProgress(this.downloadProgress({
+          stage: 'starting',
+          total_segments: ShareClientStream.manifest?.chunks?.length || file.chunk_count || 0,
+        }));
+      }
     } else {
       if (ShareClientStream.stream) ShareClientStream.resetStream();
       await ShareClientStream.load(token, file.id, onProgress);
@@ -109,11 +204,24 @@ const ShareDownload = {
     const dirHandle = options.dirHandle ?? null;
 
     if (size <= this.singleMaxBytes()) {
+      if (onProgress) {
+        onProgress(this.downloadProgress({
+          stage: 'fetching',
+          total_segments: ShareClientStream.manifest?.chunks?.length || 0,
+        }));
+      }
       await ShareClientStream.fetchAllForDownload(onProgress);
       const blob = await ShareClientStream.buildFullBlobAsync();
       ShareClientStream.saveToCache(blob);
-      await this.triggerSave(blob, name, { dirHandle });
-      return { mode: 'single', parts: 1, name, pendingParts: [] };
+      const saved = await this.triggerSave(blob, name, { dirHandle });
+      return {
+        mode: 'single',
+        parts: 1,
+        name,
+        pendingParts: [],
+        savedFiles: saved ? [saved] : [],
+        usedDirectory: !!dirHandle,
+      };
     }
 
     return this.exportSplitZips(name, size, onProgress, { dirHandle });
@@ -126,6 +234,7 @@ const ShareDownload = {
       : fileName;
     const totalChunks = ShareClientStream.manifest.chunks.length;
     const pendingParts = [];
+    const savedFiles = [];
 
     let partNum = 1;
     let partBuffers = [];
@@ -137,56 +246,66 @@ const ShareDownload = {
       if (!partBuffers.length) return;
       const thisPart = partNum;
       const zipName = `${base}.part${String(thisPart).padStart(2, '0')}of${String(totalParts).padStart(2, '0')}.zip`;
-      const entries = [];
-
-      if (thisPart === 1) {
-        entries.push({
-          name: 'README.txt',
-          data: ShareZip.utf8(this.buildReadme(fileName, totalSize, totalParts)),
-        });
-        entries.push({
-          name: 'manifest.json',
-          data: ShareZip.utf8(JSON.stringify(this.buildManifest(fileName, totalSize, totalParts), null, 2)),
-        });
-      }
-
       const payloadName = `payload.part${String(thisPart).padStart(3, '0')}.bin`;
-      entries.push({
-        name: payloadName,
-        data: partBuffers,
-        size: partSize,
-      });
-
-      const zipBlob = ShareZip.create(entries);
-      partBuffers = [];
-      partSize = 0;
 
       if (dirHandle) {
-        await this.writeBlobToDirectory(dirHandle, zipName, zipBlob);
-      } else if (!anchorUsed) {
-        await this.triggerSaveAnchor(zipBlob, zipName);
-        anchorUsed = true;
+        if (thisPart === 1) {
+          savedFiles.push(await this.writeTextToDirectory(
+            dirHandle,
+            'README.txt',
+            this.buildReadme(fileName, totalSize, totalParts, true),
+          ));
+          savedFiles.push(await this.writeTextToDirectory(
+            dirHandle,
+            'manifest.json',
+            JSON.stringify(this.buildManifest(fileName, totalSize, totalParts), null, 2),
+          ));
+        }
+        savedFiles.push(await this.writePartsToDirectory(dirHandle, payloadName, partBuffers, partSize));
       } else {
-        pendingParts.push({ blob: zipBlob, name: zipName });
+        const entries = [];
+        if (thisPart === 1) {
+          entries.push({
+            name: 'README.txt',
+            data: ShareZip.utf8(this.buildReadme(fileName, totalSize, totalParts, false)),
+          });
+          entries.push({
+            name: 'manifest.json',
+            data: ShareZip.utf8(JSON.stringify(this.buildManifest(fileName, totalSize, totalParts), null, 2)),
+          });
+        }
+        entries.push({
+          name: payloadName,
+          data: partBuffers,
+          size: partSize,
+        });
+        const zipBlob = ShareZip.create(entries);
+        if (!anchorUsed) {
+          savedFiles.push(await this.triggerSaveAnchor(zipBlob, zipName));
+          anchorUsed = true;
+        } else {
+          pendingParts.push({ blob: zipBlob, name: zipName });
+        }
       }
 
+      partBuffers = [];
+      partSize = 0;
       savedParts += 1;
       partNum += 1;
 
       if (onProgress) {
-        onProgress({
+        onProgress(this.downloadProgress({
           stage: savedParts >= totalParts && !pendingParts.length ? 'ready' : 'caching',
           segments: savedParts,
           total_segments: totalParts,
           progress: Math.round((savedParts / totalParts) * 100),
-          mode: 'client',
+          percent: Math.round((savedParts / totalParts) * 100),
           ready: savedParts >= totalParts && !pendingParts.length,
           buffered: savedParts >= totalParts && !pendingParts.length,
-          client_stream: true,
-        });
+        }));
       }
 
-      if (!dirHandle) {
+      if (!dirHandle && !pendingParts.length) {
         await this.sleep(ShareClientStream.isLowMemoryDevice() ? 2000 : 400);
       }
     };
@@ -208,21 +327,22 @@ const ShareDownload = {
       }
 
       if (onProgress) {
-        onProgress({
+        onProgress(this.downloadProgress({
           stage: 'fetching',
           segments: i + 1,
           total_segments: totalChunks,
           progress: Math.round(((i + 1) / totalChunks) * 100),
-          mode: 'client',
-          ready: false,
-          buffered: false,
-          client_stream: true,
-        });
+          percent: Math.round(((i + 1) / totalChunks) * 100),
+        }));
       }
     }
 
     if (partBuffers.length) {
       await flushPart();
+    }
+
+    if (dirHandle && !savedFiles.length) {
+      throw new Error('No files were written to the selected folder');
     }
 
     return {
@@ -231,6 +351,7 @@ const ShareDownload = {
       name: fileName,
       totalParts,
       pendingParts,
+      savedFiles,
       usedDirectory: !!dirHandle,
     };
   },
@@ -268,14 +389,6 @@ const ShareZip = {
       if (remaining <= 0) break;
     }
     return (crc ^ 0xffffffff) >>> 0;
-  },
-
-  u16(n) {
-    return new Uint8Array([n & 0xff, (n >> 8) & 0xff]);
-  },
-
-  u32(n) {
-    return new Uint8Array([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
   },
 
   create(entries) {
@@ -322,13 +435,14 @@ const ShareZip = {
     }
 
     blobParts.push(...central);
-    blobParts.push(new Uint8Array(22));
-    const end = new DataView(blobParts[blobParts.length - 1].buffer);
-    end.setUint32(0, 0x06054b50, true);
-    end.setUint16(8, entries.length, true);
-    end.setUint16(10, entries.length, true);
-    end.setUint32(12, central.reduce((s, c) => s + c.length, 0), true);
-    end.setUint32(16, offset, true);
+    const end = new Uint8Array(22);
+    const ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(8, entries.length, true);
+    ev.setUint16(10, entries.length, true);
+    ev.setUint32(12, central.reduce((s, c) => s + c.length, 0), true);
+    ev.setUint32(16, offset, true);
+    blobParts.push(end);
 
     return new Blob(blobParts, { type: 'application/zip' });
   },
