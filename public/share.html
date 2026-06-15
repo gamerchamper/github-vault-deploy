@@ -7,7 +7,7 @@
   <!-- SHARE_EMBED_META -->
   <link rel="preconnect" href="/" crossorigin>
   <link rel="stylesheet" href="/css/share.css?v=1.2.3">
-  <script>
+  <script data-cfasync="false">
     (function prefetchShareApi() {
       const parts = location.pathname.split('/').filter(Boolean);
       const i = parts.indexOf('share');
@@ -174,24 +174,24 @@
 
   <button id="shoutbox-open-btn" class="shoutbox-open-btn hidden" type="button" title="Open chat" aria-label="Open chat">💬</button>
 
-  <script defer src="/js/share-lazy-libs.js?v=1.0.0"></script>
-  <script defer src="/js/adaptive-concurrency.js?v=1.0.0"></script>
-  <script defer src="/js/share-crypto.js?v=1.0.1"></script>
-  <script defer src="/js/share-media-cache.js?v=1.0.0"></script>
-  <script defer src="/js/share-client-stream.js?v=1.0.5"></script>
-  <script defer src="/js/share-download.js?v=1.0.8"></script>
-  <script defer src="/js/api.js?v=1.0.0"></script>
-  <script defer src="/js/media-player.js?v=1.0.8"></script>
-  <script defer src="/js/playback-memory.js?v=1.0.1"></script>
-  <script defer src="/js/playlist-queue.js?v=1.0.3"></script>
-  <script defer src="/js/chunk-blocks.js?v=1.0.3"></script>
-  <script defer src="/js/download-manager.js?v=1.0.8"></script>
-  <script defer src="/js/share-stage-layout.js?v=1.1.5"></script>
-  <script defer src="/js/share-viewer.js?v=1.0.13"></script>
-  <script defer src="/js/share-presence.js?v=1.0.0"></script>
-  <script defer src="/js/share-shoutbox.js?v=1.0.2"></script>
-  <script defer src="/js/share-playlist.js?v=1.0.8"></script>
-  <script>
+  <script data-cfasync="false" defer src="/js/share-lazy-libs.js?v=1.0.0"></script>
+  <script data-cfasync="false" defer src="/js/adaptive-concurrency.js?v=1.0.0"></script>
+  <script data-cfasync="false" defer src="/js/share-crypto.js?v=1.0.1"></script>
+  <script data-cfasync="false" defer src="/js/share-media-cache.js?v=1.0.0"></script>
+  <script data-cfasync="false" defer src="/js/share-client-stream.js?v=1.0.5"></script>
+  <script data-cfasync="false" defer src="/js/share-download.js?v=1.0.8"></script>
+  <script data-cfasync="false" defer src="/js/api.js?v=1.0.0"></script>
+  <script data-cfasync="false" defer src="/js/media-player.js?v=1.0.8"></script>
+  <script data-cfasync="false" defer src="/js/playback-memory.js?v=1.0.1"></script>
+  <script data-cfasync="false" defer src="/js/playlist-queue.js?v=1.0.3"></script>
+  <script data-cfasync="false" defer src="/js/chunk-blocks.js?v=1.0.3"></script>
+  <script data-cfasync="false" defer src="/js/download-manager.js?v=1.0.8"></script>
+  <script data-cfasync="false" defer src="/js/share-stage-layout.js?v=1.1.5"></script>
+  <script data-cfasync="false" defer src="/js/share-viewer.js?v=1.0.13"></script>
+  <script data-cfasync="false" defer src="/js/share-presence.js?v=1.0.0"></script>
+  <script data-cfasync="false" defer src="/js/share-shoutbox.js?v=1.0.2"></script>
+  <script data-cfasync="false" defer src="/js/share-playlist.js?v=1.0.8"></script>
+  <script data-cfasync="false">
     function parseShareRoute() {
       const pathParts = location.pathname.split('/').filter(Boolean);
       const shareIdx = pathParts.indexOf('share');
@@ -674,47 +674,62 @@
       }
     }
 
-    document.getElementById('share-back').addEventListener('click', () => {
-      hideShareTopDock();
-      ShareViewer.destroy();
-      ShareShoutbox.destroy();
-      shareCurrentFile = null;
-      document.getElementById('share-file-view').classList.add('hidden');
-      document.getElementById('share-back').classList.add('hidden');
-      document.getElementById('share-error').classList.add('hidden');
-      loadFolder(state.currentPath).catch((err) => showError(err.message));
-    });
+    function bindShareUi() {
+      document.getElementById('share-back').addEventListener('click', () => {
+        hideShareTopDock();
+        ShareViewer.destroy();
+        ShareShoutbox.destroy();
+        shareCurrentFile = null;
+        document.getElementById('share-file-view').classList.add('hidden');
+        document.getElementById('share-back').classList.add('hidden');
+        document.getElementById('share-error').classList.add('hidden');
+        loadFolder(state.currentPath).catch((err) => showError(err.message));
+      });
 
-    document.getElementById('share-download').addEventListener('click', () => {
-      if (!shareCurrentFile) return;
-      DownloadManager.downloadFile(shareCurrentFile, { token });
-    });
+      document.getElementById('share-download').addEventListener('click', () => {
+        if (!shareCurrentFile) return;
+        DownloadManager.downloadFile(shareCurrentFile, { token });
+      });
 
-    document.getElementById('share-dl-hls').addEventListener('click', () => {
-      if (!shareCurrentFile) return;
-      const baseName = (shareCurrentFile.name || 'media').replace(/\.[^.]+$/, '');
-      const hlsUrl = shareCurrentFile.hls_playlist_url
-        ? `${shareApiBase()}/hls?file=${shareCurrentFile.id}`
-        : `${shareApiBase()}/hls/playlist.m3u8?file=${shareCurrentFile.id}`;
-      const a = document.createElement('a');
-      a.href = hlsUrl;
-      a.download = baseName + '.m3u8';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    });
-    document.getElementById('share-dl-hls-github').addEventListener('click', () => {
-      if (!shareCurrentFile?.hls_playlist_url) return;
-      window.open(shareCurrentFile.hls_playlist_url, '_blank');
-    });
+      document.getElementById('share-dl-hls').addEventListener('click', () => {
+        if (!shareCurrentFile) return;
+        const baseName = (shareCurrentFile.name || 'media').replace(/\.[^.]+$/, '');
+        const hlsUrl = shareCurrentFile.hls_playlist_url
+          ? `${shareApiBase()}/hls?file=${shareCurrentFile.id}`
+          : `${shareApiBase()}/hls/playlist.m3u8?file=${shareCurrentFile.id}`;
+        const a = document.createElement('a');
+        a.href = hlsUrl;
+        a.download = baseName + '.m3u8';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
+      document.getElementById('share-dl-hls-github').addEventListener('click', () => {
+        if (!shareCurrentFile?.hls_playlist_url) return;
+        window.open(shareCurrentFile.hls_playlist_url, '_blank');
+      });
 
-    DownloadManager.bindEvents();
+      DownloadManager.bindEvents();
 
-    window.addEventListener('pagehide', () => {
-      ShareViewer.destroy({ useBeacon: true });
-    });
+      window.addEventListener('pagehide', () => {
+        ShareViewer.destroy({ useBeacon: true });
+      });
+    }
 
-    window.addEventListener('DOMContentLoaded', () => { init(); });
+    function bootSharePage() {
+      if (typeof DownloadManager === 'undefined' || typeof ShareViewer === 'undefined') {
+        showError('Page scripts failed to load — try a hard refresh or disable Cloudflare Rocket Loader for this site');
+        return;
+      }
+      bindShareUi();
+      init();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bootSharePage);
+    } else {
+      bootSharePage();
+    }
   </script>
 </body>
 </html>
