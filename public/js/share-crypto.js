@@ -17,16 +17,23 @@ const ShareCrypto = {
   },
 
   async unwrapFileKey(shareMeta, shareToken) {
-    const shareKeyBytes = await this.deriveShareKey(shareToken);
-    const shareKey = await this.importRawKey(shareKeyBytes);
-    const wrapped = this.b64ToBytes(shareMeta.wrapped_key);
-    const iv = this.b64ToBytes(shareMeta.wrap_iv);
-    const tag = this.b64ToBytes(shareMeta.wrap_tag);
-    const combined = new Uint8Array(wrapped.length + tag.length);
-    combined.set(wrapped);
-    combined.set(tag, wrapped.length);
-    const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, shareKey, combined);
-    return this.importRawKey(new Uint8Array(raw));
+    try {
+      const shareKeyBytes = await this.deriveShareKey(shareToken);
+      const shareKey = await this.importRawKey(shareKeyBytes);
+      const wrapped = this.b64ToBytes(shareMeta.wrapped_key);
+      const iv = this.b64ToBytes(shareMeta.wrap_iv);
+      const tag = this.b64ToBytes(shareMeta.wrap_tag);
+      const combined = new Uint8Array(wrapped.length + tag.length);
+      combined.set(wrapped);
+      combined.set(tag, wrapped.length);
+      const raw = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, shareKey, combined);
+      return this.importRawKey(new Uint8Array(raw));
+    } catch (err) {
+      const detail = typeof ShareStreamLog !== 'undefined'
+        ? ShareStreamLog.formatError(err)
+        : (err?.name || 'decrypt error');
+      throw new Error(`Could not decrypt file key for this share link (${detail})`);
+    }
   },
 
   async decryptChunk(encrypted, fileKey, ivB64, tagB64) {

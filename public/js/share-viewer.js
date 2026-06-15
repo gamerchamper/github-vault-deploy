@@ -314,7 +314,12 @@ const ShareViewer = {
   destroy(options = {}) {
     const token = this.currentToken;
     const fileId = this.currentFile?.id;
-    ShareClientStream.abort();
+    if (token && fileId
+      && typeof ShareClientStream !== 'undefined'
+      && ShareClientStream.token === token
+      && ShareClientStream.fileId === fileId) {
+      ShareClientStream.abort();
+    }
     this.destroyHls();
     this.stopStatusPoll();
     this.stopPlaybackStats();
@@ -753,6 +758,14 @@ const ShareViewer = {
       } else {
         this.startStatusPoll(token, info);
         this.playDirectStream(info, token, video, videoWrap, loading);
+      }
+
+      if (this.clientStream) {
+        ShareClientStream.load(token, info.id).catch((err) => {
+          ShareStreamLog?.warn('session:warm-failed', {
+            message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : err.message,
+          });
+        });
       }
 
       this.bindHlsToggle(info, token, video, videoWrap, loading);

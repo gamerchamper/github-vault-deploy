@@ -149,11 +149,13 @@ const DownloadManager = {
         if (!job.saveDir) setTimeout(() => this.removeJob(job.id), 8000);
       }
     } catch (err) {
-      job.error = err.message;
+      job.error = typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || 'Download failed');
       job.done = false;
       job.pendingParts = [];
       job.savedFiles = [];
-      ShareStreamLog?.error('download:job-failed', { message: err.message });
+      ShareStreamLog?.error('download:job-failed', {
+        message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || String(err)),
+      });
       this.render();
       this.notifyDownload(err.message, 'error');
     }

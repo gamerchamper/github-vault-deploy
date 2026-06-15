@@ -236,7 +236,9 @@ const ShareDownload = {
 
       return this.exportSplitZips(name, size, onProgress, { dirHandle });
     } catch (err) {
-      ShareStreamLog?.error('download:export-failed', { message: err.message });
+      ShareStreamLog?.error('download:export-failed', {
+        message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || String(err)),
+      });
       throw err;
     } finally {
       if (hadSession) ShareClientStream.endDownloadSession();

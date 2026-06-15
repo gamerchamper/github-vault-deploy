@@ -7,9 +7,12 @@ const ShareStreamLog = {
 
   init() {
     const qs = new URLSearchParams(location.search);
+    const href = location.href;
     const stored = localStorage.getItem('shareStreamLog');
     this.enabled = qs.has('streamlog')
       || qs.get('streamlog') === '1'
+      || /[?&]streamlog=1(?:&|$)/.test(href)
+      || href.includes('streamlog=1')
       || stored === '1'
       || stored === 'true';
     if (this.enabled) this.mountPanel();
@@ -70,6 +73,14 @@ const ShareStreamLog = {
   fmtTs(ts) {
     const d = new Date(ts);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  },
+
+  formatError(err) {
+    if (!err) return 'Unknown error';
+    if (typeof err === 'string') return err || 'Unknown error';
+    const parts = [err.message, err.name, err.code].filter(Boolean);
+    if (parts.length) return parts.join(' — ');
+    return String(err) || 'Unknown error';
   },
 
   streamSnapshot() {

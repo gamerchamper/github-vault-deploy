@@ -1419,12 +1419,45 @@ function createShareToken(userId, fileId, req = null) {
 async function ensureShareKeyMeta(userId, fileId, shareToken) {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file) throw new Error('Item not found');
-  if (file.share_key_meta) return JSON.parse(file.share_key_meta);
+
+  const store = parseShareKeyMetaStore(file.share_key_meta);
+  if (store[shareToken]?.wrapped_key) {
+    return store[shareToken];
+  }
+
+  if (store.__legacy__ && file.share_token) {
+    store[file.share_token] = { ...store.__legacy__, wrap_token: file.share_token };
+    delete store.__legacy__;
+    if (store[shareToken]?.wrapped_key) {
+      db.prepare('UPDATE files SET share_key_meta = ? WHERE id = ?').run(JSON.stringify(store), fileId);
+      return store[shareToken];
+    }
+  }
 
   const fileKey = await getFileKeyFromMeta(userId, file);
   const shareMeta = crypto.wrapKeyForShare(fileKey, shareToken);
-  db.prepare('UPDATE files SET share_key_meta = ? WHERE id = ?').run(JSON.stringify(shareMeta), fileId);
+  shareMeta.wrap_token = shareToken;
+  store[shareToken] = shareMeta;
+  delete store.__legacy__;
+  db.prepare('UPDATE files SET share_key_meta = ? WHERE id = ?').run(JSON.stringify(store), fileId);
   return shareMeta;
+}
+
+function parseShareKeyMetaStore(raw) {
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== 'object') return {};
+  if (parsed.wrapped_key) {
+    const token = parsed.wrap_token || null;
+    if (token) return { [token]: parsed };
+    return { __legacy__: parsed };
+  }
+  return parsed;
 }
 
 function revokeShareToken(userId, fileId) {
