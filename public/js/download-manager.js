@@ -85,9 +85,24 @@ const DownloadManager = {
       status: null,
       blocks: null,
       done: false,
+      pendingParts: [],
+      saveDir: null,
     };
     this.jobs.set(jobId, job);
     this.render();
+
+    const fileSize = file.size || 0;
+    if (ShareDownload.isLargeFile(fileSize) && ShareDownload.canUseDirectoryPicker()) {
+      try {
+        job.saveDir = await ShareDownload.pickSaveDirectory();
+        job.status = { stage: 'starting', progress: 0, percent: 0 };
+        this.renderItem(job);
+      } catch (err) {
+        if (err?.name !== 'AbortError' && typeof App !== 'undefined') {
+          App.toast(err.message, 'error');
+        }
+      }
+    }
 
     try {
       const result = await ShareDownload.exportShare(token, file, (status) => {
@@ -102,31 +117,56 @@ const DownloadManager = {
           }
         }
         this.renderItem(job);
-      });
+      }, { dirHandle: job.saveDir });
 
-      job.done = true;
+      job.pendingParts = result.pendingParts || [];
       job.splitParts = result.mode === 'split' ? result.parts : null;
+      job.done = job.pendingParts.length === 0;
       job.status = {
         ...ShareClientStream.getDownloadStatus(),
         percent: 100,
-        ready: true,
-        stage: result.mode === 'split' ? 'done' : 'ready',
+        progress: 100,
+        ready: job.done,
+        stage: job.pendingParts.length ? 'caching' : (result.mode === 'split' ? 'done' : 'ready'),
       };
-      this.renderItem(job);
+      this.render();
 
-      const msg = result.mode === 'split'
-        ? `Saved ${result.parts} zip part(s) — see README in part 1`
-        : `Downloaded ${file.name}`;
-      if (typeof App !== 'undefined') App.toast(msg, 'success');
-      setTimeout(() => this.removeJob(job.id), 6000);
+      if (job.pendingParts.length) {
+        const msg = `${job.pendingParts.length} zip part(s) ready — click Save below for each file`;
+        if (typeof App !== 'undefined') App.toast(msg, 'info');
+      } else {
+        const msg = result.mode === 'split'
+          ? (result.usedDirectory
+            ? `Saved ${result.parts} zip part(s) to selected folder`
+            : `Saved ${result.parts} zip part(s) — see README in part 1`)
+          : (job.saveDir ? `Saved ${file.name} to selected folder` : `Downloaded ${file.name}`);
+        if (typeof App !== 'undefined') App.toast(msg, 'success');
+        setTimeout(() => this.removeJob(job.id), 6000);
+      }
     } catch (err) {
       job.error = err.message;
       job.done = true;
+      job.pendingParts = [];
       this.render();
       if (typeof App !== 'undefined') App.toast(err.message, 'error');
     } finally {
       ShareClientStream.endDownloadSession();
     }
+  },
+
+  async savePendingPart(jobId, partIndex) {
+    const job = this.jobs.get(jobId);
+    const part = job?.pendingParts?.[partIndex];
+    if (!part) return;
+    await ShareDownload.triggerSaveAnchor(part.blob, part.name);
+    job.pendingParts.splice(partIndex, 1);
+    if (!job.pendingParts.length) {
+      job.done = true;
+      job.status = { ...job.status, stage: 'done', ready: true, percent: 100, progress: 100 };
+      if (typeof App !== 'undefined') App.toast(`Downloaded ${job.fileName}`, 'success');
+      setTimeout(() => this.removeJob(job.id), 6000);
+    }
+    this.render();
   },
 
   downloadUrl(job) {
@@ -211,6 +251,7 @@ const DownloadManager = {
   removeJob(jobId) {
     const job = this.jobs.get(jobId);
     if (job?.blocks) ChunkBlocks.destroy(job.blocks);
+    if (job) job.pendingParts = [];
     this.jobs.delete(jobId);
     this.render();
     this.stopPollIfIdle();
@@ -235,27 +276,20 @@ const DownloadManager = {
     if (!el) return;
     const status = job.status;
     const percent = job.error ? 0 : job.done ? 100 : (status?.percent ?? status?.progress ?? 0);
-    const detail = job.error
-      ? job.error
-      : job.done
-        ? (job.splitParts
-          ? `Saved ${job.splitParts} zip part(s) — combine using README in part 1`
-          : 'Saved to your downloads folder')
-        : status
-          ? `${this.stageLabel(status.stage)} · ${status.fetched ?? status.segments ?? 0} / ${status.total || status.total_segments || job.total} ${status.stage === 'caching' ? 'parts' : 'chunks'}`
-          : 'Preparing...';
+    const detail = this.jobDetailText(job);
 
-    el.classList.toggle('download-item-done', !!job.done && !job.error);
+    el.classList.toggle('download-item-done', !!job.done && !job.error && !job.pendingParts?.length);
     el.classList.toggle('download-item-error', !!job.error);
+    el.classList.toggle('download-item-pending', !!job.pendingParts?.length);
 
     const fill = el.querySelector('.download-bar-fill');
     if (fill) fill.style.width = `${percent}%`;
     const detailEl = el.querySelector('.download-detail');
     if (detailEl) detailEl.textContent = detail;
     const pctEl = el.querySelector('.download-percent');
-    if (pctEl) pctEl.textContent = job.error ? 'Failed' : job.done ? 'Done' : `${percent}%`;
+    if (pctEl) pctEl.textContent = job.error ? 'Failed' : job.pendingParts?.length ? 'Save' : job.done ? 'Done' : `${percent}%`;
 
-    if (job.done || job.error) {
+    if (job.done || job.error || job.pendingParts?.length) {
       el.querySelector('.download-chunk-blocks')?.remove();
       el.querySelector('.download-bar')?.remove();
       if (job.blocks) {
@@ -267,8 +301,38 @@ const DownloadManager = {
     }
   },
 
+  jobDetailText(job) {
+    if (job.error) return job.error;
+    if (job.pendingParts?.length) {
+      return `Click Save for each remaining zip part (${job.pendingParts.length} left)`;
+    }
+    if (job.done) {
+      if (job.splitParts) {
+        return job.saveDir
+          ? `Saved ${job.splitParts} zip part(s) to your folder`
+          : `Saved ${job.splitParts} zip part(s) — combine using README in part 1`;
+      }
+      return job.saveDir ? 'Saved to your selected folder' : 'Saved to your downloads folder';
+    }
+    const status = job.status;
+    if (!status) return 'Preparing...';
+    return `${this.stageLabel(status.stage)} · ${status.fetched ?? status.segments ?? 0} / ${status.total || status.total_segments || job.total} ${status.stage === 'caching' ? 'parts' : 'chunks'}`;
+  },
+
+  jobPendingPartsHtml(job) {
+    if (!job.pendingParts?.length) return '';
+    return `
+          <div class="download-pending-parts">
+            ${job.pendingParts.map((part, index) => `
+              <button type="button" class="btn-secondary download-save-part" data-job-id="${job.id}" data-part-index="${index}">
+                Save ${this.escape(part.name)}
+              </button>
+            `).join('')}
+          </div>`;
+  },
+
   jobProgressHtml(job) {
-    if (job.done || job.error) return '';
+    if (job.done || job.error || job.pendingParts?.length) return this.jobPendingPartsHtml(job);
     const status = job.status;
     const percent = status?.percent ?? status?.progress ?? 0;
     return `
@@ -288,24 +352,16 @@ const DownloadManager = {
 
     list.innerHTML = items.map((job) => {
       const status = job.status;
-      const percent = job.error ? 0 : (status?.percent ?? (job.done ? 100 : 0));
-      const detail = job.error
-        ? job.error
-        : job.done
-          ? (job.splitParts
-          ? `Saved ${job.splitParts} zip part(s) — combine using README in part 1`
-          : 'Saved to your downloads folder')
-          : status
-            ? `${this.stageLabel(status.stage)} · ${status.fetched ?? status.segments ?? 0} / ${status.total || status.total_segments || job.total} ${status.stage === 'caching' ? 'parts' : 'chunks'}`
-            : 'Preparing...';
+      const percent = job.error ? 0 : job.done ? 100 : (status?.percent ?? status?.progress ?? 0);
+      const detail = this.jobDetailText(job);
 
       return `
-        <div class="download-item${job.error ? ' download-item-error' : ''}${job.done ? ' download-item-done' : ''}" data-job-id="${job.id}">
+        <div class="download-item${job.error ? ' download-item-error' : ''}${job.done ? ' download-item-done' : ''}${job.pendingParts?.length ? ' download-item-pending' : ''}" data-job-id="${job.id}">
           <div class="download-item-header">
-            <span class="download-icon">${job.error ? '⚠️' : job.done ? '✓' : '⬇️'}</span>
+            <span class="download-icon">${job.error ? '⚠️' : job.done ? '✓' : job.pendingParts?.length ? '💾' : '⬇️'}</span>
             <span class="download-title" title="${this.escape(job.fileName)}">${this.escape(job.fileName)}</span>
-            <span class="download-percent">${job.error ? 'Failed' : job.done ? 'Done' : `${percent}%`}</span>
-            ${job.done || job.error ? `<button type="button" class="download-dismiss" data-job-id="${job.id}" title="Dismiss">×</button>` : ''}
+            <span class="download-percent">${job.error ? 'Failed' : job.pendingParts?.length ? 'Save' : job.done ? 'Done' : `${percent}%`}</span>
+            ${job.done || job.error || job.pendingParts?.length ? `<button type="button" class="download-dismiss" data-job-id="${job.id}" title="Dismiss">×</button>` : ''}
           </div>
           <div class="download-detail">${this.escape(detail)}</div>
           ${this.jobProgressHtml(job)}
@@ -316,6 +372,7 @@ const DownloadManager = {
     applyDynamicStyles(list);
 
     for (const job of items) {
+      if (job.done || job.error || job.pendingParts?.length) continue;
       if (job.blocks && job.status) {
         ChunkBlocks.update(job.blocks, ChunkBlocks.fromDownloadStatus(job.status));
         continue;
@@ -327,14 +384,24 @@ const DownloadManager = {
       }
     }
 
-    list.querySelectorAll('.download-dismiss').forEach((btn) => {
-      btn.addEventListener('click', () => this.dismiss(btn.dataset.jobId));
-    });
   },
 
   bindEvents() {
     const list = document.getElementById('download-list');
     if (!list || list.dataset.bound) return;
     list.dataset.bound = '1';
+    list.addEventListener('click', (ev) => {
+      const saveBtn = ev.target.closest('.download-save-part');
+      if (saveBtn) {
+        ev.preventDefault();
+        this.savePendingPart(saveBtn.dataset.jobId, Number(saveBtn.dataset.partIndex));
+        return;
+      }
+      const dismissBtn = ev.target.closest('.download-dismiss');
+      if (dismissBtn) {
+        ev.preventDefault();
+        this.dismiss(dismissBtn.dataset.jobId);
+      }
+    });
   },
 };

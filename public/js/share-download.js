@@ -9,25 +9,54 @@ const ShareDownload = {
       : this.DESKTOP_SINGLE_MAX;
   },
 
+  isLargeFile(size) {
+    return (size || 0) > this.singleMaxBytes();
+  },
+
+  canUseDirectoryPicker() {
+    return typeof window.showDirectoryPicker === 'function';
+  },
+
+  async pickSaveDirectory() {
+    return window.showDirectoryPicker({ mode: 'readwrite' });
+  },
+
+  async writeBlobToDirectory(dirHandle, filename, blob) {
+    const handle = await dirHandle.getFileHandle(filename, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  },
+
   sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
   },
 
-  triggerSave(blob, filename) {
-    const downloadBlob = blob.slice(0, blob.size, blob.type || 'application/octet-stream');
-    const url = URL.createObjectURL(downloadBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    requestAnimationFrame(() => {
-      a.click();
-      setTimeout(() => {
-        a.remove();
-        URL.revokeObjectURL(url);
-      }, 120000);
+  triggerSaveAnchor(blob, filename) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      requestAnimationFrame(() => {
+        a.click();
+        setTimeout(() => {
+          a.remove();
+          URL.revokeObjectURL(url);
+          resolve();
+        }, 500);
+      });
     });
+  },
+
+  async triggerSave(blob, filename, { dirHandle = null } = {}) {
+    if (dirHandle) {
+      await this.writeBlobToDirectory(dirHandle, filename, blob);
+      return;
+    }
+    await this.triggerSaveAnchor(blob, filename);
   },
 
   buildManifest(fileName, totalSize, totalParts) {
@@ -62,7 +91,7 @@ const ShareDownload = {
     ].join('\n');
   },
 
-  async exportShare(token, file, onProgress) {
+  async exportShare(token, file, onProgress, options = {}) {
     const sameSession = ShareClientStream.token === token
       && ShareClientStream.fileId === file.id
       && ShareClientStream.manifest;
@@ -77,29 +106,32 @@ const ShareDownload = {
 
     const size = ShareClientStream.manifest?.size || file.size || 0;
     const name = ShareClientStream.manifest?.name || file.name;
+    const dirHandle = options.dirHandle ?? null;
 
     if (size <= this.singleMaxBytes()) {
       await ShareClientStream.fetchAllForDownload(onProgress);
       const blob = await ShareClientStream.buildFullBlobAsync();
       ShareClientStream.saveToCache(blob);
-      this.triggerSave(blob, name);
-      return { mode: 'single', parts: 1, name };
+      await this.triggerSave(blob, name, { dirHandle });
+      return { mode: 'single', parts: 1, name, pendingParts: [] };
     }
 
-    return this.exportSplitZips(name, size, onProgress);
+    return this.exportSplitZips(name, size, onProgress, { dirHandle });
   },
 
-  async exportSplitZips(fileName, totalSize, onProgress) {
+  async exportSplitZips(fileName, totalSize, onProgress, { dirHandle = null } = {}) {
     const totalParts = Math.max(1, Math.ceil(totalSize / this.ZIP_PART_SIZE));
     const base = fileName.includes('.')
       ? fileName.slice(0, fileName.lastIndexOf('.'))
       : fileName;
     const totalChunks = ShareClientStream.manifest.chunks.length;
+    const pendingParts = [];
 
     let partNum = 1;
     let partBuffers = [];
     let partSize = 0;
     let savedParts = 0;
+    let anchorUsed = false;
 
     const flushPart = async () => {
       if (!partBuffers.length) return;
@@ -126,26 +158,37 @@ const ShareDownload = {
       });
 
       const zipBlob = ShareZip.create(entries);
-      this.triggerSave(zipBlob, zipName);
-      savedParts += 1;
-      partNum += 1;
       partBuffers = [];
       partSize = 0;
 
+      if (dirHandle) {
+        await this.writeBlobToDirectory(dirHandle, zipName, zipBlob);
+      } else if (!anchorUsed) {
+        await this.triggerSaveAnchor(zipBlob, zipName);
+        anchorUsed = true;
+      } else {
+        pendingParts.push({ blob: zipBlob, name: zipName });
+      }
+
+      savedParts += 1;
+      partNum += 1;
+
       if (onProgress) {
         onProgress({
-          stage: savedParts >= totalParts ? 'ready' : 'caching',
+          stage: savedParts >= totalParts && !pendingParts.length ? 'ready' : 'caching',
           segments: savedParts,
           total_segments: totalParts,
           progress: Math.round((savedParts / totalParts) * 100),
           mode: 'client',
-          ready: savedParts >= totalParts,
-          buffered: savedParts >= totalParts,
+          ready: savedParts >= totalParts && !pendingParts.length,
+          buffered: savedParts >= totalParts && !pendingParts.length,
           client_stream: true,
         });
       }
 
-      await this.sleep(ShareClientStream.isLowMemoryDevice() ? 2000 : 800);
+      if (!dirHandle) {
+        await this.sleep(ShareClientStream.isLowMemoryDevice() ? 2000 : 400);
+      }
     };
 
     for (let i = 0; i < totalChunks; i++) {
@@ -158,10 +201,7 @@ const ShareDownload = {
       const chunk = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
       partBuffers.push(chunk);
       partSize += chunk.byteLength;
-
-      if (ShareClientStream.isLowMemoryDevice()) {
-        ShareClientStream.chunks[i] = ShareClientStream.CHUNK_ON_DISK;
-      }
+      ShareClientStream.chunks[i] = ShareClientStream.CHUNK_ON_DISK;
 
       if (partSize >= this.ZIP_PART_SIZE) {
         await flushPart();
@@ -185,7 +225,14 @@ const ShareDownload = {
       await flushPart();
     }
 
-    return { mode: 'split', parts: savedParts, name: fileName, totalParts };
+    return {
+      mode: 'split',
+      parts: savedParts,
+      name: fileName,
+      totalParts,
+      pendingParts,
+      usedDirectory: !!dirHandle,
+    };
   },
 };
 
@@ -232,7 +279,7 @@ const ShareZip = {
   },
 
   create(entries) {
-    const blobs = [];
+    const blobParts = [];
     const central = [];
     let offset = 0;
 
@@ -255,7 +302,8 @@ const ShareZip = {
       view.setUint16(26, name.length, true);
       header.set(name, 30);
 
-      blobs.push(header, ...parts);
+      blobParts.push(header);
+      for (const part of parts) blobParts.push(part);
 
       const cd = new Uint8Array(46 + name.length);
       const cdv = new DataView(cd.buffer);
@@ -273,15 +321,15 @@ const ShareZip = {
       offset += header.length + size;
     }
 
-    const centralSize = central.reduce((s, c) => s + c.length, 0);
-    const end = new Uint8Array(22);
-    const ev = new DataView(end.buffer);
-    ev.setUint32(0, 0x06054b50, true);
-    ev.setUint16(8, entries.length, true);
-    ev.setUint16(10, entries.length, true);
-    ev.setUint32(12, centralSize, true);
-    ev.setUint32(16, offset, true);
+    blobParts.push(...central);
+    blobParts.push(new Uint8Array(22));
+    const end = new DataView(blobParts[blobParts.length - 1].buffer);
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, entries.length, true);
+    end.setUint16(10, entries.length, true);
+    end.setUint32(12, central.reduce((s, c) => s + c.length, 0), true);
+    end.setUint32(16, offset, true);
 
-    return new Blob([...blobs, ...central, end], { type: 'application/zip' });
+    return new Blob(blobParts, { type: 'application/zip' });
   },
 };

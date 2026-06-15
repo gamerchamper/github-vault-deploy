@@ -2334,6 +2334,26 @@ body.share-cinema-active .share-cinema-dock > .share-download-panel {
   color: var(--text-secondary);
 }
 
+.share-cinema-dock .share-download-panel .download-item-pending {
+  border-color: var(--border);
+}
+
+.share-cinema-dock .share-download-panel .download-pending-parts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.share-cinema-dock .share-download-panel .download-save-part {
+  width: 100%;
+  justify-content: center;
+  font-size: 12px;
+  padding: 8px 12px;
+  text-align: center;
+  word-break: break-all;
+}
+
 /* Embed mode */
 body.share-embed-mode { padding: 0; }
 body.share-embed-mode .share-hero,
