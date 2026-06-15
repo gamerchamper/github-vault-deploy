@@ -213,6 +213,20 @@ const SharePlaylist = {
     btn.setAttribute('aria-pressed', PlaylistQueue.shuffle ? 'true' : 'false');
   },
 
+  scrollActiveRowIntoView(activeRow) {
+    if (!activeRow || !this.listEl) return;
+    requestAnimationFrame(() => {
+      const list = this.listEl;
+      const margin = 8;
+      const rowTop = activeRow.offsetTop - margin;
+      const rowBottom = activeRow.offsetTop + activeRow.offsetHeight + margin;
+      const viewTop = list.scrollTop;
+      const viewBottom = viewTop + list.clientHeight;
+      if (rowTop < viewTop) list.scrollTop = rowTop;
+      else if (rowBottom > viewBottom) list.scrollTop = rowBottom - list.clientHeight;
+    });
+  },
+
   render() {
     if (!this.listEl) return;
     const current = PlaylistQueue.current();
@@ -285,9 +299,7 @@ const SharePlaylist = {
     this.listEl.appendChild(fragment);
 
     if (activeRow) {
-      requestAnimationFrame(() => {
-        activeRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      });
+      this.scrollActiveRowIntoView(activeRow);
     }
   },
 

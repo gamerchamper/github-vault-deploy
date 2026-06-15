@@ -164,10 +164,10 @@
   <script src="/js/chunk-blocks.js?v=1.0.3"></script>
   <script src="/js/download-manager.js?v=1.0.8"></script>
   <script src="/js/share-stage-layout.js?v=1.1.5"></script>
-  <script src="/js/share-viewer.js?v=1.0.10"></script>
+  <script src="/js/share-viewer.js?v=1.0.12"></script>
   <script src="/js/share-presence.js?v=1.0.0"></script>
-  <script src="/js/share-shoutbox.js?v=1.0.1"></script>
-  <script src="/js/share-playlist.js?v=1.0.6"></script>
+  <script src="/js/share-shoutbox.js?v=1.0.2"></script>
+  <script src="/js/share-playlist.js?v=1.0.7"></script>
   <script>
     function parseShareRoute() {
       const pathParts = location.pathname.split('/').filter(Boolean);
@@ -598,6 +598,8 @@
 
     async function init() {
       applyEmbedMode();
+      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+      window.scrollTo(0, 0);
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/share/sw.js', { scope: '/share/' })
           .then((reg) => reg.update())

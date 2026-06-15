@@ -21,6 +21,9 @@ const ShareViewer = {
   lastChunkStateKey: null,
   clientStream: false,
   playlistMode: false,
+  _hlsMode: 'direct',
+  _hlsSegmentsDone: 0,
+  _hlsSegmentsTotal: 0,
 
   apiBase(token) {
     return this.playlistMode
@@ -129,6 +132,13 @@ const ShareViewer = {
   },
 
   playDirectStream(info, token, video, videoWrap, loading) {
+    if (this._hlsMode === 'hls') {
+      this._hlsMode = 'direct';
+      this._hlsSegmentsDone = 0;
+      this._hlsSegmentsTotal = 0;
+      this.syncChunksStatLabel();
+      if (info?.chunk_count) this.mountChunkBlocks(info, null);
+    }
     const streamUrl = this.streamUrl(token, info.id);
     MediaPlayer.attachStreamPlayback(video, {
       onReady: () => {
@@ -198,16 +208,7 @@ const ShareViewer = {
     this.hls = new Hls({ enableWorker: true, lowLatencyMode: true });
     this.hls.loadSource(proxyUrl);
     this.hls.attachMedia(video);
-
-    let hlsSegmentsDone = 0;
-    const totalSegments = this.chunkBlocks?.layout?.total || info.hls_segment_count || 0;
-    this.hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
-      hlsSegmentsDone = Math.max(hlsSegmentsDone, (data.frag?.sn || 0) + 1);
-      if (this.chunkBlocks) {
-        ChunkBlocks.update(this.chunkBlocks, { completed: hlsSegmentsDone, total: totalSegments, stage: 'hls' });
-      }
-      this.setStat('share-stat-chunks', `${hlsSegmentsDone} / ${totalSegments || '?'}`);
-    });
+    this.bindHlsSegmentTracking(info);
 
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
       this.initVideoPlyr(video);
@@ -277,6 +278,7 @@ const ShareViewer = {
 
     this.hls.loadSource(playlistUrl);
     this.hls.attachMedia(video);
+    this.bindHlsSegmentTracking(info);
 
     video.oncanplay = () => {
       clearTimeout(this.hlsFallbackTimer);
@@ -359,6 +361,22 @@ const ShareViewer = {
     } else if (typeof ShareStageLayout !== 'undefined') {
       ShareStageLayout.onOpen();
     }
+  },
+
+  isMobileShareLayout() {
+    return typeof matchMedia !== 'undefined' && matchMedia('(max-width: 768px)').matches;
+  },
+
+  ensurePageScrollTop() {
+    if (!this.isMobileShareLayout()) return;
+    const pin = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    pin();
+    requestAnimationFrame(pin);
+    requestAnimationFrame(() => requestAnimationFrame(pin));
   },
 
   setPlayerFullscreen(active) {
@@ -523,6 +541,19 @@ const ShareViewer = {
 
   updateChunkBlocks(status) {
     if (!this.chunkBlocks || !this.currentFile) return;
+    if (this.usesHlsSegments()) {
+      const total = this.hlsSegmentTotal();
+      const completed = Math.max(
+        this._hlsSegmentsDone || 0,
+        status?.hls_segments || status?.segments || 0,
+      );
+      const state = { completed, total, stage: 'hls' };
+      const key = ChunkBlocks.stateKey(state);
+      if (this.lastChunkStateKey === key) return;
+      this.lastChunkStateKey = key;
+      ChunkBlocks.update(this.chunkBlocks, state);
+      return;
+    }
     const state = ChunkBlocks.fromStreamStatus(status, this.currentFile);
     const key = ChunkBlocks.stateKey(state);
     if (this.lastChunkStateKey === key) return;
@@ -684,6 +715,7 @@ const ShareViewer = {
 
     if (this.currentMediaType === 'video') {
       this.setCinemaMode(true);
+      this.ensurePageScrollTop();
       const hasHls = info.hls_available && !!info.hls_playlist_url;
       let typeParam = new URL(location.href).searchParams.get('type');
       if (!typeParam && hasHls) {
@@ -745,11 +777,9 @@ const ShareViewer = {
 
       this._hlsPlaylistUrl = hasHls ? info.hls_playlist_url : null;
       this._hlsMode = hasHls && (useHls || useGithub) ? 'hls' : 'direct';
-      if (hasHls && (useHls || useGithub)) {
-        const chunksContainer = document.getElementById('share-stat-chunks')?.closest('.viewer-stat');
-        const statLabel = chunksContainer?.querySelector('.viewer-stat-label');
-        if (statLabel) statLabel.textContent = 'Segments';
-      }
+      this._hlsSegmentsDone = 0;
+      this._hlsSegmentsTotal = showHlsBlocks ? (info.hls_segment_count || 0) : 0;
+      this.syncChunksStatLabel();
 
       if (hasHls && useHls) {
         this.playWithHlsUrl(info, token, video, videoWrap, loading);
@@ -853,6 +883,7 @@ const ShareViewer = {
   onMediaReady(el, wrap, loading) {
     if (this.mediaReady) return;
     this.mediaReady = true;
+    this.ensurePageScrollTop();
     loading.classList.add('hidden');
     wrap.classList.remove('hidden');
 
@@ -927,10 +958,58 @@ const ShareViewer = {
     this.setBar(0);
     if (file) {
       this.setStat('share-stat-size', formatSize(file.size));
-      const segCount = this._hlsMode === 'hls' ? file.hls_segment_count : null;
-      this.setStat('share-stat-chunks', segCount ? `0 / ${segCount}` : file.chunk_count ? `0 / ${file.chunk_count}` : '—');
+      const total = this.usesHlsSegments()
+        ? this.hlsSegmentTotal(file)
+        : (file.chunk_count || 0);
+      this.setChunksStat(0, total);
     }
     this.syncDurationStat();
+  },
+
+  usesHlsSegments() {
+    return this._hlsMode === 'hls';
+  },
+
+  hlsSegmentTotal(file = this.currentFile) {
+    return this._hlsSegmentsTotal
+      || this.chunkBlocks?.layout?.total
+      || file?.hls_segment_count
+      || 0;
+  },
+
+  syncChunksStatLabel() {
+    const labelEl = document.getElementById('share-stat-chunks')
+      ?.closest('.viewer-stat')
+      ?.querySelector('.viewer-stat-label');
+    if (labelEl) labelEl.textContent = this.usesHlsSegments() ? 'Segments' : 'Chunks';
+  },
+
+  setChunksStat(completed, total) {
+    this.syncChunksStatLabel();
+    if (total > 0) {
+      this.setStat('share-stat-chunks', `${Math.max(0, completed)} / ${total}`);
+    } else {
+      this.setStat('share-stat-chunks', '—');
+    }
+  },
+
+  bindHlsSegmentTracking(info) {
+    if (!this.hls || typeof Hls === 'undefined') return;
+    const totalSegments = this.hlsSegmentTotal(info);
+    this._hlsSegmentsTotal = totalSegments;
+    this._hlsSegmentsDone = 0;
+    this.syncChunksStatLabel();
+    this.hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
+      this._hlsSegmentsDone = Math.max(this._hlsSegmentsDone, (data.frag?.sn || 0) + 1);
+      if (this.chunkBlocks) {
+        ChunkBlocks.update(this.chunkBlocks, {
+          completed: this._hlsSegmentsDone,
+          total: totalSegments,
+          stage: 'hls',
+        });
+      }
+      this.setChunksStat(this._hlsSegmentsDone, totalSegments);
+    });
   },
 
   effectiveDuration(el = null) {
@@ -1064,14 +1143,18 @@ const ShareViewer = {
 
     const video = document.querySelector('#share-viewer .share-video-el');
     const isBuffering = video?.buffered?.length > 0;
-    const total = status.total_segments || file.chunk_count || 0;
-    const current = status.mode === 'hls'
-      ? (status.hls_segments || status.segments || 0)
-      : (status.segments || 0);
+    const total = this.usesHlsSegments()
+      ? (status.total_segments || this.hlsSegmentTotal(file))
+      : (status.total_segments || file.chunk_count || 0);
+    const current = this.usesHlsSegments()
+      ? Math.max(this._hlsSegmentsDone || 0, status.hls_segments || status.segments || 0)
+      : (status.mode === 'hls'
+        ? (status.hls_segments || status.segments || 0)
+        : (status.segments || 0));
 
     if (this.mediaReady || isBuffering) {
-      if (total > 0 && current > 0) {
-        this.setStat('share-stat-chunks', `${current} / ${total}`);
+      if (total > 0 && current >= 0) {
+        this.setChunksStat(current, total);
       }
       if (status.bytes_ready > 0 && file.size > 0) {
         const pct = Math.round((status.bytes_ready / file.size) * 100);
@@ -1083,8 +1166,8 @@ const ShareViewer = {
     }
 
     if (total > 0) {
-      this.setStat('share-stat-chunks', `${current} / ${total}`);
-    } else if (file.chunk_count) {
+      this.setChunksStat(current, total);
+    } else if (!this.usesHlsSegments() && file.chunk_count) {
       this.setStat('share-stat-chunks', `— / ${file.chunk_count}`);
     }
 
@@ -1102,7 +1185,11 @@ const ShareViewer = {
 
     if (status.ready && status.buffered) {
       this.setStat('share-stat-buffered', '100%');
-      this.setStat('share-stat-chunks', total > 0 ? `${total} / ${total}` : (file.chunk_count ? `${file.chunk_count} / ${file.chunk_count}` : '—'));
+      if (this.usesHlsSegments()) {
+        this.setChunksStat(total, total);
+      } else {
+        this.setChunksStat(total, total > 0 ? total : (file.chunk_count || 0));
+      }
     } else if (bytes > 0 && file.size > 0) {
       this.setStat('share-stat-buffered', `${Math.round((bytes / file.size) * 100)}%`);
     }
@@ -1141,13 +1228,18 @@ const ShareViewer = {
     this.updateSpeed(bufferedBytes);
     this.setStat('share-stat-speed', this.formatSpeed(this.metrics.speed));
 
-    const total = this.lastServerStatus?.total_segments || file.chunk_count;
-    const segments = this.lastServerStatus?.segments;
-    if (total && segments) {
-      this.setStat('share-stat-chunks', `${segments} / ${total}`);
-    } else if (file.chunk_count && bufferedPct > 0) {
-      const chunksLoaded = Math.min(file.chunk_count, Math.ceil((bufferedPct / 100) * file.chunk_count));
-      this.setStat('share-stat-chunks', `${chunksLoaded} / ${file.chunk_count}`);
+    if (this.usesHlsSegments()) {
+      const total = this.hlsSegmentTotal(file);
+      if (total > 0) this.setChunksStat(this._hlsSegmentsDone || 0, total);
+    } else {
+      const total = this.lastServerStatus?.total_segments || file.chunk_count;
+      const segments = this.lastServerStatus?.segments;
+      if (total && segments) {
+        this.setChunksStat(segments, total);
+      } else if (file.chunk_count && bufferedPct > 0) {
+        const chunksLoaded = Math.min(file.chunk_count, Math.ceil((bufferedPct / 100) * file.chunk_count));
+        this.setChunksStat(chunksLoaded, file.chunk_count);
+      }
     }
 
     if (this.lastServerStatus) this.updateChunkBlocks(this.lastServerStatus);

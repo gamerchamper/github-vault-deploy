@@ -258,7 +258,7 @@ const ShareShoutbox = {
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
   },
 
-  openPanel() {
+  openPanel({ focusInput = true } = {}) {
     const scrollY = window.scrollY;
     this.shoutboxEl.classList.remove('hidden', 'shoutbox-closed');
     this.setPanelAccessibility(true);
@@ -273,11 +273,13 @@ const ShareShoutbox = {
       });
     });
     setTimeout(() => {
-      try {
-        this.inputEl?.focus({ preventScroll: true });
-      } catch {
-        this.inputEl?.focus();
-        window.scrollTo(0, scrollY);
+      if (focusInput) {
+        try {
+          this.inputEl?.focus({ preventScroll: true });
+        } catch {
+          this.inputEl?.focus();
+          window.scrollTo(0, scrollY);
+        }
       }
       window.scrollTo(0, scrollY);
       ShareStageLayout?.syncLayoutMode?.();
@@ -338,8 +340,9 @@ const ShareShoutbox = {
     this.openBtnEl.classList.remove('hidden');
     document.body.classList.remove('share-shoutbox-open');
 
-    const storedOpen = sessionStorage.getItem('shoutboxOpen');
-    if (storedOpen !== 'false') this.openPanel();
+    const storedOpen = sessionStorage.getItem('shoutboxOpen') === 'true';
+    const isMobile = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 768px)').matches;
+    if (storedOpen && !isMobile) this.openPanel({ focusInput: true });
 
     this.messagesEl.addEventListener('scroll', () => ShareShoutbox.checkScroll());
 
@@ -385,7 +388,7 @@ const ShareShoutbox = {
 
   bindEvents() {
     document.addEventListener('click', (e) => {
-      if (e.target.id === 'shoutbox-open-btn') { ShareShoutbox.openPanel(); }
+      if (e.target.id === 'shoutbox-open-btn') { ShareShoutbox.openPanel({ focusInput: true }); }
       if (e.target.id === 'shoutbox-close') { ShareShoutbox.closePanel(); }
       if (e.target.id === 'shoutbox-send') { ShareShoutbox.sendMessage(); }
     });
