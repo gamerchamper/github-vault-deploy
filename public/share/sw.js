@@ -1,20 +1,29 @@
-const CACHE = 'vault-share-v15';
-const LEGACY_CACHES = ['vault-share-v14', 'vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
+const CACHE = 'vault-share-v16';
+const LEGACY_CACHES = ['vault-share-v15', 'vault-share-v14', 'vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
 
 const STATIC_ASSETS = [
+  '/css/tokens.css',
   '/css/share.css',
+  '/css/playlists.css',
+  '/css/explorer.css',
+  '/css/plyr.css',
   '/js/share-lazy-libs.js',
   '/js/adaptive-concurrency.js',
   '/js/share-crypto.js',
   '/js/share-media-cache.js',
   '/js/share-client-stream.js',
   '/js/share-download.js',
+  '/js/api.js',
   '/js/media-player.js',
+  '/js/playback-memory.js',
+  '/js/playlist-queue.js',
   '/js/chunk-blocks.js',
   '/js/download-manager.js',
+  '/js/share-stage-layout.js',
   '/js/share-viewer.js',
   '/js/share-presence.js',
-  '/css/plyr.css',
+  '/js/share-shoutbox.js',
+  '/js/share-playlist.js',
   '/js/plyr.polyfilled.min.js',
   '/js/hls.min.js',
 ];

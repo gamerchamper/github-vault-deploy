@@ -41,6 +41,8 @@ async function renderSharePage(req, res, { embed = false } = {}) {
   html = html.replace('<!-- SHARE_EMBED_META -->', meta.tagsHtml);
   html = html.replace('<!-- SHARE_PAGE_TITLE -->', meta.title);
 
+  html = html.replace('<!-- SHARE_PAGE_CSS -->', '');
+
   if (embed) {
     html = html.replace('<body>', '<body class="share-embed-mode">');
     html = html.replace(
@@ -73,6 +75,10 @@ router.get('/p/:token', (req, res) => {
   let html = getTemplate();
   html = html.replace('<!-- SHARE_PAGE_TITLE -->', 'Playlist');
   html = html.replace('<!-- SHARE_EMBED_META -->', '');
+  html = html.replace(
+    '<!-- SHARE_PAGE_CSS -->',
+    '<link rel="stylesheet" href="/css/playlists.css?v=1.0.2" id="share-playlists-css">'
+  );
   html = html.replace(
     '<!-- SHARE_EMBED_BOOT -->',
     '<script>window.SHARE_PLAYLIST_MODE = true;</script>'

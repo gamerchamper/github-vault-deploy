@@ -6,7 +6,10 @@
   <title><!-- SHARE_PAGE_TITLE --> — GitHub Vault</title>
   <!-- SHARE_EMBED_META -->
   <link rel="preconnect" href="/" crossorigin>
-  <link rel="stylesheet" href="/css/share.css?v=1.2.3">
+  <link rel="stylesheet" href="/css/tokens.css?v=1.0.0">
+  <link rel="stylesheet" href="/css/share.css?v=1.2.4">
+  <link rel="stylesheet" href="/css/plyr.css?v=1.0.0" id="share-plyr-css">
+  <!-- SHARE_PAGE_CSS -->
   <script data-cfasync="false">
     (function prefetchShareApi() {
       const parts = location.pathname.split('/').filter(Boolean);
@@ -612,7 +615,9 @@
 
     async function initPlaylistShare() {
       setPlaylistShareMode();
-      ShareLazyLibs.loadPlaylistsCss().catch(() => {});
+      if (!document.getElementById('share-playlists-css')) {
+        await ShareLazyLibs.loadPlaylistsCss().catch(() => {});
+      }
       document.getElementById('share-hero')?.classList.add('hidden');
       SharePlaylist.init(token, async (fileId) => {
         updateShareFileUrl(fileId);

@@ -1,7 +1,111 @@
 /**
- * Share page — premium presentation layer (uses tokens.css)
+ * Share page — premium presentation layer (tokens.css linked from share.html)
  */
-@import url('tokens.css');
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+
+.hidden { display: none !important; }
+
+@keyframes share-spin {
+  to { transform: rotate(360deg); }
+}
+
+.vault-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.vault-loader-mark {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vault-loader-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: share-spin 0.75s linear infinite;
+}
+
+.vault-loader-logo {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  color: var(--accent);
+  z-index: 1;
+}
+
+.vault-loader-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.btn-primary, .btn-secondary, .btn-danger {
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  transition: background 0.15s, transform 0.1s;
+}
+
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.97);
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-color: var(--border);
+  transition: background 0.15s, transform 0.1s;
+}
+
+.btn-secondary:hover:not(:disabled) { background: var(--bg-hover); }
+
+.btn-secondary:active:not(:disabled) { transform: scale(0.97); }
+
+@supports (scrollbar-width: thin) {
+  .vault-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb, var(--border)) transparent;
+  }
+}
+
+.vault-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.vault-scroll::-webkit-scrollbar-track { background: transparent; margin: 4px 0; }
+.vault-scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, var(--border));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.vault-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, var(--text-muted));
+  background-clip: padding-box;
+}
+.vault-scroll::-webkit-scrollbar-corner { background: transparent; }
 
 #share-file-view:not(.hidden) .share-cinema-stage {
   min-height: clamp(200px, 52vw, 48vh);
@@ -22,6 +126,7 @@ body.share-body {
   --share-right-rail-width: var(--share-shoutbox-width);
   --share-playlist-panel-height: min(42vh, 320px);
   --share-shoutbox-gap: var(--space-md);
+  font-family: var(--font);
   background: var(--bg-primary);
   min-height: 100vh;
   height: auto;
@@ -1492,6 +1597,17 @@ body.share-player-fullscreen .shoutbox-open-btn {
 }
 
 .share-audio-player { margin: 0 auto; max-width: 640px; }
+
+.viewer-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  background: rgba(17, 17, 17, 0.85);
+}
 
 .share-loading {
   display: flex;
