@@ -182,26 +182,36 @@ const ShareDownload = {
   },
 
   async exportShare(token, file, onProgress, options = {}) {
-    const sameSession = ShareClientStream.token === token
+    const hadSession = ShareClientStream.token === token
       && ShareClientStream.fileId === file.id
       && ShareClientStream.manifest;
 
+    ShareStreamLog?.info('download:export-start', {
+      fileId: file.id,
+      hadSession,
+      size: file.size,
+    });
+
     try {
-      if (sameSession) {
-        ShareClientStream.beginDownloadSession(onProgress);
-        if (onProgress) {
-          onProgress(this.downloadProgress({
-            stage: 'starting',
-            total_segments: ShareClientStream.manifest?.chunks?.length || file.chunk_count || 0,
-          }));
-        }
-      } else {
-        await ShareClientStream.load(token, file.id, onProgress);
+      if (hadSession) ShareClientStream.beginDownloadSession(onProgress);
+      await ShareClientStream.load(token, file.id, onProgress);
+
+      if (onProgress) {
+        onProgress(this.downloadProgress({
+          stage: 'starting',
+          total_segments: ShareClientStream.manifest?.chunks?.length || file.chunk_count || 0,
+        }));
       }
 
       const size = ShareClientStream.manifest?.size || file.size || 0;
       const name = ShareClientStream.manifest?.name || file.name;
       const dirHandle = options.dirHandle ?? null;
+
+      ShareStreamLog?.info('download:export-mode', {
+        size,
+        split: size > this.singleMaxBytes(),
+        dir: !!dirHandle,
+      });
 
       if (size <= this.singleMaxBytes()) {
         if (onProgress) {
@@ -225,8 +235,11 @@ const ShareDownload = {
       }
 
       return this.exportSplitZips(name, size, onProgress, { dirHandle });
+    } catch (err) {
+      ShareStreamLog?.error('download:export-failed', { message: err.message });
+      throw err;
     } finally {
-      if (sameSession) ShareClientStream.endDownloadSession();
+      if (hadSession) ShareClientStream.endDownloadSession();
     }
   },
 
@@ -315,6 +328,7 @@ const ShareDownload = {
 
     for (let i = 0; i < totalChunks; i++) {
       if (!ShareClientStream.isChunkReady(i)) {
+        ShareStreamLog?.debug('download:fetch-chunk', { index: i });
         await ShareClientStream.fetchOne(i);
       }
       const bytes = await ShareClientStream.getChunkBytes(i);

@@ -73,6 +73,8 @@ const DownloadManager = {
     const jobId = `pub:${file.id}`;
     if (this.jobs.has(jobId)) return;
 
+    ShareStreamLog?.info('download:job-start', { fileId: file.id, name: file.name, size: file.size });
+
     const job = {
       id: jobId,
       fileId: file.id,
@@ -140,6 +142,7 @@ const DownloadManager = {
         this.notifyDownload(`${job.pendingParts.length} zip part(s) ready — click Save below for each file`);
       } else if (job.done) {
         const names = job.savedFiles.map((f) => f.name).join(', ');
+        ShareStreamLog?.info('download:job-done', { files: job.savedFiles.length, names });
         this.notifyDownload(job.saveDir
           ? `Saved to folder: ${names}`
           : `Downloaded ${file.name}`);
@@ -150,6 +153,7 @@ const DownloadManager = {
       job.done = false;
       job.pendingParts = [];
       job.savedFiles = [];
+      ShareStreamLog?.error('download:job-failed', { message: err.message });
       this.render();
       this.notifyDownload(err.message, 'error');
     }

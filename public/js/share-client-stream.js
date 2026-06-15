@@ -120,7 +120,24 @@ const ShareClientStream = {
     }
   },
 
-  resetStream() {
+  log(level, event, data) {
+    if (typeof ShareStreamLog !== 'undefined') ShareStreamLog[level](event, data);
+  },
+
+  resetStream(options = {}) {
+    const force = options.force === true;
+    if (this._streamProtected && !force) {
+      this.log('warn', 'stream:reset-blocked', {
+        appendIndex: this.stream?.appendIndex,
+        mseUrl: this.stream?.mseUrl?.slice(0, 64) || null,
+      });
+      return;
+    }
+    this.log('info', 'stream:reset', {
+      force,
+      hadStream: !!this.stream,
+      mseUrl: this.stream?.mseUrl?.slice(0, 64) || null,
+    });
     this.stopStreamPump();
     if (this.stream?.mseUrl) {
       URL.revokeObjectURL(this.stream.mseUrl);
@@ -184,6 +201,7 @@ const ShareClientStream = {
       .catch((err) => {
         this.stream.inFlight.delete(index);
         if (!this.stream.error) this.stream.error = err;
+        this.log('error', 'stream:fetch-failed', { index, message: err.message });
       });
   },
 
@@ -264,7 +282,7 @@ const ShareClientStream = {
       this.stream.appendedBytes += bytes.byteLength || bytes.length;
 
       if (this.isLowMemoryDevice()) {
-        this.chunks[idx] = this.CHUNK_ON_DISK;
+        await this.persistChunkToCache(idx);
       }
 
       this.stream.appendIndex = idx + 1;
@@ -293,7 +311,8 @@ const ShareClientStream = {
     const mime = this.mseMimeType();
     if (!mime) throw new Error('Progressive playback not supported in this browser');
 
-    this.resetStream();
+    this.log('info', 'playback:mse-start', { mime, chunks: this.manifest.chunks.length });
+    this.resetStream({ force: true });
     this.prepareMediaElement(mediaEl, wrap);
 
     const mediaSource = new MediaSource();
@@ -471,7 +490,11 @@ const ShareClientStream = {
   async getChunkBytes(index) {
     const entry = this.chunks[index];
     if (entry && entry !== this.CHUNK_ON_DISK) return entry;
-    return ShareMediaCache.getChunk(this.cacheKey(), index);
+    const cached = await ShareMediaCache.getChunk(this.cacheKey(), index);
+    if (!cached) {
+      this.log('warn', 'chunk:cache-miss', { index, onDisk: entry === this.CHUNK_ON_DISK });
+    }
+    return cached;
   },
 
   fetchConcurrency() {
@@ -481,7 +504,7 @@ const ShareClientStream = {
 
   async fetchManifestFromNetwork() {
     const res = await fetch(this.manifestUrl(this.token, this.fileId), {
-      signal: this.abortController.signal,
+      signal: this.fetchSignal(),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -512,7 +535,47 @@ const ShareClientStream = {
     this.syncCompleted();
   },
 
+  reuseSession(token, fileId, onProgress) {
+    if (onProgress) this.onProgress = onProgress;
+    this.ensureFetchController();
+    this.ensurePool();
+    this.onProgress(this.getStatus());
+    return this.manifest;
+  },
+
   async load(token, fileId, onProgress) {
+    while (this._loadInflight) {
+      await this._loadInflight;
+      if (this.token === token && this.fileId === fileId && this.manifest) {
+        this.log('info', 'load:reuse-after-wait', { fileId });
+        return this.reuseSession(token, fileId, onProgress);
+      }
+    }
+
+    const reuse = this.token === token
+      && this.fileId === fileId
+      && this.manifest
+      && this.chunks
+      && this.fileKey;
+    if (reuse) {
+      this.log('info', 'load:reuse', {
+        fileId,
+        completed: this.completed,
+        stream: !!this.stream,
+      });
+      return this.reuseSession(token, fileId, onProgress);
+    }
+
+    this._loadInflight = this._loadFresh(token, fileId, onProgress);
+    try {
+      return await this._loadInflight;
+    } finally {
+      this._loadInflight = null;
+    }
+  },
+
+  async _loadFresh(token, fileId, onProgress) {
+    this.log('info', 'load:start', { fileId, token: token?.slice(0, 8) });
     this.abort();
     this.token = token;
     this.fileId = fileId;
@@ -524,7 +587,7 @@ const ShareClientStream = {
     this.cacheHit = false;
     this.offline = false;
     this.serverOffline = false;
-    this.resetStream();
+    this.resetStream({ force: true });
     this._mseMime = null;
     this._chunkStarts = null;
 
@@ -582,13 +645,36 @@ const ShareClientStream = {
     }
 
     const chunkCount = this.manifest.chunks.length;
+    this.ensurePool(chunkCount);
+    this.onProgress(this.getStatus());
+    this.log('info', 'load:ready', {
+      chunks: chunkCount,
+      completed: this.completed,
+      cacheHit: this.cacheHit,
+    });
+    return this.manifest;
+  },
+
+  ensureFetchController() {
+    if (!this.abortController || this.abortController.signal.aborted) {
+      this.abortController = new AbortController();
+      this.log('warn', 'fetch:controller-recreated', {});
+    }
+  },
+
+  fetchSignal() {
+    this.ensureFetchController();
+    return this.abortController.signal;
+  },
+
+  ensurePool(chunkCount = this.manifest?.chunks?.length || 0) {
+    if (this.pool || !chunkCount) return;
     const conc = this.mediaKind() === 'media' && this.canUseMse()
       ? { max: this.isLowMemoryDevice() ? 2 : 4, initial: 1 }
       : this.fetchConcurrency();
     this.pool = AdaptiveConcurrency.createPool(chunkCount, conc);
     this.pool.start();
-    this.onProgress(this.getStatus());
-    return this.manifest;
+    this.log('info', 'pool:created', { max: conc.max, initial: conc.initial });
   },
 
   getStatus() {
@@ -679,7 +765,7 @@ const ShareClientStream = {
   async fetchFromGithub(urls) {
     for (const url of urls) {
       try {
-        const res = await fetch(url, { signal: this.abortController.signal });
+        const res = await fetch(url, { signal: this.fetchSignal() });
         if (res.ok) return res.arrayBuffer();
       } catch { /* try next source */ }
     }
@@ -702,7 +788,7 @@ const ShareClientStream = {
     if (!this.serverOffline) {
       try {
         const res = await fetch(this.chunkUrl(index), {
-          signal: this.abortController.signal,
+          signal: this.fetchSignal(),
         });
         if (res.ok) {
           const buf = await res.arrayBuffer();
@@ -748,6 +834,13 @@ const ShareClientStream = {
     }
     if (!this.manifest?.chunks[index]) throw new Error(`Unknown chunk ${index}`);
 
+    this.ensurePool();
+    if (!this.pool) {
+      const err = new Error('Stream session not ready — reload the page');
+      this.log('error', 'fetchOne:no-pool', { index });
+      throw err;
+    }
+
     await this.pool.acquire();
     try {
       if (this.isChunkReady(index)) {
@@ -774,11 +867,12 @@ const ShareClientStream = {
         this.chunks[index] = this.CHUNK_ON_DISK;
       } else {
         this.chunks[index] = dec;
-        ShareMediaCache.putChunk(this.cacheKey(), index, dec).catch(() => {});
+        await ShareMediaCache.putChunk(this.cacheKey(), index, dec);
       }
       this.syncCompleted();
       this.pool.recordBytes(dec.byteLength || dec.length);
       this.onProgress(this.getStatus());
+      this.log('debug', 'fetchOne:done', { index, bytes: dec.byteLength || dec.length });
       return dec;
     } finally {
       this.pool.release();
@@ -1096,7 +1190,7 @@ const ShareClientStream = {
       try {
         return await this.playMediaProgressive(mediaEl, wrap);
       } catch {
-        this.resetStream();
+        this.resetStream({ force: true });
         return this.playMediaBlob(mediaEl, wrap);
       }
     }
@@ -1135,19 +1229,30 @@ const ShareClientStream = {
   beginDownloadSession(onProgress) {
     this._playbackOnProgress = this.onProgress;
     if (onProgress) this.onProgress = onProgress;
+    if (this.stream?.mseUrl) this._streamProtected = true;
+    this.log('info', 'download:begin', {
+      stream: !!this.stream,
+      appendIndex: this.stream?.appendIndex ?? null,
+      protected: !!this._streamProtected,
+    });
   },
 
   endDownloadSession() {
+    this._streamProtected = false;
     if (this._playbackOnProgress) {
       this.onProgress = this._playbackOnProgress;
       this._playbackOnProgress = null;
     }
+    this.log('info', 'download:end', ShareStreamLog?.streamSnapshot?.() || {});
   },
 
   abort() {
+    this.log('info', 'session:abort', {});
+    this._streamProtected = false;
+    this._playbackOnProgress = null;
     this.abortController?.abort();
     this.pool?.stop();
-    this.resetStream();
+    this.resetStream({ force: true });
     this.revokeBlobUrl();
     this.token = null;
     this.fileId = null;

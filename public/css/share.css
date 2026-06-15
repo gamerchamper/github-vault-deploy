@@ -2516,3 +2516,64 @@ body.share-embed-mode #share-folder-meta { display: none; }
   .share-page h1 { font-size: 18px; }
   .share-presence-label { display: none; }
 }
+
+/* Stream debug log (?streamlog=1 or localStorage shareStreamLog=1) */
+.share-stream-log {
+  position: fixed;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  z-index: 10050;
+  width: min(520px, calc(100vw - 24px));
+  max-height: min(42vh, 360px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 12, 16, 0.96);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  color: #dbe4f0;
+  font-size: 11px;
+}
+
+.share-stream-log.hidden { display: none; }
+
+.share-stream-log-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.share-stream-log-hint {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.share-stream-log-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.share-stream-log-actions button {
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: inherit;
+  cursor: pointer;
+}
+
+.share-stream-log-list {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.35;
+}

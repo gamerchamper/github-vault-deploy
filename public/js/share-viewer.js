@@ -619,6 +619,7 @@ const ShareViewer = {
       this.onMediaReady(video, videoWrap, loading);
     } catch (err) {
       loading.classList.add('hidden');
+      ShareStreamLog?.error('playback:video-failed', { message: err.message });
       let msg = err.message || 'Failed to load video';
       if (/allocation|memory|Missing chunk|size mismatch/i.test(msg)) {
         msg = 'Video too large for this device\'s memory — try a shorter clip or use Download on Wi‑Fi';
@@ -639,6 +640,7 @@ const ShareViewer = {
       this.onMediaReady(audio, wrap, loading);
     } catch (err) {
       loading.classList.add('hidden');
+      ShareStreamLog?.error('playback:audio-failed', { message: err.message });
       let msg = err.message || 'Failed to load audio';
       if (/allocation|memory|Missing chunk|size mismatch/i.test(msg)) {
         msg = 'File too large for this device\'s memory — try Download on Wi‑Fi instead';
