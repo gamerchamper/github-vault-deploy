@@ -152,8 +152,6 @@ const DownloadManager = {
       job.savedFiles = [];
       this.render();
       this.notifyDownload(err.message, 'error');
-    } finally {
-      ShareClientStream.endDownloadSession();
     }
   },
 

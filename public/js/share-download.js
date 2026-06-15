@@ -186,45 +186,48 @@ const ShareDownload = {
       && ShareClientStream.fileId === file.id
       && ShareClientStream.manifest;
 
-    if (sameSession) {
-      if (onProgress) ShareClientStream.onProgress = onProgress;
-      if (onProgress) {
-        onProgress(this.downloadProgress({
-          stage: 'starting',
-          total_segments: ShareClientStream.manifest?.chunks?.length || file.chunk_count || 0,
-        }));
+    try {
+      if (sameSession) {
+        ShareClientStream.beginDownloadSession(onProgress);
+        if (onProgress) {
+          onProgress(this.downloadProgress({
+            stage: 'starting',
+            total_segments: ShareClientStream.manifest?.chunks?.length || file.chunk_count || 0,
+          }));
+        }
+      } else {
+        await ShareClientStream.load(token, file.id, onProgress);
       }
-    } else {
-      if (ShareClientStream.stream) ShareClientStream.resetStream();
-      await ShareClientStream.load(token, file.id, onProgress);
-    }
 
-    const size = ShareClientStream.manifest?.size || file.size || 0;
-    const name = ShareClientStream.manifest?.name || file.name;
-    const dirHandle = options.dirHandle ?? null;
+      const size = ShareClientStream.manifest?.size || file.size || 0;
+      const name = ShareClientStream.manifest?.name || file.name;
+      const dirHandle = options.dirHandle ?? null;
 
-    if (size <= this.singleMaxBytes()) {
-      if (onProgress) {
-        onProgress(this.downloadProgress({
-          stage: 'fetching',
-          total_segments: ShareClientStream.manifest?.chunks?.length || 0,
-        }));
+      if (size <= this.singleMaxBytes()) {
+        if (onProgress) {
+          onProgress(this.downloadProgress({
+            stage: 'fetching',
+            total_segments: ShareClientStream.manifest?.chunks?.length || 0,
+          }));
+        }
+        await ShareClientStream.fetchAllForDownload(onProgress);
+        const blob = await ShareClientStream.buildFullBlobAsync();
+        ShareClientStream.saveToCache(blob);
+        const saved = await this.triggerSave(blob, name, { dirHandle });
+        return {
+          mode: 'single',
+          parts: 1,
+          name,
+          pendingParts: [],
+          savedFiles: saved ? [saved] : [],
+          usedDirectory: !!dirHandle,
+        };
       }
-      await ShareClientStream.fetchAllForDownload(onProgress);
-      const blob = await ShareClientStream.buildFullBlobAsync();
-      ShareClientStream.saveToCache(blob);
-      const saved = await this.triggerSave(blob, name, { dirHandle });
-      return {
-        mode: 'single',
-        parts: 1,
-        name,
-        pendingParts: [],
-        savedFiles: saved ? [saved] : [],
-        usedDirectory: !!dirHandle,
-      };
-    }
 
-    return this.exportSplitZips(name, size, onProgress, { dirHandle });
+      return this.exportSplitZips(name, size, onProgress, { dirHandle });
+    } finally {
+      if (sameSession) ShareClientStream.endDownloadSession();
+    }
   },
 
   async exportSplitZips(fileName, totalSize, onProgress, { dirHandle = null } = {}) {
@@ -320,7 +323,9 @@ const ShareDownload = {
       const chunk = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
       partBuffers.push(chunk);
       partSize += chunk.byteLength;
-      ShareClientStream.chunks[i] = ShareClientStream.CHUNK_ON_DISK;
+      if (ShareClientStream.chunks[i] !== ShareClientStream.CHUNK_ON_DISK) {
+        await ShareClientStream.persistChunkToCache(i);
+      }
 
       if (partSize >= this.ZIP_PART_SIZE) {
         await flushPart();

@@ -1000,8 +1000,6 @@ const ShareClientStream = {
       return this.cachedEntry.blob;
     }
 
-    if (this.stream) this.resetStream();
-
     const indices = this.manifest.chunks.map((_, i) => i);
     for (const index of indices) {
       if (!this.isChunkReady(index)) {
@@ -1127,10 +1125,23 @@ const ShareClientStream = {
     return this.fetchAllParallel();
   },
 
+  async persistChunkToCache(index) {
+    const entry = this.chunks?.[index];
+    if (!entry || entry === this.CHUNK_ON_DISK) return;
+    await ShareMediaCache.putChunk(this.cacheKey(), index, entry);
+    this.chunks[index] = this.CHUNK_ON_DISK;
+  },
+
+  beginDownloadSession(onProgress) {
+    this._playbackOnProgress = this.onProgress;
+    if (onProgress) this.onProgress = onProgress;
+  },
+
   endDownloadSession() {
-    this.abortController?.abort();
-    this.pool?.stop();
-    this.abortController = null;
+    if (this._playbackOnProgress) {
+      this.onProgress = this._playbackOnProgress;
+      this._playbackOnProgress = null;
+    }
   },
 
   abort() {
