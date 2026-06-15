@@ -1,4 +1,18 @@
 /** Lazy-load heavy share-page libraries (HLS, Plyr, PDF) after first paint. */
+globalThis.ShareStreamLog = globalThis.ShareStreamLog || {
+  init() {},
+  info() {},
+  warn() {},
+  error() {},
+  debug() {},
+  formatError(err) {
+    if (!err) return 'Unknown error';
+    if (typeof err === 'string') return err || 'Unknown error';
+    return err.message || String(err);
+  },
+  streamSnapshot() { return {}; },
+};
+
 const ShareLazyLibs = {
   _promises: new Map(),
 
@@ -59,12 +73,12 @@ const ShareLazyLibs = {
   },
 
   loadStreamLog() {
-    if (typeof ShareStreamLog !== 'undefined') {
-      ShareStreamLog.init?.();
+    if (globalThis.ShareStreamLog?.MAX) {
+      globalThis.ShareStreamLog.init?.();
       return Promise.resolve();
     }
     return this.loadScript('/js/share-stream-log.js?v=1.0.2').then(() => {
-      ShareStreamLog?.init?.();
+      globalThis.ShareStreamLog?.init?.();
     });
   },
 

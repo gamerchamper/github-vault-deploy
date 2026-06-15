@@ -231,7 +231,7 @@ const ShareDownload = {
       && ShareClientStream.fileId === file.id
       && !!ShareClientStream.manifest;
 
-    ShareStreamLog?.info('download:export-start', {
+globalThis.ShareStreamLog?.info('download:export-start', {
       fileId: file.id,
       reuseSession,
       size: file.size,
@@ -250,7 +250,7 @@ const ShareDownload = {
     const name = ShareClientStream.manifest?.name || file.name;
     const dirHandle = options.dirHandle ?? null;
 
-    ShareStreamLog?.info('download:export-mode', {
+    globalThis.ShareStreamLog?.info('download:export-mode', {
       size,
       split: size > this.singleMaxBytes(),
       dir: !!dirHandle,
@@ -280,8 +280,8 @@ const ShareDownload = {
 
       return await this.exportSplitZips(name, size, onProgress, { dirHandle });
     } catch (err) {
-      ShareStreamLog?.error('download:export-failed', {
-        message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || String(err)),
+      globalThis.ShareStreamLog?.error('download:export-failed', {
+        message: globalThis.ShareStreamLog?.formatError?.(err) || err.message || String(err),
       });
       throw err;
     }
@@ -372,7 +372,7 @@ const ShareDownload = {
 
     for (let i = 0; i < totalChunks; i++) {
       if (!ShareClientStream.isChunkReady(i)) {
-        ShareStreamLog?.debug('download:fetch-chunk', { index: i });
+        globalThis.ShareStreamLog?.debug('download:fetch-chunk', { index: i });
         await ShareClientStream.fetchOne(i);
       }
       const bytes = await ShareClientStream.getChunkBytes(i);

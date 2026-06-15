@@ -1,4 +1,4 @@
-const ShareStreamLog = {
+const ShareStreamLog = Object.assign(globalThis.ShareStreamLog || {}, {
   MAX: 600,
   entries: [],
   enabled: false,
@@ -158,5 +158,7 @@ const ShareStreamLog = {
     this.listEl.textContent += line;
     this.listEl.scrollTop = this.listEl.scrollHeight;
   },
-};
+});
+
+globalThis.ShareStreamLog = ShareStreamLog;
 

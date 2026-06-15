@@ -121,7 +121,7 @@ const ShareClientStream = {
   },
 
   log(level, event, data) {
-    if (typeof ShareStreamLog !== 'undefined') ShareStreamLog[level](event, data);
+    if (globalThis.ShareStreamLog) globalThis.ShareStreamLog[level](event, data);
   },
 
   detachBlobFromMedia(url) {
@@ -1269,7 +1269,7 @@ const ShareClientStream = {
       this.onProgress = this._playbackOnProgress;
       this._playbackOnProgress = null;
     }
-    this.log('info', 'download:end', ShareStreamLog?.streamSnapshot?.() || {});
+    this.log('info', 'download:end', globalThis.ShareStreamLog?.streamSnapshot?.() || {});
   },
 
   shouldYieldForPlayback() {

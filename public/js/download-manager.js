@@ -73,7 +73,7 @@ const DownloadManager = {
     const jobId = `pub:${file.id}`;
     if (this.jobs.has(jobId)) return;
 
-    ShareStreamLog?.info('download:job-start', { fileId: file.id, name: file.name, size: file.size });
+    globalThis.ShareStreamLog?.info('download:job-start', { fileId: file.id, name: file.name, size: file.size });
 
     const job = {
       id: jobId,
@@ -150,19 +150,19 @@ const DownloadManager = {
         this.notifyDownload(`${job.pendingParts.length} zip part(s) ready — click Save below for each file`);
       } else if (job.done) {
         const names = job.savedFiles.map((f) => f.name).join(', ');
-        ShareStreamLog?.info('download:job-done', { files: job.savedFiles.length, names });
+        globalThis.ShareStreamLog?.info('download:job-done', { files: job.savedFiles.length, names });
         this.notifyDownload(job.saveDir
           ? `Saved to folder: ${names}`
           : `Downloaded ${file.name}`);
         if (!job.saveDir) setTimeout(() => this.removeJob(job.id), 8000);
       }
     } catch (err) {
-      job.error = typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || 'Download failed');
+      job.error = globalThis.ShareStreamLog?.formatError?.(err) || err.message || 'Download failed';
       job.done = false;
       job.pendingParts = [];
       job.savedFiles = [];
-      ShareStreamLog?.error('download:job-failed', {
-        message: typeof ShareStreamLog !== 'undefined' ? ShareStreamLog.formatError(err) : (err.message || String(err)),
+      globalThis.ShareStreamLog?.error('download:job-failed', {
+        message: globalThis.ShareStreamLog?.formatError?.(err) || err.message || String(err),
       });
       this.render();
       this.notifyDownload(job.error, 'error');
