@@ -425,6 +425,18 @@ const ShareViewer = {
     document.body.classList.toggle('share-player-fullscreen', !!active);
   },
 
+  bindFullscreenSync() {
+    if (this._fullscreenSyncBound) return;
+    this._fullscreenSyncBound = true;
+    const sync = () => {
+      const active = !!document.fullscreenElement
+        || !!document.webkitFullscreenElement;
+      this.setPlayerFullscreen(active);
+    };
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+  },
+
   async initVideoPlyr(video) {
     if (this.plyr || !video) return this.plyr;
     try {
@@ -734,6 +746,7 @@ const ShareViewer = {
 
   mount(info, token) {
     this.destroy();
+    this.bindFullscreenSync();
     this.currentFile = info;
     this.currentToken = token;
     this.currentMediaType = this.mediaType(info.name, info.mime_type);

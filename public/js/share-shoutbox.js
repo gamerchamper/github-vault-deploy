@@ -310,6 +310,10 @@ const ShareShoutbox = {
     this.bindVideoPositionTracking();
   },
 
+  showOpenButton() {
+    this.openBtnEl?.classList.remove('hidden');
+  },
+
   init(token, fileId) {
     this.token = token;
     this.fileId = fileId;
@@ -337,7 +341,7 @@ const ShareShoutbox = {
     this.shoutboxEl.classList.add('hidden', 'shoutbox-closed');
     this.shoutboxEl.classList.remove('shoutbox-open');
     this.setPanelAccessibility(false);
-    this.openBtnEl.classList.remove('hidden');
+    this.showOpenButton();
     document.body.classList.remove('share-shoutbox-open');
 
     const storedOpen = sessionStorage.getItem('shoutboxOpen') === 'true';

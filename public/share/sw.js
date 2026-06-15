@@ -1,5 +1,5 @@
-const CACHE = 'vault-share-v16';
-const LEGACY_CACHES = ['vault-share-v15', 'vault-share-v14', 'vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
+const CACHE = 'vault-share-v17';
+const LEGACY_CACHES = ['vault-share-v16', 'vault-share-v15', 'vault-share-v14', 'vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
 
 const STATIC_ASSETS = [
   '/css/tokens.css',

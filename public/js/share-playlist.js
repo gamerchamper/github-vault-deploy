@@ -115,6 +115,11 @@ const SharePlaylist = {
     this.updateShuffleBtn();
 
     const first = this.pickFirstMedia();
+    if (first && typeof ShareShoutbox !== 'undefined') {
+      if (ShareShoutbox.token === this.token) ShareShoutbox.updateFile(first.id);
+      else ShareShoutbox.init(this.token, first.id);
+    }
+
     if (first && this.onPlayItem) {
       await this.onPlayItem(first.id);
     } else if (!first) {

@@ -5,6 +5,24 @@
 
 html, body { margin: 0; padding: 0; }
 
+:root {
+  color-scheme: dark;
+  --bg-primary: #0b0d14;
+  --bg-secondary: #11141f;
+  --bg-hover: #1a244533;
+  --border: #1e2440;
+  --text-primary: #e8ecf7;
+  --text-secondary: #9aa4c0;
+  --text-muted: #5e6888;
+  --accent: #5b8cf7;
+  --accent-hover: #7ba5ff;
+  --accent-glow: rgba(91, 140, 247, 0.15);
+  --font: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --radius: 10px;
+  --scrollbar-thumb: #2a3358;
+  --scrollbar-thumb-hover: #4a5580;
+}
+
 .hidden { display: none !important; }
 
 @keyframes share-spin {
@@ -107,6 +125,99 @@ html, body { margin: 0; padding: 0; }
 }
 .vault-scroll::-webkit-scrollbar-corner { background: transparent; }
 
+/* Segment / chunk progress blocks (also in explorer.css — duplicated so share page works standalone) */
+.chunk-blocks-wrap {
+  margin-top: 8px;
+  width: 100%;
+  contain: layout style;
+}
+
+.chunk-blocks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.chunk-blocks-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.chunk-blocks-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chunk-blocks-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  max-height: 54px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-content: flex-start;
+  contain: layout style paint;
+}
+
+.chunk-block {
+  flex: 1 0 4px;
+  height: 5px;
+  min-width: 4px;
+  max-width: 100%;
+  border-radius: 1px;
+  background: #2a2a2a;
+  border: none;
+  transition: background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.chunk-block--pending {
+  opacity: 0.35;
+}
+
+.chunk-block--done {
+  background: linear-gradient(135deg, #4a9eff 0%, #0067c0 100%);
+  box-shadow: 0 0 3px rgba(74, 158, 255, 0.3);
+  opacity: 1;
+}
+
+.chunk-block--active {
+  background: linear-gradient(135deg, #6eb6ff 0%, #4a9eff 100%);
+  box-shadow: 0 0 5px rgba(74, 158, 255, 0.65);
+  opacity: 1;
+  animation: chunk-pulse 0.9s ease-in-out infinite;
+}
+
+.chunk-block--decrypt {
+  background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+  box-shadow: 0 0 4px rgba(124, 58, 237, 0.35);
+  opacity: 1;
+  animation: chunk-decrypt 1.2s ease-in-out infinite;
+}
+
+@keyframes chunk-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(74, 158, 255, 0.4); }
+  50% { box-shadow: 0 0 14px rgba(74, 158, 255, 0.85); }
+}
+
+@keyframes chunk-decrypt {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
+}
+
 #share-file-view:not(.hidden) .share-cinema-stage {
   min-height: clamp(200px, 52vw, 48vh);
   aspect-ratio: 16 / 9;
@@ -127,6 +238,7 @@ body.share-body {
   --share-playlist-panel-height: min(42vh, 320px);
   --share-shoutbox-gap: var(--space-md);
   font-family: var(--font);
+  color: var(--text-primary);
   background: var(--bg-primary);
   min-height: 100vh;
   height: auto;
@@ -1337,6 +1449,29 @@ body.share-cinema-active .share-media-area-full {
   min-height: 0;
 }
 
+.share-video-player .plyr,
+.share-audio-player .plyr {
+  --plyr-color-main: var(--accent);
+  --plyr-menu-background: var(--bg-secondary);
+  --plyr-menu-color: var(--text-primary);
+  --plyr-video-background: #000;
+  color: var(--text-primary);
+}
+
+.share-video-player .plyr__controls,
+.share-video-player .plyr__time,
+.share-video-player .plyr__menu__container,
+.share-audio-player .plyr__controls,
+.share-audio-player .plyr__time,
+.share-audio-player .plyr__menu__container {
+  color: var(--text-primary);
+}
+
+.share-video-player .plyr__menu__container .plyr__control,
+.share-audio-player .plyr__menu__container .plyr__control {
+  color: var(--text-primary);
+}
+
 .share-video-player { padding: var(--space-sm) 0; width: 100%; }
 
 /* Browser video enhancement compatibility (Edge VSR, RTX VSR, Safari HW decode) */
@@ -1914,6 +2049,30 @@ body.share-has-top-dock .share-cinema-stage:not(.share-stage-fitted) {
 .share-playlist-hero-text {
   min-width: 0;
   flex: 1;
+}
+
+.share-playlist-panel .playlist-panel-title,
+#share-playlist-title {
+  color: var(--text-primary);
+}
+
+.share-playlist-panel .playlist-panel-meta,
+#share-playlist-meta {
+  color: var(--text-secondary);
+}
+
+.share-playlist-panel .playlist-panel-search,
+.share-playlist-panel .playlist-ctrl-btn {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.share-playlist-panel .playlist-queue-name {
+  color: var(--text-primary);
+}
+
+.share-playlist-panel .playlist-queue-meta {
+  color: var(--text-muted);
 }
 
 .share-playlist-desc {
