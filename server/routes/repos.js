@@ -6,62 +6,13 @@ const github = require('../services/github');
 const capacity = require('../services/capacity');
 const vaultOrg = require('../services/vault-org');
 const accounts = require('../services/accounts');
+const repoBatch = require('../services/repo-batch');
 const db = require('../db/database');
 
 const router = express.Router();
-const REPO_CAPACITY_GB = parseInt(process.env.REPO_CAPACITY_GB || '1', 10);
+const REPO_CAPACITY_GB = repoBatch.REPO_CAPACITY_GB;
 
 router.use(requireAuth, ensureSetup);
-
-async function createStorageRepoForUser(userId, { linkedAccountId = null } = {}) {
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-
-  let token = user.access_token;
-  let ownerOrg = user.vault_org || null;
-  let linkId = null;
-
-  if (linkedAccountId) {
-    const account = accounts.getLinkedAccount(userId, linkedAccountId);
-    if (!account) throw new Error('Linked account not found');
-    if (account.role !== 'storage') {
-      throw new Error('Only storage-linked accounts can create repositories');
-    }
-    token = account.access_token;
-    ownerOrg = null;
-    linkId = account.id;
-  }
-
-  const octokit = github.createClient(token);
-
-  const count = db.prepare(
-    'SELECT COUNT(*) as c FROM storage_repos WHERE user_id = ? AND is_metadata = 0 AND repo_role != ?'
-      + (ownerOrg ? ' AND owner = ?' : linkId ? ' AND linked_account_id = ?' : ' AND linked_account_id IS NULL')
-  ).get(
-    ownerOrg
-      ? [userId, 'backup', ownerOrg]
-      : linkId
-        ? [userId, 'backup', linkId]
-        : [userId, 'backup']
-  );
-  const repoName = `vault-storage-${count.c + 1}`;
-
-  let created;
-  if (ownerOrg) {
-    await vaultOrg.assertOrgAdmin(octokit, ownerOrg);
-    try {
-      created = await github.getRepoInfo(octokit, ownerOrg, repoName);
-    } catch {
-      created = await github.createStorageRepo(octokit, repoName, ownerOrg);
-    }
-  } else {
-    created = await github.createStorageRepo(octokit, repoName);
-  }
-
-  return storage.addRepo(userId, created.full_name, created.default_branch, {
-    linkedAccountId: linkId,
-    isPublic: !created.private,
-  });
-}
 
 router.get('/available', async (req, res) => {
   try {
@@ -307,7 +258,7 @@ router.post('/make-public', async (req, res) => {
 
 router.post('/create', async (req, res) => {
   try {
-    const repo = await createStorageRepoForUser(req.user.id, {
+    const repo = await repoBatch.createStorageRepo(req.user.id, {
       linkedAccountId: req.body.linked_account_id || null,
     });
     res.json({ success: true, repo });
@@ -319,41 +270,25 @@ router.post('/create', async (req, res) => {
 
 router.post('/create-batch', async (req, res) => {
   try {
-    const linkedAccountId = req.body.linked_account_id || null;
-    let count = parseInt(req.body.count, 10);
-    const gb = parseFloat(req.body.gb);
-
-    if (Number.isFinite(gb) && gb > 0) {
-      count = Math.ceil(gb / REPO_CAPACITY_GB);
-    }
-    if (!Number.isFinite(count) || count < 1) {
-      return res.status(400).json({ error: 'Provide a positive gb or count value' });
-    }
-    count = Math.min(50, Math.max(1, count));
-
-    const repos = [];
-    const errors = [];
-    for (let i = 0; i < count; i++) {
-      try {
-        const repo = await createStorageRepoForUser(req.user.id, { linkedAccountId });
-        repos.push(repo);
-      } catch (err) {
-        errors.push({ index: i + 1, error: err.message });
-        break;
-      }
-    }
-
+    const linkedAccountId = req.body.linked_account_id
+      ? parseInt(req.body.linked_account_id, 10)
+      : null;
+    const result = repoBatch.startBatchCreate(req.user.id, {
+      gb: req.body.gb,
+      count: req.body.count,
+      linkedAccountId: Number.isFinite(linkedAccountId) ? linkedAccountId : null,
+      source: 'manual',
+    });
     res.json({
-      success: errors.length === 0,
-      requested: count,
-      created: repos.length,
-      repos,
-      errors,
-      capacity_gb_added: repos.length * REPO_CAPACITY_GB,
-      repo_capacity_gb: REPO_CAPACITY_GB,
+      success: true,
+      taskId: result.taskId,
+      requested: result.requested,
+      repo_capacity_gb: result.repo_capacity_gb,
+      capacity_gb_requested: result.capacity_gb_requested,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = /already running/i.test(err.message) ? 409 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 

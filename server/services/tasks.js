@@ -45,6 +45,7 @@ function update(taskId, userId, patch) {
     'accountId', 'method', 'log', 'lastLog', 'gitBytesStaged', 'gitRepos', 'names', 'pauseReason',
     'segmentsDone', 'segmentsTotal',
     'seamlessPartSize', 'seamlessPartsTotal', 'seamlessPartsDone', 'seamlessPartsReceived', 'hlsTaskId',
+    'linkedAccountId', 'source', 'capacityGbAdded', 'errors', 'partial',
   ];
 
   for (const key of payloadKeys) {
@@ -221,6 +222,14 @@ async function cancelTask(taskId, userId) {
       await hlsConvert.cancelConversion(userId, payload.fileId);
     } catch {
       // conversion may already be finished
+    }
+  }
+
+  if (row.type === 'repo-batch') {
+    try {
+      require('./repo-batch').cancelBatch(taskId);
+    } catch {
+      /* ignore */
     }
   }
 

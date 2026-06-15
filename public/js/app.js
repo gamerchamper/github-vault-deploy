@@ -659,7 +659,7 @@ const App = {
     if (capLabel) capLabel.textContent = String(capGb);
     const gb = Math.max(1, parseInt(input.value, 10) || 1);
     const repos = Math.ceil(gb / capGb);
-    hint.textContent = `Will create ${repos} new repo${repos === 1 ? '' : 's'} (~${repos * capGb} GB total).`;
+    hint.textContent = `Will create ${repos} new repo${repos === 1 ? '' : 's'} (~${repos * capGb} GB total). Progress appears in the task panel.`;
   },
 
   async populateStorageAccountSelect() {
@@ -739,12 +739,14 @@ const App = {
     btn.disabled = true;
     try {
       const result = await API.repos.createBatch({ gb, linked_account_id: linkedAccountId });
-      const msg = result.errors?.length
-        ? `Created ${result.created}/${result.requested} repos — ${result.errors[0].error}`
-        : `Added ${result.capacity_gb_added} GB (${result.created} repo${result.created === 1 ? '' : 's'})`;
-      this.toast(msg, result.errors?.length ? 'error' : 'success');
+      if (result.taskId) {
+        TaskPanel.track(result.taskId);
+        TaskPanel.setExpanded(true);
+        this.toast(`Creating ${result.requested} storage repo${result.requested === 1 ? '' : 's'}…`, 'success');
+      } else {
+        this.toast('Repo batch started', 'success');
+      }
       document.getElementById('storage-increase-modal')?.classList.add('hidden');
-      await Promise.all([this.loadRepos(), this.loadStats()]);
     } catch (err) {
       this.toast(err.message, 'error');
     } finally {
@@ -824,6 +826,140 @@ const App = {
         this.toast(err.message, 'error');
       }
     });
+  },
+
+  async populateSettingsAccountSelect() {
+    const select = document.getElementById('settings-auto-repo-account');
+    if (!select) return;
+    select.innerHTML = '<option value="">Loading accounts…</option>';
+    select.disabled = true;
+
+    try {
+      const [accountsRes, orgRes] = await Promise.all([
+        API.accounts.list(),
+        API.repos.org().catch(() => ({ org: null })),
+      ]);
+      const username = this.currentUser?.username || 'primary';
+      const vaultOrg = orgRes.org;
+      const primaryLabel = vaultOrg
+        ? `Primary (@${username} · org ${vaultOrg})`
+        : `Primary (@${username})`;
+
+      const storageAccounts = (accountsRes.accounts || []).filter(
+        (a) => a.role === 'storage' && a.is_active,
+      );
+
+      select.innerHTML = '';
+      const primaryOpt = document.createElement('option');
+      primaryOpt.value = '';
+      primaryOpt.textContent = primaryLabel;
+      select.appendChild(primaryOpt);
+
+      for (const account of storageAccounts) {
+        const opt = document.createElement('option');
+        opt.value = String(account.id);
+        opt.textContent = `Linked storage · @${account.username}`;
+        select.appendChild(opt);
+      }
+
+      select.disabled = false;
+    } catch (err) {
+      select.innerHTML = '<option value="">Failed to load accounts</option>';
+      select.disabled = true;
+      throw err;
+    }
+  },
+
+  updateAutoRepoHint(settings) {
+    const hint = document.getElementById('settings-auto-repo-hint');
+    const capGb = settings?.repo_capacity_gb || this.getRepoCapacityGb();
+    const gbInput = document.getElementById('settings-auto-repo-gb');
+    const intervalInput = document.getElementById('settings-auto-repo-interval');
+    if (!hint) return;
+    const gb = Math.max(1, parseInt(gbInput?.value, 10) || 1);
+    const minutes = Math.max(1, parseInt(intervalInput?.value, 10) || 60);
+    const repos = Math.ceil(gb / capGb);
+    hint.textContent = `Every ${minutes} minute${minutes === 1 ? '' : 's'}, create ${repos} repo${repos === 1 ? '' : 's'} (~${repos * capGb} GB) while enabled. Runs on the server even when this tab is closed.`;
+  },
+
+  async openSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    if (!modal) return;
+    try {
+      await this.populateSettingsAccountSelect();
+      const { settings } = await API.settings.get();
+      this.lastSettings = settings;
+      document.getElementById('settings-auto-repo-enabled').checked = !!settings.auto_repo_enabled;
+      document.getElementById('settings-auto-repo-interval').value = String(settings.auto_repo_interval_minutes || 60);
+      document.getElementById('settings-auto-repo-gb').value = String(settings.auto_repo_gb || 5);
+      const accountSelect = document.getElementById('settings-auto-repo-account');
+      if (accountSelect && settings.auto_repo_linked_account_id != null) {
+        accountSelect.value = String(settings.auto_repo_linked_account_id);
+      } else if (accountSelect) {
+        accountSelect.value = '';
+      }
+      const lastRun = document.getElementById('settings-auto-repo-last-run');
+      if (lastRun) {
+        lastRun.textContent = settings.auto_repo_last_run_at
+          ? `Last auto run: ${new Date(settings.auto_repo_last_run_at).toLocaleString()}`
+          : 'Last auto run: never';
+      }
+      this.updateAutoRepoHint(settings);
+      modal.classList.remove('hidden');
+    } catch (err) {
+      this.toast(err.message, 'error');
+    }
+  },
+
+  async saveSettings() {
+    const btn = document.getElementById('btn-save-settings');
+    const enabled = document.getElementById('settings-auto-repo-enabled')?.checked;
+    const intervalMinutes = parseInt(document.getElementById('settings-auto-repo-interval')?.value, 10);
+    const gb = parseInt(document.getElementById('settings-auto-repo-gb')?.value, 10);
+    const linkedRaw = document.getElementById('settings-auto-repo-account')?.value;
+    const linkedAccountId = linkedRaw ? parseInt(linkedRaw, 10) : null;
+
+    await App.withButton(btn, async () => {
+      try {
+        const { settings } = await API.settings.update({
+          auto_repo_enabled: enabled,
+          auto_repo_interval_minutes: intervalMinutes,
+          auto_repo_gb: gb,
+          auto_repo_linked_account_id: linkedAccountId,
+        });
+        this.lastSettings = settings;
+        this.updateAutoRepoHint(settings);
+        const lastRun = document.getElementById('settings-auto-repo-last-run');
+        if (lastRun) {
+          lastRun.textContent = settings.auto_repo_last_run_at
+            ? `Last auto run: ${new Date(settings.auto_repo_last_run_at).toLocaleString()}`
+            : 'Last auto run: never';
+        }
+        this.toast('Settings saved', 'success');
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
+  },
+
+  handleSettingsQuickAction(action) {
+    document.getElementById('settings-modal')?.classList.add('hidden');
+    if (action === 'cache') {
+      if (this.lastCacheStats) this.openCacheSettings(this.lastCacheStats);
+      else this.toast('Cache stats not loaded yet — try again', 'error');
+      return;
+    }
+    if (action === 'local-upload') {
+      document.getElementById('local-upload-modal')?.classList.remove('hidden');
+      return;
+    }
+    if (action === 'repos') {
+      this.showRepoModal();
+      return;
+    }
+    if (action === 'increase-storage') {
+      void this.openStorageIncreaseModal();
+    }
   },
 
   renderRepoDriveItem(repo) {
@@ -1062,6 +1198,19 @@ const App = {
 
     document.getElementById('btn-viewers')?.addEventListener('click', () => this.showViewersPanel());
     document.getElementById('btn-repos').addEventListener('click', () => this.showRepoModal());
+    document.getElementById('btn-settings')?.addEventListener('click', () => this.openSettingsModal());
+    document.getElementById('btn-save-settings')?.addEventListener('click', () => this.saveSettings());
+    document.getElementById('settings-modal')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-settings-action]');
+      if (!btn) return;
+      this.handleSettingsQuickAction(btn.dataset.settingsAction);
+    });
+    document.getElementById('settings-auto-repo-gb')?.addEventListener('input', () => {
+      this.updateAutoRepoHint(this.lastSettings);
+    });
+    document.getElementById('settings-auto-repo-interval')?.addEventListener('input', () => {
+      this.updateAutoRepoHint(this.lastSettings);
+    });
     document.getElementById('backup-sync-force')?.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();

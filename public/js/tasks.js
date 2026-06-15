@@ -478,6 +478,15 @@ const TaskPanel = {
         : 'Custom thumbnail updated', 'success');
       explorer.refresh({ filesOnly: true });
     }
+    if (task.type === 'repo-batch') {
+      const added = task.capacityGbAdded || (task.done || 0) * (App.getRepoCapacityGb?.() || 1);
+      const msg = task.partial
+        ? `Created ${task.done}/${task.total} repos (${added} GB) — some failed`
+        : `Added ${added} GB (${task.done || 0} repo${(task.done || 0) === 1 ? '' : 's'})`;
+      App.toast(msg, task.partial ? 'error' : 'success');
+      App.loadRepos();
+      App.loadStats();
+    }
   },
 
   ensurePoll() {
@@ -623,6 +632,16 @@ const TaskPanel = {
       }
       if (task.status === 'error' && task.resumable) return task.error || 'Backup sync interrupted';
       return 'Syncing backup...';
+    }
+    if (task.type === 'repo-batch') {
+      if (task.status === 'error' && task.phase === 'cancelled') return 'Cancelled';
+      if (task.status === 'error') return task.error || 'Repository creation failed';
+      if (task.lastLog) return task.lastLog;
+      if (task.total) {
+        const name = task.currentName || (task.currentRepo ? task.currentRepo.split('/').pop() : '');
+        return `Creating repo ${task.done || 0}/${task.total}${name ? ` — ${name}` : ''}`;
+      }
+      return 'Creating storage repos...';
     }
     return task.phase || 'Working...';
   },
@@ -783,7 +802,7 @@ const TaskPanel = {
           <button class="task-btn task-btn-pause" data-task-id="${task.id}">Pause</button>
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
-      ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair' || task.type === 'verify-hls') ? `
+      ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair' || task.type === 'verify-hls' || task.type === 'repo-batch') ? `
         <div class="task-actions">
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
@@ -807,7 +826,7 @@ const TaskPanel = {
       return `
         <div class="task-item task-${task.status}${expanded ? ' task-expanded' : ''}" data-task-id="${task.id}">
           <div class="task-item-header">
-            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : task.type === 'thumbnail-upload' ? '🖼️' : (task.type === 'verify-repair' || task.type === 'verify-hls') ? '🔍' : '🗑️'}</span>
+            <span class="task-icon">${task.type === 'upload' ? '⬆️' : task.type === 'backup-sync' ? '⎘' : task.type === 'hls-convert' ? '🎬' : task.type === 'thumbnail-upload' ? '🖼️' : task.type === 'repo-batch' ? '📀' : (task.type === 'verify-repair' || task.type === 'verify-hls') ? '🔍' : '🗑️'}</span>
             <span class="task-title" title="${this.escape(task.title)}">${this.escape(task.title)}</span>
             <span class="task-percent">${cancelled ? 'Cancelled' : failed && !resumable ? 'Failed' : done ? 'Done' : `${percent}%`}</span>
             <button type="button" class="task-expand-btn" title="${expanded ? 'Hide details' : 'Show debug log'}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>

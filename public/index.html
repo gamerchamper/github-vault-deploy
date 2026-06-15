@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.17">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.18">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.2">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -172,6 +172,10 @@
         <button id="btn-repos" class="ribbon-btn" title="Manage storage repos">
           <span class="ribbon-icon">⚙️</span>
           <span>Repos</span>
+        </button>
+        <button id="btn-settings" class="ribbon-btn" title="Vault settings">
+          <span class="ribbon-icon">🛠️</span>
+          <span>Settings</span>
         </button>
         <button id="btn-upload-center" class="ribbon-btn" title="Upload center">
           <span class="ribbon-icon">📋</span>
@@ -947,11 +951,52 @@
         <select id="storage-increase-account" class="form-input"></select>
         <label class="form-label" for="storage-increase-gb">Additional storage (GB)</label>
         <input type="number" id="storage-increase-gb" class="form-input" min="1" max="500" step="1" value="5">
-        <p class="form-hint" id="storage-increase-hint">Will create 5 new repos (~5 GB total).</p>
+        <p class="form-hint" id="storage-increase-hint">Will create 5 new repos (~5 GB total). Progress appears in the task panel.</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-secondary" data-close="storage-increase-modal">Cancel</button>
         <button type="button" id="btn-confirm-storage-increase" class="btn-primary">Create repos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vault Settings -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content modal-content-wide">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="modal-close" data-close="settings-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <section class="settings-section">
+          <h3 class="settings-section-title">Quick access</h3>
+          <div class="settings-quick-grid">
+            <button type="button" class="btn-secondary settings-quick-btn" data-settings-action="cache">Cache disk</button>
+            <button type="button" class="btn-secondary settings-quick-btn" data-settings-action="local-upload">Local upload (LAN)</button>
+            <button type="button" class="btn-secondary settings-quick-btn" data-settings-action="repos">Storage repos</button>
+            <button type="button" class="btn-secondary settings-quick-btn" data-settings-action="increase-storage">Increase pool storage</button>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Automatic storage expansion</h3>
+          <p class="modal-desc">Periodically create new GitHub storage repos on the server. Useful for keeping ahead of uploads without manual pool expansion.</p>
+          <label class="settings-toggle">
+            <input type="checkbox" id="settings-auto-repo-enabled">
+            <span>Enable automatic repo creation</span>
+          </label>
+          <label class="form-label" for="settings-auto-repo-interval">Run every (minutes)</label>
+          <input type="number" id="settings-auto-repo-interval" class="form-input" min="1" max="1440" step="1" value="60">
+          <label class="form-label" for="settings-auto-repo-gb">Storage per run (GB)</label>
+          <input type="number" id="settings-auto-repo-gb" class="form-input" min="1" max="500" step="1" value="5">
+          <label class="form-label" for="settings-auto-repo-account">Create repos on</label>
+          <select id="settings-auto-repo-account" class="form-input"></select>
+          <p class="form-hint" id="settings-auto-repo-hint">Every 60 minutes, create 5 repos (~5 GB) while enabled.</p>
+          <p class="form-hint" id="settings-auto-repo-last-run">Last auto run: never</p>
+        </section>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" data-close="settings-modal">Close</button>
+        <button type="button" id="btn-save-settings" class="btn-primary">Save</button>
       </div>
     </div>
   </div>
@@ -1086,7 +1131,7 @@
 
   <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
   <script src="/js/media-player.js?v=1.0.8"></script>
-  <script src="/js/api.js?v=1.0.6"></script>
+  <script src="/js/api.js?v=1.0.7"></script>
   <script src="/js/playback-memory.js?v=1.0.1"></script>
   <script src="/js/pdf-viewer.js?v=1.0.0"></script>
   <script src="/js/image-viewer.js?v=1.0.0"></script>
@@ -1104,7 +1149,7 @@
   <script src="/js/chunk-blocks.js?v=1.0.0"></script>
   <script src="/js/share-download.js?v=1.0.2"></script>
   <script src="/js/download-manager.js?v=1.0.3"></script>
-  <script src="/js/tasks.js?v=1.0.4"></script>
+  <script src="/js/tasks.js?v=1.0.5"></script>
   <script src="/js/audio-queue.js?v=1.0.0"></script>
   <script src="/js/playlist-queue.js?v=1.0.3"></script>
   <script src="/js/playlist-player.js?v=1.0.4"></script>
@@ -1119,6 +1164,6 @@
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
   <script src="/js/local-upload.js?v=1.0.2"></script>
-  <script src="/js/app.js?v=1.0.10"></script>
+  <script src="/js/app.js?v=1.0.11"></script>
 </body>
 </html>

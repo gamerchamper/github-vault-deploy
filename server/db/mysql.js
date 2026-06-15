@@ -213,6 +213,19 @@ async function createTables() {
   } catch {
     /* column exists */
   }
+  for (const stmt of [
+    'ALTER TABLE users ADD COLUMN auto_repo_enabled TINYINT DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN auto_repo_interval_minutes INT DEFAULT 60',
+    'ALTER TABLE users ADD COLUMN auto_repo_gb INT DEFAULT 5',
+    'ALTER TABLE users ADD COLUMN auto_repo_linked_account_id INT NULL',
+    'ALTER TABLE users ADD COLUMN auto_repo_last_run_at DATETIME NULL',
+  ]) {
+    try {
+      await pool.execute(stmt);
+    } catch {
+      /* column exists */
+    }
+  }
 }
 
 async function getConn() {

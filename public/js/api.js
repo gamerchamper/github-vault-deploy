@@ -369,6 +369,11 @@ const API = {
     setMaxGb: (maxGb) => API.patch('/api/cache/config', { maxGb }),
   },
 
+  settings: {
+    get: () => API.get('/api/settings'),
+    update: (patch) => API.patch('/api/settings', patch),
+  },
+
   tasks: {
     list: (opts = {}) => {
       const params = new URLSearchParams();

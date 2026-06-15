@@ -210,6 +210,7 @@ app.use('/api/repos', repoRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/cache', cacheRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/api/settings', require('./routes/settings'));
 app.use('/api/accounts', accountRoutes);
 app.use('/api/viewers', viewerRoutes);
 app.use('/api/bandwidth', bandwidthRoutes);
@@ -287,6 +288,13 @@ app.listen(PORT, () => {
     maintenance.startMaintenance();
   } catch (err) {
     console.warn('[maintenance] startup skipped:', err.message);
+  }
+
+  try {
+    const autoRepo = require('./services/auto-repo');
+    autoRepo.startAutoRepoScheduler();
+  } catch (err) {
+    console.warn('[auto-repo] startup skipped:', err.message);
   }
 
   // Schedule daily audit log cleanup (runs once per 24h, first run after 1 hour)
