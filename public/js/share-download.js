@@ -15,7 +15,9 @@ const ShareDownload = {
   },
 
   canUseDirectoryPicker() {
-    return typeof window.showDirectoryPicker === 'function';
+    if (typeof window.showDirectoryPicker !== 'function') return false;
+    if (typeof ShareClientStream !== 'undefined' && ShareClientStream.isLowMemoryDevice()) return false;
+    return true;
   },
 
   async pickSaveDirectory() {

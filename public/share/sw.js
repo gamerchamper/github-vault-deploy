@@ -1,5 +1,5 @@
-const CACHE = 'vault-share-v17';
-const LEGACY_CACHES = ['vault-share-v16', 'vault-share-v15', 'vault-share-v14', 'vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
+const CACHE = 'vault-share-v18';
+const LEGACY_CACHES = ['vault-share-v17', 'vault-share-v16', 'vault-share-v15', 'vault-share-v14', 'vault-share-v13', 'vault-share-v12', 'vault-share-v11', 'vault-share-v10', 'vault-share-v9', 'vault-share-v8', 'vault-share-v7', 'vault-share-v6', 'vault-share-v5', 'vault-share-v4', 'vault-share-v3', 'vault-share-v2'];
 
 const STATIC_ASSETS = [
   '/css/tokens.css',
@@ -33,10 +33,6 @@ const CACHEABLE_PATHS = new Set(
 );
 
 const CDN_ASSETS = STATIC_ASSETS.filter((asset) => asset.startsWith('http'));
-
-function isSharePage(url) {
-  return url.pathname.startsWith('/share/');
-}
 
 function isCacheableAsset(url) {
   return CACHEABLE_PATHS.has(url.pathname);
@@ -100,17 +96,5 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (isSharePage(url)) {
-    event.respondWith(
-      fetch(event.request)
-        .then((res) => {
-          if (res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE).then((c) => c.put(event.request, clone)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => caches.match(event.request))
-    );
-  }
+  // HTML navigation is not cached — avoids stale shells and disturbed response bodies on mobile.
 });

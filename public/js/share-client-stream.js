@@ -519,11 +519,15 @@ const ShareClientStream = {
     const res = await fetch(this.manifestUrl(this.token, this.fileId), {
       signal: this.fetchSignal(),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to load share manifest');
+    const text = await res.text();
+    let data = null;
+    if (text) {
+      try { data = JSON.parse(text); } catch { /* not json */ }
     }
-    return res.json();
+    if (!res.ok) {
+      throw new Error(data?.error || 'Failed to load share manifest');
+    }
+    return data;
   },
 
   async restoreCachedChunks() {

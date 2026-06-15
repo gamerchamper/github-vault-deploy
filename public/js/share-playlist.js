@@ -93,18 +93,28 @@ const SharePlaylist = {
   },
 
   async load() {
-    let res;
+    let payload;
     if (window.__shareBootPrefetch) {
-      res = await window.__shareBootPrefetch;
+      payload = await window.__shareBootPrefetch;
       window.__shareBootPrefetch = null;
     } else {
-      res = await fetch(this.apiBase());
+      const res = await fetch(this.apiBase());
+      const data = res.ok
+        ? await res.json()
+        : await res.json().catch(() => ({}));
+      payload = { ok: res.ok, status: res.status, data };
     }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Playlist not found' }));
-      throw new Error(err.error || 'Playlist not found');
+    if (payload && typeof payload.json === 'function') {
+      const res = payload;
+      const data = res.ok
+        ? await res.json()
+        : await res.json().catch(() => ({}));
+      payload = { ok: res.ok, status: res.status, data };
     }
-    this.playlist = await res.json();
+    if (!payload?.ok) {
+      throw new Error(payload?.data?.error || 'Playlist not found');
+    }
+    this.playlist = payload.data;
     PlaylistQueue.setFromPlaylist(this.playlist, null, {
       isPublic: true,
       publicToken: this.token,

@@ -422,6 +422,7 @@ const ShareViewer = {
   },
 
   setPlayerFullscreen(active) {
+    if (this.isMobileShareLayout()) return;
     document.body.classList.toggle('share-player-fullscreen', !!active);
   },
 
@@ -429,12 +430,18 @@ const ShareViewer = {
     if (this._fullscreenSyncBound) return;
     this._fullscreenSyncBound = true;
     const sync = () => {
+      if (this.isMobileShareLayout()) {
+        document.body.classList.remove('share-player-fullscreen');
+        return;
+      }
       const active = !!document.fullscreenElement
         || !!document.webkitFullscreenElement;
       this.setPlayerFullscreen(active);
     };
     document.addEventListener('fullscreenchange', sync);
     document.addEventListener('webkitfullscreenchange', sync);
+    document.addEventListener('visibilitychange', sync);
+    window.addEventListener('pagehide', () => this.setPlayerFullscreen(false));
   },
 
   async initVideoPlyr(video) {
