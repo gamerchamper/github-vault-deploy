@@ -130,30 +130,40 @@ def infer_container(sidecar, file_path):
   return 'mp4'
 
 
+def safe_attr(obj, name, default=None):
+  try:
+    return getattr(obj, name)
+  except Exception:
+    return default
+
+
 def collect_media_part_files(media):
   """Collect local file paths from a Plex MediaTree (movie or TV)."""
   files = []
   if not media:
     return files
 
+  parts = safe_attr(media, 'parts') or []
   try:
-    for part in media.parts or []:
+    for part in parts:
       if part.file:
         files.append(part.file)
   except Exception:
     pass
 
+  items = safe_attr(media, 'items') or []
   try:
-    for item in media.items or []:
+    for item in items:
       for part in item.parts or []:
         if part.file:
           files.append(part.file)
   except Exception:
     pass
 
+  seasons = safe_attr(media, 'seasons') or {}
   try:
-    for season_key in media.seasons or {}:
-      season = media.seasons[season_key]
+    for season_key in seasons:
+      season = seasons[season_key]
       for episode_key in season.episodes or {}:
         episode = season.episodes[episode_key]
         for item in episode.items or []:
@@ -222,14 +232,18 @@ def apply_part_streams(part, sidecar):
 
   if not has_video:
     video = None
-    for factory in (
-      lambda: part.addStream(1),
-      lambda: part.addPrimaryStream('video'),
-      lambda: part.addPrimaryStream(1),
-    ):
+    try:
+      video = part.addStream(1)
+    except Exception:
+      video = None
+    if video is None:
       try:
-        video = factory()
-        break
+        video = part.addPrimaryStream('video')
+      except Exception:
+        video = None
+    if video is None:
+      try:
+        video = part.addPrimaryStream(1)
       except Exception:
         video = None
     if video is None:
@@ -255,14 +269,18 @@ def apply_part_streams(part, sidecar):
 
   if not has_audio:
     audio = None
-    for factory in (
-      lambda: part.addStream(2),
-      lambda: part.addPrimaryStream('audio'),
-      lambda: part.addPrimaryStream(2),
-    ):
+    try:
+      audio = part.addStream(2)
+    except Exception:
+      audio = None
+    if audio is None:
       try:
-        audio = factory()
-        break
+        audio = part.addPrimaryStream('audio')
+      except Exception:
+        audio = None
+    if audio is None:
+      try:
+        audio = part.addPrimaryStream(2)
       except Exception:
         audio = None
     if audio is None:
@@ -430,27 +448,38 @@ def apply_sidecar(metadata, sidecar, file_path):
     ))
 
 
-def resolve_metadata_target(metadata, media, file_path):
-  for season_key in media.seasons or {}:
-    season = media.seasons[season_key]
-    for episode_key in season.episodes or {}:
-      episode_media = season.episodes[episode_key]
-      for item in episode_media.items or []:
-        for part in item.parts or []:
+def resolve_episode_metadata(metadata, media, file_path):
+  seasons = safe_attr(media, 'seasons')
+  meta_seasons = safe_attr(metadata, 'seasons')
+  if not seasons or not meta_seasons:
+    return metadata
+
+  try:
+    for season_key in seasons:
+      season = seasons[season_key]
+      for episode_key in season.episodes or {}:
+        episode_media = season.episodes[episode_key]
+        for item in episode_media.items or []:
+          for part in item.parts or []:
+            if part.file == file_path:
+              return meta_seasons[season_key].episodes[episode_key]
+        for part in episode_media.parts or []:
           if part.file == file_path:
-            return metadata.seasons[season_key].episodes[episode_key]
-      for part in episode_media.parts or []:
-        if part.file == file_path:
-          return metadata.seasons[season_key].episodes[episode_key]
+            return meta_seasons[season_key].episodes[episode_key]
+  except Exception, err:
+    Log('[GitHub Vault] episode metadata resolve failed: %s' % err)
   return metadata
 
 
-def enrich_all(metadata, media, label):
+def enrich_all(metadata, media, label, for_tv=False):
   touched = False
   for file_path in collect_media_part_files(media):
     if not is_vault_item(file_path):
       continue
-    target = resolve_metadata_target(metadata, media, file_path)
+    if for_tv:
+      target = resolve_episode_metadata(metadata, media, file_path)
+    else:
+      target = metadata
     sidecar = load_sidecar(file_path) or {}
     apply_sidecar(target, sidecar, file_path)
     touched = True
@@ -460,8 +489,8 @@ def enrich_all(metadata, media, label):
 
 
 def enrich_movie(metadata, media):
-  enrich_all(metadata, media, 'movie')
+  enrich_all(metadata, media, 'movie', for_tv=False)
 
 
 def enrich_tv(metadata, media):
-  enrich_all(metadata, media, 'TV')
+  enrich_all(metadata, media, 'TV', for_tv=True)

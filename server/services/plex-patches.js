@@ -286,6 +286,9 @@ function validateAgentPython(bundleDir) {
       if (/\byield\b/.test(line)) {
         issues.push(`${file}:${lineNo} uses yield (RestrictedPython SyntaxError)`);
       }
+      if (/\blambda\b/.test(line)) {
+        issues.push(`${file}:${lineNo} uses lambda (RestrictedPython may reject)`);
+      }
     });
   }
   return { ok: issues.length === 0, issues };

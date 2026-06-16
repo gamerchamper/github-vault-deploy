@@ -400,9 +400,32 @@ async function streamPublic(req, res, file) {
   ).all(file.id);
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(file.user_id);
+  const isMp4 = mp4.isMp4(file.name, file.mime_type);
+  const remote = isRemoteMediaClient(req);
+  const mimeType = streamMimeType(file);
+
+  if (req.method === 'HEAD') {
+    serveStreamHead(res, file);
+    return;
+  }
+
+  if (isChunkMode(file, chunks) && isMp4 && remote) {
+    const fileKey = await getFileKey(file.user_id, file);
+    try {
+      const faststart = await waitForFaststartReady(file.user_id, file, chunks, fileKey, user);
+      return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
+    } catch (err) {
+      console.warn(`[stream] public remote client could not get faststart (${file.id}): ${err.message}`);
+      if (!res.headersSent) {
+        res.setHeader('Retry-After', '30');
+        res.status(503).json({ error: err.message });
+      }
+      return;
+    }
+  }
+
   if (isChunkMode(file, chunks)) {
     const fileKey = await getFileKey(file.user_id, file);
-    const isMp4 = mp4.isMp4(file.name, file.mime_type);
 
     if (isMp4) {
       let faststart = streamCache.getFaststart(file.user_id, file.id, file.size);
