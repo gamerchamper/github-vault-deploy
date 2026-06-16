@@ -171,7 +171,7 @@ async function createLibrarySection(plexUrl, token, {
   type = 'show',
   agent = 'com.plexapp.agents.none',
   scanner = 'Plex Series Scanner',
-  language = 'en',
+  language = 'en-US',
   location,
 } = {}) {
   if (!location) throw new Error('Library location path is required');
