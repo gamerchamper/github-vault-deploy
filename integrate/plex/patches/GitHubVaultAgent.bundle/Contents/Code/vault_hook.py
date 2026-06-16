@@ -130,15 +130,16 @@ def infer_container(sidecar, file_path):
   return 'mp4'
 
 
-def iter_media_part_files(media):
-  """Yield local file paths from a Plex MediaTree (movie or TV)."""
+def collect_media_part_files(media):
+  """Collect local file paths from a Plex MediaTree (movie or TV)."""
+  files = []
   if not media:
-    return
+    return files
 
   try:
     for part in media.parts or []:
       if part.file:
-        yield part.file
+        files.append(part.file)
   except Exception:
     pass
 
@@ -146,7 +147,7 @@ def iter_media_part_files(media):
     for item in media.items or []:
       for part in item.parts or []:
         if part.file:
-          yield part.file
+          files.append(part.file)
   except Exception:
     pass
 
@@ -158,19 +159,22 @@ def iter_media_part_files(media):
         for item in episode.items or []:
           for part in item.parts or []:
             if part.file:
-              yield part.file
+              files.append(part.file)
   except Exception:
     pass
 
+  return files
+
 
 def first_media_part_file(media):
-  for file_path in iter_media_part_files(media):
-    return file_path
+  files = collect_media_part_files(media)
+  if files:
+    return files[0]
   return None
 
 
 def is_vault_media_tree(media):
-  for file_path in iter_media_part_files(media):
+  for file_path in collect_media_part_files(media):
     if is_vault_item(file_path):
       return True
   return False
@@ -443,7 +447,7 @@ def resolve_metadata_target(metadata, media, file_path):
 
 def enrich_all(metadata, media, label):
   touched = False
-  for file_path in iter_media_part_files(media):
+  for file_path in collect_media_part_files(media):
     if not is_vault_item(file_path):
       continue
     target = resolve_metadata_target(metadata, media, file_path)

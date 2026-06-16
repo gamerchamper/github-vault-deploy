@@ -283,6 +283,9 @@ function validateAgentPython(bundleDir) {
       if (/^\s*class\s+_/.test(line)) {
         issues.push(`${file}:${lineNo} uses class _* (RestrictedPython SyntaxError)`);
       }
+      if (/\byield\b/.test(line)) {
+        issues.push(`${file}:${lineNo} uses yield (RestrictedPython SyntaxError)`);
+      }
     });
   }
   return { ok: issues.length === 0, issues };

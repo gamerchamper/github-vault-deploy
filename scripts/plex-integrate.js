@@ -44,6 +44,11 @@ async function main() {
     console.error('No vault user found — sign in once via GitHub first, or pass --user-id');
     process.exit(1);
   }
+  const userRow = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (!userRow) {
+    console.error(`User id ${userId} not found in vault DB — sign in via GitHub in the vault app first`);
+    process.exit(1);
+  }
 
   const fakeReq = {
     protocol: 'http',

@@ -364,17 +364,30 @@ async function resolveVaultLibrarySection(plexUrl, token, {
   return null;
 }
 
-async function applyGitHubVaultAgent(plexUrl, token, section) {
+async function applyGitHubVaultAgent(plexUrl, token, section, { refreshMetadata = true } = {}) {
   if (!section?.key) throw new Error('Library section key is required');
   const profile = vaultLibraryAgentProfile(section.type);
   // Do not send `type` on PUT — Plex rejects unknown/duplicate type updates.
   await updateLibrarySection(plexUrl, token, section.key, profile);
-  return {
+  const result = {
     section_key: section.key,
     agent: profile.agent,
     scanner: profile.scanner,
     type: section.type || (section.type === 'show' ? 'show' : 'movie'),
   };
+  if (refreshMetadata) {
+    try {
+      result.refresh = await refreshLibrary(plexUrl, token, section.key, { force: true });
+    } catch (err) {
+      result.refresh_error = err.message;
+    }
+    try {
+      result.analyze = await analyzeLibrary(plexUrl, token, section.key);
+    } catch (err) {
+      result.analyze_error = err.message;
+    }
+  }
+  return result;
 }
 
 async function getAgentRegistrationStatus(plexUrl, token) {
