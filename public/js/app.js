@@ -1134,22 +1134,7 @@ const App = {
     });
   },
 
-  async syncPlexToLocalFolder() {
-    const btn = document.getElementById('btn-sync-plex-local');
-    if (!window.PlexLocalSync?.supported()) {
-      this.toast('Use Chrome or Edge on desktop to write files to a local folder', 'error');
-      return;
-    }
-
-    // showDirectoryPicker must run during the click gesture — before any await.
-    let folderPromise;
-    try {
-      folderPromise = PlexLocalSync.pickFolder();
-    } catch (err) {
-      this.toast(err.message, 'error');
-      return;
-    }
-
+  async continuePlexLocalSync(folderPromise, btn) {
     await App.withButton(btn, async () => {
       try {
         const folder = await folderPromise;
@@ -1174,6 +1159,22 @@ const App = {
         this.toast(err.message, 'error');
       }
     });
+  },
+
+  async syncPlexToLocalFolder() {
+    if (!window.PlexLocalSync?.supported()) {
+      this.toast('Use Chrome or Edge on desktop to write files to a local folder', 'error');
+      return;
+    }
+    const btn = document.getElementById('btn-sync-plex-local');
+    let folderPromise;
+    try {
+      folderPromise = PlexLocalSync.requestFolderPicker();
+    } catch (err) {
+      this.toast(err.message, 'error');
+      return;
+    }
+    await this.continuePlexLocalSync(folderPromise, btn);
   },
 
   async integratePlexNow() {
@@ -1535,7 +1536,6 @@ const App = {
     document.getElementById('btn-save-settings')?.addEventListener('click', () => this.saveSettings());
     document.getElementById('btn-test-plex')?.addEventListener('click', () => this.testPlexConnection());
     document.getElementById('btn-integrate-plex')?.addEventListener('click', () => this.integratePlexNow());
-    document.getElementById('btn-sync-plex-local')?.addEventListener('click', () => this.syncPlexToLocalFolder());
     document.getElementById('btn-sync-plex-now')?.addEventListener('click', () => this.syncPlexNow());
     document.getElementById('settings-modal')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-settings-action]');

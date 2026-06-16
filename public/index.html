@@ -1022,7 +1022,7 @@
           <p class="form-hint" id="settings-plex-sync-status">Last sync: never</p>
           <div class="settings-plex-actions">
             <button type="button" id="btn-test-plex" class="btn-secondary">Test Plex connection</button>
-            <button type="button" id="btn-sync-plex-local" class="btn-primary">Write to folder on this PC</button>
+            <button type="button" id="btn-sync-plex-local" class="btn-primary" onclick="return PlexLocalSync.beginWriteFromClick(event)">Write to folder on this PC</button>
             <button type="button" id="btn-sync-plex-now" class="btn-secondary">Sync now (server)</button>
           </div>
           <p class="form-hint">Remote vault (<strong>vault.arktic.top</strong>) cannot write to <code>C:\</code> paths. Use <strong>Write to folder on this PC</strong> and pick the same folder Plex uses.</p>
@@ -1232,7 +1232,7 @@
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
   <script src="/js/local-upload.js?v=1.0.2"></script>
-  <script src="/js/plex-local-sync.js?v=1.0.0"></script>
-  <script src="/js/app.js?v=1.0.20"></script>
+  <script src="/js/plex-local-sync.js?v=1.0.1" data-cfasync="false"></script>
+  <script src="/js/app.js?v=1.0.21" data-cfasync="false"></script>
 </body>
 </html>

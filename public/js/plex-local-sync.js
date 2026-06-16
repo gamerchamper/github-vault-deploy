@@ -6,11 +6,35 @@ const PlexLocalSync = {
     return typeof window.showDirectoryPicker === 'function';
   },
 
-  async pickFolder() {
+  /** Call showDirectoryPicker synchronously — only valid during a user click. */
+  requestFolderPicker() {
     if (!this.supported()) {
       throw new Error('Use Chrome or Edge on desktop to write files to a local folder.');
     }
     return window.showDirectoryPicker({ mode: 'readwrite', id: 'github-vault-plex' });
+  },
+
+  /**
+   * Inline onclick entry point — keeps the picker inside the browser user-gesture window
+   * (required when Cloudflare Rocket Loader defers addEventListener handlers).
+   */
+  beginWriteFromClick(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!this.supported()) {
+      window.App?.toast('Use Chrome or Edge on desktop to write files to a local folder', 'error');
+      return false;
+    }
+    let folderPromise;
+    try {
+      folderPromise = this.requestFolderPicker();
+    } catch (err) {
+      window.App?.toast(err.message, 'error');
+      return false;
+    }
+    const btn = document.getElementById('btn-sync-plex-local');
+    window.App?.continuePlexLocalSync(folderPromise, btn);
+    return false;
   },
 
   async getDirectory(dirHandle, parts, { create = false } = {}) {
