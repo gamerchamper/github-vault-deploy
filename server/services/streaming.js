@@ -41,11 +41,13 @@ function streamMimeType(file) {
 
 /** Plex/ffprobe probe remote URLs; they need valid headers and a ready MP4 bootstrap. */
 function isRemoteMediaClient(req) {
+  if (!req) return false;
   const ua = String(req?.get?.('user-agent') || req?.headers?.['user-agent'] || '');
-  if (/Plex|Lavf|ffprobe|libmpv|VideoLAN|MediaServer|ExoPlayerLib|stagefright|Datahunter|Player/i.test(ua)) {
+  if (/Plex|Lavf|ffprobe|libmpv|VideoLAN|MediaServer|ExoPlayerLib|stagefright|Datahunter|Player|AppleCoreMedia/i.test(ua)) {
     return true;
   }
-  if (req?.headers?.range && !ua) return true;
+  if (req?.headers?.['x-plex-token'] || req?.headers?.['x-plex-product']) return true;
+  if (req?.headers?.range) return true;
   return false;
 }
 
@@ -61,11 +63,28 @@ async function ensureFaststartForRemoteClient(req, userId, file, chunks, fileKey
   return streamCache.ensureFaststartCache(userId, file, chunks, fileKey, user, status);
 }
 
-function serveStreamHead(res, file) {
+async function waitForFaststartReady(userId, file, chunks, fileKey, user, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let faststart = streamCache.getFaststart(userId, file.id, file.size);
+    if (faststart) return faststart;
+    try {
+      faststart = await ensureFaststartForRemoteClient(null, userId, file, chunks, fileKey, user);
+      if (faststart) return faststart;
+    } catch (err) {
+      console.warn(`[stream] faststart build retry (${file.id}): ${err.message}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error(`Faststart not ready for file ${file.id}`);
+}
+
+function serveStreamHead(res, file, contentLength = null) {
   const mimeType = streamMimeType(file);
+  const length = contentLength != null ? contentLength : file.size;
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', mimeType);
-  res.setHeader('Content-Length', String(file.size));
+  res.setHeader('Content-Length', String(length));
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.name)}"`);
   mediaCache.setMediaCacheHeaders(res);
   res.status(200).end();
@@ -303,56 +322,55 @@ async function streamFile(req, res, userId, fileId, view = null) {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file || file.is_folder) throw new Error('File not found');
 
-  if (req.method === 'HEAD') {
-    serveStreamHead(res, file);
-    return;
-  }
-
   const mimeType = streamMimeType(file);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const chunks = db.prepare(
     'SELECT c.*, r.full_name, r.default_branch FROM chunks c JOIN storage_repos r ON c.repo_id = r.id WHERE c.file_id = ? ORDER BY c.chunk_index'
   ).all(fileId);
   const usePrimaryCache = !view || view.type === 'primary';
+  const isMp4 = mp4.isMp4(file.name, file.mime_type);
+  const remote = isRemoteMediaClient(req);
+
+  if (isChunkMode(file, chunks) && usePrimaryCache && isMp4 && remote) {
+    const fileKey = await getFileKey(userId, file);
+    try {
+      const faststart = await waitForFaststartReady(userId, file, chunks, fileKey, user);
+      if (req.method === 'HEAD') {
+        serveStreamHead(res, file, faststart.size);
+        return;
+      }
+      return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
+    } catch (err) {
+      console.warn(`[stream] remote media client could not get faststart (${fileId}): ${err.message}`);
+      if (!res.headersSent) {
+        res.setHeader('Retry-After', '30');
+        res.status(503).json({ error: err.message });
+      }
+      return;
+    }
+  }
+
+  if (req.method === 'HEAD') {
+    serveStreamHead(res, file);
+    return;
+  }
 
   if (isChunkMode(file, chunks)) {
     const fileKey = await getFileKey(userId, file);
-    const isMp4 = mp4.isMp4(file.name, file.mime_type);
 
     if (usePrimaryCache && isMp4) {
       let faststart = streamCache.getFaststart(userId, fileId, file.size);
-      if (!faststart && isRemoteMediaClient(req)) {
-        try {
-          faststart = await ensureFaststartForRemoteClient(req, userId, file, chunks, fileKey, user);
-        } catch (err) {
-          console.warn(`Faststart required for remote media client (${fileId}):`, err.message);
-        }
-      }
       if (!faststart) {
         const cached = cache.get(userId, fileId);
         if (cached) {
-          if (isRemoteMediaClient(req)) {
-            try {
-              faststart = await streamCache.ensureFaststartFromBin(userId, file, cached.path, null);
-            } catch (err) {
-              console.warn(`Faststart from cache failed (${fileId}):`, err.message);
-            }
-          } else {
-            streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
-              console.warn(`Faststart build deferred (${fileId}):`, err.message);
-            });
-            return serveRange(req, res, cached.path, mimeType, file.name, file.size);
-          }
+          streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
+            console.warn(`Faststart build deferred (${fileId}):`, err.message);
+          });
+          return serveRange(req, res, cached.path, mimeType, file.name, file.size);
         }
       }
       if (faststart) {
         return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
-      }
-      if (isRemoteMediaClient(req)) {
-        if (!res.headersSent) {
-          res.status(503).json({ error: 'Stream preparing for Plex analysis — retry shortly' });
-        }
-        return;
       }
     }
 

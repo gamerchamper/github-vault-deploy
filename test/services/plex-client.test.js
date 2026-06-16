@@ -53,4 +53,14 @@ describe('plex-client library updates', () => {
     const [url] = fetchStub.firstCall.args;
     assert.match(String(url), /\/library\/sections\/2\/refresh\?force=1/);
   });
+
+  it('metadataNeedsAnalysis detects empty Plex media records', () => {
+    assert.strictEqual(plexClient.metadataNeedsAnalysis({ Media: [] }), true);
+    assert.strictEqual(plexClient.metadataNeedsAnalysis({
+      Media: [{ container: 'mp4', duration: 120000, Part: [{ Stream: [{ id: 1 }] }] }],
+    }), false);
+    assert.strictEqual(plexClient.metadataNeedsAnalysis({
+      Media: [{ container: null, duration: 0, Part: [{ Stream: [] }] }],
+    }), true);
+  });
 });

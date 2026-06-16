@@ -57,9 +57,9 @@ function buildUrl(plexUrl, apiPath, token, query = {}) {
   return qs ? `${base}${api}?${qs}` : `${base}${api}`;
 }
 
-async function plexRequest(plexUrl, token, apiPath, { method = 'GET', timeoutMs = 15000 } = {}) {
+async function plexRequest(plexUrl, token, apiPath, { method = 'GET', timeoutMs = 15000, query = {} } = {}) {
   if (!token) throw new Error('Plex token is required');
-  const url = buildUrl(plexUrl, apiPath, token);
+  const url = buildUrl(plexUrl, apiPath, token, query);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -139,6 +139,54 @@ async function refreshMetadataItem(plexUrl, token, ratingKey, { force = false } 
   const query = force ? '?force=1' : '';
   await plexFormWrite(plexUrl, token, `/library/metadata/${encodeURIComponent(ratingKey)}/refresh${query}`, {}, { method: 'PUT' });
   return { refreshed: true, ratingKey: String(ratingKey), force: !!force };
+}
+
+function flattenMetadata(container) {
+  const raw = container?.Metadata ?? container?.metadata ?? [];
+  return Array.isArray(raw) ? raw : (raw ? [raw] : []);
+}
+
+function metadataMediaSummary(item) {
+  const mediaList = item?.Media ?? item?.media ?? [];
+  const media = Array.isArray(mediaList) ? mediaList[0] : mediaList;
+  if (!media) {
+    return { hasMedia: false, container: null, duration: 0, streamCount: 0 };
+  }
+  const parts = media.Part ?? media.part ?? [];
+  const part = Array.isArray(parts) ? parts[0] : parts;
+  const streams = part?.Stream ?? part?.stream ?? [];
+  const streamArr = Array.isArray(streams) ? streams : (streams ? [streams] : []);
+  return {
+    hasMedia: true,
+    container: media.container || null,
+    duration: Number(media.duration || item.duration || 0),
+    streamCount: streamArr.length,
+    videoCodec: media.videoCodec || null,
+  };
+}
+
+function metadataNeedsAnalysis(item) {
+  const summary = metadataMediaSummary(item);
+  if (!summary.hasMedia) return true;
+  if (!summary.container) return true;
+  if (!summary.duration || summary.duration <= 0) return true;
+  if (summary.streamCount === 0) return true;
+  return false;
+}
+
+async function listSectionMetadata(plexUrl, token, sectionKey) {
+  if (!sectionKey) throw new Error('Plex library section key is required');
+  const data = await plexRequest(plexUrl, token, `/library/sections/${encodeURIComponent(sectionKey)}/all`, {
+    query: { includeMedia: 1 },
+    timeoutMs: 60000,
+  });
+  const container = data?.MediaContainer || data;
+  return flattenMetadata(container).map((item) => ({
+    ratingKey: String(item.ratingKey || item.key || ''),
+    title: item.title || null,
+    type: item.type || null,
+    ...metadataMediaSummary(item),
+  })).filter((item) => item.ratingKey);
 }
 
 function normalizePathForCompare(p) {
@@ -415,6 +463,9 @@ module.exports = {
   analyzeLibrary,
   analyzeMetadataItem,
   refreshMetadataItem,
+  listSectionMetadata,
+  metadataMediaSummary,
+  metadataNeedsAnalysis,
   findLibraryForPath,
   findLibraryByTitle,
   createLibrarySection,

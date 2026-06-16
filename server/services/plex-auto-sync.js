@@ -2,7 +2,12 @@ const db = require('../db/database');
 const userSettings = require('./user-settings');
 const plexLibrarySync = require('./plex-library-sync');
 const plexClient = require('./plex-client');
+const plexMetadataRepair = require('./plex-metadata-repair');
 const appUrl = require('./app-url');
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const runningUsers = new Set();
 
@@ -59,13 +64,22 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
 
     let refresh = null;
     let analyze = null;
+    let repair = null;
     if (sectionKey) {
       const plexUrl = settings.plex_server_url || plexClient.DEFAULT_PLEX_URL;
       refresh = await plexClient.refreshLibrary(plexUrl, token, sectionKey, { force: true });
+      await sleep(5000);
       try {
         analyze = await plexClient.analyzeLibrary(plexUrl, token, sectionKey);
       } catch (analyzeErr) {
         analyze = { analyzed: false, error: analyzeErr.message };
+      }
+      try {
+        repair = await plexMetadataRepair.repairSectionMetadata(plexUrl, token, sectionKey, {
+          delayMs: 5000,
+        });
+      } catch (repairErr) {
+        repair = { error: repairErr.message };
       }
     }
 
@@ -74,6 +88,7 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
       ...syncResult,
       refresh,
       analyze,
+      repair,
       section_key: sectionKey,
     };
   } catch (err) {
