@@ -23,6 +23,23 @@ function isLocalPlexHost(plexUrl) {
   }
 }
 
+const GITHUB_VAULT_AGENT_ID = 'com.githubvault.plex.agent';
+
+function vaultLibraryAgentProfile(sectionType) {
+  if (sectionType === 'show') {
+    return {
+      agent: GITHUB_VAULT_AGENT_ID,
+      scanner: 'GitHub Vault Scanner',
+      language: 'en-US',
+    };
+  }
+  return {
+    agent: GITHUB_VAULT_AGENT_ID,
+    scanner: 'Plex Video Files Scanner',
+    language: 'xn',
+  };
+}
+
 function buildUrl(plexUrl, apiPath, token, query = {}) {
   const base = normalizePlexUrl(plexUrl);
   const api = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
@@ -98,10 +115,30 @@ async function listLibraries(plexUrl, token) {
   return parseSections(data);
 }
 
-async function refreshLibrary(plexUrl, token, sectionKey) {
+async function refreshLibrary(plexUrl, token, sectionKey, { force = false } = {}) {
   if (!sectionKey) throw new Error('Plex library section key is required');
-  await plexRequest(plexUrl, token, `/library/sections/${encodeURIComponent(sectionKey)}/refresh`);
-  return { refreshed: true, sectionKey: String(sectionKey) };
+  const query = force ? '?force=1' : '';
+  await plexRequest(plexUrl, token, `/library/sections/${encodeURIComponent(sectionKey)}/refresh${query}`);
+  return { refreshed: true, sectionKey: String(sectionKey), force: !!force };
+}
+
+async function analyzeLibrary(plexUrl, token, sectionKey) {
+  if (!sectionKey) throw new Error('Plex library section key is required');
+  await plexFormWrite(plexUrl, token, `/library/sections/${encodeURIComponent(sectionKey)}/analyze`, {}, { method: 'PUT' });
+  return { analyzed: true, sectionKey: String(sectionKey) };
+}
+
+async function analyzeMetadataItem(plexUrl, token, ratingKey) {
+  if (!ratingKey) throw new Error('Plex metadata rating key is required');
+  await plexFormWrite(plexUrl, token, `/library/metadata/${encodeURIComponent(ratingKey)}/analyze`, {}, { method: 'PUT' });
+  return { analyzed: true, ratingKey: String(ratingKey) };
+}
+
+async function refreshMetadataItem(plexUrl, token, ratingKey, { force = false } = {}) {
+  if (!ratingKey) throw new Error('Plex metadata rating key is required');
+  const query = force ? '?force=1' : '';
+  await plexFormWrite(plexUrl, token, `/library/metadata/${encodeURIComponent(ratingKey)}/refresh${query}`, {}, { method: 'PUT' });
+  return { refreshed: true, ratingKey: String(ratingKey), force: !!force };
 }
 
 function normalizePathForCompare(p) {
@@ -138,13 +175,17 @@ async function findLibraryForPath(plexUrl, token, folderPath) {
 }
 
 async function plexFormPost(plexUrl, token, apiPath, fields, { timeoutMs = 20000, headers = {} } = {}) {
+  return plexFormWrite(plexUrl, token, apiPath, fields, { method: 'POST', timeoutMs, headers });
+}
+
+async function plexFormWrite(plexUrl, token, apiPath, fields, { method = 'POST', timeoutMs = 20000, headers = {} } = {}) {
   if (!token) throw new Error('Plex token is required');
   const url = buildUrl(plexUrl, apiPath, token, fields);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      method: 'POST',
+      method,
       headers: {
         ...PLEX_CLIENT_HEADERS,
         ...headers,
@@ -169,6 +210,22 @@ async function plexFormPost(plexUrl, token, apiPath, fields, { timeoutMs = 20000
 
 function libraryCreateProfiles(title) {
   return [
+    {
+      label: 'GitHub Vault (movie)',
+      name: title,
+      type: 'movie',
+      agent: GITHUB_VAULT_AGENT_ID,
+      scanner: 'Plex Video Files Scanner',
+      language: 'xn',
+    },
+    {
+      label: 'GitHub Vault (TV)',
+      name: title,
+      type: 'show',
+      agent: GITHUB_VAULT_AGENT_ID,
+      scanner: 'GitHub Vault Scanner',
+      language: 'en-US',
+    },
     {
       label: 'Other Videos (STRM)',
       name: title,
@@ -273,15 +330,86 @@ async function ensureLibrarySection(plexUrl, token, folderPath, options = {}) {
   return { created: true, section };
 }
 
+async function updateLibrarySection(plexUrl, token, sectionKey, fields = {}) {
+  if (!sectionKey) throw new Error('Plex library section key is required');
+  const headers = fields.language && fields.language !== 'xn'
+    ? { 'X-Plex-Language': fields.language }
+    : {};
+  const data = await plexFormWrite(
+    plexUrl,
+    token,
+    `/library/sections/${encodeURIComponent(sectionKey)}`,
+    fields,
+    { method: 'PUT', headers },
+  );
+  return data;
+}
+
+async function resolveVaultLibrarySection(plexUrl, token, {
+  libraryPath,
+  sectionKey,
+  title = 'GitHub Vault',
+} = {}) {
+  if (libraryPath) {
+    const byPath = await findLibraryForPath(plexUrl, token, libraryPath);
+    if (byPath?.key) return byPath;
+  }
+  const byTitle = await findLibraryByTitle(plexUrl, token, title);
+  if (byTitle?.key) return byTitle;
+  if (sectionKey) {
+    const sections = await listLibraries(plexUrl, token);
+    const match = sections.find((section) => String(section.key) === String(sectionKey));
+    if (match?.key) return match;
+  }
+  return null;
+}
+
+async function applyGitHubVaultAgent(plexUrl, token, section) {
+  if (!section?.key) throw new Error('Library section key is required');
+  const profile = vaultLibraryAgentProfile(section.type);
+  // Do not send `type` on PUT — Plex rejects unknown/duplicate type updates.
+  await updateLibrarySection(plexUrl, token, section.key, profile);
+  return {
+    section_key: section.key,
+    agent: profile.agent,
+    scanner: profile.scanner,
+    type: section.type || (section.type === 'show' ? 'show' : 'movie'),
+  };
+}
+
+async function getAgentRegistrationStatus(plexUrl, token) {
+  const libraries = await listLibraries(plexUrl, token);
+  const vaultLibraries = libraries.filter((section) => (
+    section.agent === GITHUB_VAULT_AGENT_ID
+    || (section.locations || []).some((loc) => /github[\s_-]?vault/i.test(loc))
+  ));
+  return {
+    agent_id: GITHUB_VAULT_AGENT_ID,
+    libraries,
+    vault_libraries: vaultLibraries,
+    agent_applied: vaultLibraries.some((section) => section.agent === GITHUB_VAULT_AGENT_ID),
+  };
+}
+
 module.exports = {
   DEFAULT_PLEX_URL,
+  GITHUB_VAULT_AGENT_ID,
   normalizePlexUrl,
   isLocalPlexHost,
   testConnection,
   listLibraries,
   refreshLibrary,
+  analyzeLibrary,
+  analyzeMetadataItem,
+  refreshMetadataItem,
   findLibraryForPath,
   findLibraryByTitle,
   createLibrarySection,
   ensureLibrarySection,
+  updateLibrarySection,
+  applyGitHubVaultAgent,
+  getAgentRegistrationStatus,
+  resolveVaultLibrarySection,
+  vaultLibraryAgentProfile,
+  plexFormWrite,
 };

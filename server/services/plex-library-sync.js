@@ -24,12 +24,11 @@ function strmBaseName(index, item) {
   const title = safeName(item.title || item.id);
   const base = `${padIndex(index)} - ${title}`;
   const mime = item.mime_type || '';
-  if (mime.startsWith('video/')) {
-    if (/\.mkv$/i.test(item.title || '')) return `${base}.mkv`;
-    if (/\.webm$/i.test(item.title || '')) return `${base}.webm`;
-    return `${base}.mp4`;
-  }
-  return base;
+  if (!mime.startsWith('video/')) return base;
+  if (/\.(mkv|webm|mp4|m4v|mov|avi)$/i.test(title)) return base;
+  if (/\.mkv$/i.test(item.title || '')) return `${base}.mkv`;
+  if (/\.webm$/i.test(item.title || '')) return `${base}.webm`;
+  return `${base}.mp4`;
 }
 
 function sidecarPayload(item, probe = null) {
@@ -267,9 +266,25 @@ async function syncLibrary(userId, req, outputPath, { prune = true } = {}) {
       }
     })
     .filter(Boolean);
-  require('./plex-stream-prewarm').prewarmFilesBackground(userId, fileIds);
+  const prewarm = await require('./plex-stream-prewarm').prewarmFiles(userId, fileIds);
 
-  return { output, stats, manifest: diskManifest };
+  return { output, stats, manifest: diskManifest, prewarm };
+}
+
+async function prewarmManifestFiles(userId, manifest) {
+  const fileIds = (manifest?.entries || [])
+    .filter((entry) => entry.path?.endsWith('.vault-item.json'))
+    .map((entry) => {
+      try {
+        return JSON.parse(entry.content).file_id;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  if (!fileIds.length) return { warmed: 0, file_ids: [] };
+  await require('./plex-stream-prewarm').prewarmFiles(userId, fileIds);
+  return { warmed: fileIds.length, file_ids: fileIds };
 }
 
 module.exports = {
@@ -278,4 +293,5 @@ module.exports = {
   requiresBrowserSync,
   canWriteLibraryPath,
   syncLibrary,
+  prewarmManifestFiles,
 };

@@ -1148,6 +1148,12 @@ const App = {
           return;
         }
         const written = await PlexLocalSync.applyManifest(manifest, folder);
+        App.toast('Preparing streams for Plex (faststart cache)…', 'info');
+        try {
+          await API.plex.prewarm({});
+        } catch (prewarmErr) {
+          this.toast(`STRM files written; stream prewarm failed: ${prewarmErr.message}`, 'info');
+        }
         try {
           await API.plex.refresh();
         } catch (refreshErr) {
@@ -1195,6 +1201,19 @@ const App = {
         };
         if (tokenInput) body.plex_token = tokenInput;
         const result = await API.plex.integrate(body);
+        try {
+          const localInstall = await API.plex.installAgent(body);
+          if (localInstall?.success) {
+            this.toast('GitHub Vault agent installed — restart Plex Media Server', 'success');
+          }
+        } catch (installErr) {
+          if (result.remote_plex) {
+            setTimeout(
+              () => this.toast('On this PC run: npm run plex:install-agent', 'info'),
+              600,
+            );
+          }
+        }
         const stats = result.sync?.stats || {};
         const remoteNote = result.remote_plex ? ' Use "Write to folder on this PC" next.' : '';
         this.toast(

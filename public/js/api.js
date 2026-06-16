@@ -380,10 +380,23 @@ const API = {
 
   plex: {
     sync: (body) => API.post('/api/plex/sync', body),
-    manifest: () => API.get('/api/plex/manifest'),
+    manifest: (opts = {}) => {
+      const qs = opts.prewarm ? '?prewarm=1' : '';
+      return API.get(`/api/plex/manifest${qs}`);
+    },
+    prewarm: (body) => API.post('/api/plex/prewarm', body),
     refresh: () => API.post('/api/plex/refresh'),
     integrate: (body) => API.post('/api/plex/integrate', body),
+    installAgent: (body) => API.post('/api/plex/install-agent', body),
     integrationStatus: () => API.get('/api/plex/integration-status'),
+    verify: (opts = {}) => {
+      const params = new URLSearchParams();
+      if (opts.fileId) params.set('file_id', opts.fileId);
+      if (opts.libraryPath) params.set('library_path', opts.libraryPath);
+      const qs = params.toString();
+      return API.get(`/api/plex/verify${qs ? `?${qs}` : ''}`);
+    },
+    streamTest: (fileId) => API.get(`/api/plex/stream-test/${encodeURIComponent(fileId)}`),
     test: (body) => API.post('/api/plex/test', body),
     libraries: () => API.get('/api/plex/libraries'),
   },

@@ -330,15 +330,29 @@ async function streamFile(req, res, userId, fileId, view = null) {
       }
       if (!faststart) {
         const cached = cache.get(userId, fileId);
-        if (cached && !isRemoteMediaClient(req)) {
-          streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
-            console.warn(`Faststart build deferred (${fileId}):`, err.message);
-          });
-          return serveRange(req, res, cached.path, mimeType, file.name, file.size);
+        if (cached) {
+          if (isRemoteMediaClient(req)) {
+            try {
+              faststart = await streamCache.ensureFaststartFromBin(userId, file, cached.path, null);
+            } catch (err) {
+              console.warn(`Faststart from cache failed (${fileId}):`, err.message);
+            }
+          } else {
+            streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
+              console.warn(`Faststart build deferred (${fileId}):`, err.message);
+            });
+            return serveRange(req, res, cached.path, mimeType, file.name, file.size);
+          }
         }
       }
       if (faststart) {
         return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
+      }
+      if (isRemoteMediaClient(req)) {
+        if (!res.headersSent) {
+          res.status(503).json({ error: 'Stream preparing for Plex analysis — retry shortly' });
+        }
+        return;
       }
     }
 

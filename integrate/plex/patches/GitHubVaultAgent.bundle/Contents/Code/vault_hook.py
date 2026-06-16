@@ -1,5 +1,6 @@
 # GitHub Vault — LocalMedia infiltration hook
 # Reads .vault-item.json sidecars written by vault Plex sync.
+# Plex RestrictedPython rejects function names starting with "_".
 
 import os
 import json
@@ -8,14 +9,14 @@ VAULT_PATH_MARKERS = ('github vault', 'github-vault', 'github_vault')
 VAULT_URL_MARKERS = ('/api/files/stream/', 'vault.arktic.top', 'github-vault')
 
 
-def _is_vault_path(path):
+def is_vault_path(path):
   if not path:
     return False
   normalized = path.replace('\\', '/').lower()
   return any(marker in normalized for marker in VAULT_PATH_MARKERS)
 
 
-def _read_strm_url(file_path):
+def read_strm_url(file_path):
   if not file_path or not file_path.lower().endswith('.strm'):
     return None
   try:
@@ -27,17 +28,17 @@ def _read_strm_url(file_path):
     return None
 
 
-def _is_vault_stream_url(url):
+def is_vault_stream_url(url):
   if not url:
     return False
   normalized = url.replace('\\', '/').lower()
   return any(marker in normalized for marker in VAULT_URL_MARKERS)
 
 
-def _has_vault_sidecar(file_path):
+def has_vault_sidecar(file_path):
   if not file_path:
     return False
-  base, _ = os.path.splitext(file_path)
+  base, ext = os.path.splitext(file_path)
   return os.path.isfile(base + '.vault-item.json')
 
 
@@ -45,15 +46,15 @@ def is_vault_item(file_path):
   """Public helper for GitHubVaultAgent — sidecar, folder, or vault stream URL."""
   if not file_path:
     return False
-  if _has_vault_sidecar(file_path):
+  if has_vault_sidecar(file_path):
     return True
-  if _is_vault_path(file_path):
+  if is_vault_path(file_path):
     return True
-  return _is_vault_stream_url(_read_strm_url(file_path))
+  return is_vault_stream_url(read_strm_url(file_path))
 
 
-def _load_sidecar(file_path):
-  base, _ = os.path.splitext(file_path)
+def load_sidecar(file_path):
+  base, ext = os.path.splitext(file_path)
   candidates = [
     base + '.vault-item.json',
     os.path.join(os.path.dirname(file_path), '.vault-item.json'),
@@ -70,7 +71,7 @@ def _load_sidecar(file_path):
   return None
 
 
-def _video_resolution(height):
+def video_resolution(height):
   try:
     h = int(height)
   except Exception:
@@ -92,7 +93,7 @@ def _video_resolution(height):
   return None
 
 
-def _infer_container(sidecar, file_path):
+def infer_container(sidecar, file_path):
   container = sidecar.get('container') if sidecar else None
   if container:
     return container
@@ -116,7 +117,7 @@ def _infer_container(sidecar, file_path):
   if name.endswith('.mp4.strm') or '.mp4.' in name:
     return 'mp4'
 
-  url = _read_strm_url(file_path)
+  url = read_strm_url(file_path)
   if url:
     url_lower = url.lower().split('?')[0]
     if url_lower.endswith('.mkv'):
@@ -129,19 +130,178 @@ def _infer_container(sidecar, file_path):
   return 'mp4'
 
 
-def _apply_media_technical(metadata, sidecar, file_path):
-  if not sidecar:
-    sidecar = {}
+def iter_media_part_files(media):
+  """Yield local file paths from a Plex MediaTree (movie or TV)."""
+  if not media:
+    return
 
-  container = _infer_container(sidecar, file_path)
+  try:
+    for part in media.parts or []:
+      if part.file:
+        yield part.file
+  except Exception:
+    pass
+
+  try:
+    for item in media.items or []:
+      for part in item.parts or []:
+        if part.file:
+          yield part.file
+  except Exception:
+    pass
+
+  try:
+    for season_key in media.seasons or {}:
+      season = media.seasons[season_key]
+      for episode_key in season.episodes or {}:
+        episode = season.episodes[episode_key]
+        for item in episode.items or []:
+          for part in item.parts or []:
+            if part.file:
+              yield part.file
+  except Exception:
+    pass
+
+
+def first_media_part_file(media):
+  for file_path in iter_media_part_files(media):
+    return file_path
+  return None
+
+
+def is_vault_media_tree(media):
+  for file_path in iter_media_part_files(media):
+    if is_vault_item(file_path):
+      return True
+  return False
+
+
+def stream_type_value(stream):
+  try:
+    return int(getattr(stream, 'streamType', None) or getattr(stream, 'type', 0))
+  except Exception:
+    return 0
+
+
+def part_stream_flags(part):
+  has_video = False
+  has_audio = False
+  try:
+    streams = list(part.streams) if part.streams else []
+  except Exception:
+    streams = []
+  for stream in streams:
+    st = stream_type_value(stream)
+    if st == 1:
+      has_video = True
+    elif st == 2:
+      has_audio = True
+  return has_video, has_audio
+
+
+def apply_part_streams(part, sidecar):
+  if not part:
+    return False
+
+  has_video, has_audio = part_stream_flags(part)
+  if has_video and has_audio:
+    return False
+
   video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or 'h264'
   audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or 'aac'
   video_profile = sidecar.get('video_profile') or 'high'
+  audio_channels = sidecar.get('audio_channels') or 2
+  width = sidecar.get('width')
+  height = sidecar.get('height')
+  bitrate = sidecar.get('bitrate')
+  touched = False
+
+  if not has_video:
+    video = None
+    for factory in (
+      lambda: part.addStream(1),
+      lambda: part.addPrimaryStream('video'),
+      lambda: part.addPrimaryStream(1),
+    ):
+      try:
+        video = factory()
+        break
+      except Exception:
+        video = None
+    if video is None:
+      try:
+        video = part.streams.add()
+        video.streamType = 1
+      except Exception:
+        video = None
+    if video is not None:
+      try:
+        video.codec = video_codec
+        video.index = 0
+        video.profile = video_profile
+        if width:
+          video.width = int(width)
+        if height:
+          video.height = int(height)
+        if bitrate:
+          video.bitrate = int(int(bitrate) / 1000)
+        touched = True
+      except Exception, err:
+        Log('[GitHub Vault] video stream attrs failed: %s' % err)
+
+  if not has_audio:
+    audio = None
+    for factory in (
+      lambda: part.addStream(2),
+      lambda: part.addPrimaryStream('audio'),
+      lambda: part.addPrimaryStream(2),
+    ):
+      try:
+        audio = factory()
+        break
+      except Exception:
+        audio = None
+    if audio is None:
+      try:
+        audio = part.streams.add()
+        audio.streamType = 2
+      except Exception:
+        audio = None
+    if audio is not None:
+      try:
+        audio.codec = audio_codec
+        audio.index = 1
+        audio.channels = int(audio_channels)
+        audio.selected = True
+        touched = True
+      except Exception, err:
+        Log('[GitHub Vault] audio stream attrs failed: %s' % err)
+
+  if touched:
+    Log('[GitHub Vault] added synthetic streams (video=%s audio=%s)' % (video_codec, audio_codec))
+  return touched
+
+
+def apply_media_technical(metadata, sidecar, file_path):
+  if not sidecar:
+    sidecar = {}
+
+  container = infer_container(sidecar, file_path)
+  video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or 'h264'
+  audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or 'aac'
+  video_profile = sidecar.get('video_profile') or 'high'
+  audio_channels = sidecar.get('audio_channels') or 2
   width = sidecar.get('width')
   height = sidecar.get('height')
   bitrate = sidecar.get('bitrate')
   duration = sidecar.get('duration_sec')
-  video_resolution = sidecar.get('video_resolution') or _video_resolution(height)
+  video_resolution_label = sidecar.get('video_resolution') or video_resolution(height)
+  duration_ms = None
+  if duration:
+    try:
+      duration_ms = int(float(duration) * 1000)
+    except Exception:
+      duration_ms = None
 
   touched = False
   media_items = list(metadata.media) if metadata.media else []
@@ -169,6 +329,16 @@ def _apply_media_technical(metadata, sidecar, file_path):
     if audio_codec:
       media.audioCodec = audio_codec
       touched = True
+    try:
+      media.videoProfile = video_profile
+      touched = True
+    except Exception:
+      pass
+    try:
+      media.audioChannels = int(audio_channels)
+      touched = True
+    except Exception:
+      pass
     if width:
       try:
         media.width = int(width)
@@ -181,8 +351,8 @@ def _apply_media_technical(metadata, sidecar, file_path):
         touched = True
       except Exception:
         pass
-    if video_resolution:
-      media.videoResolution = video_resolution
+    if video_resolution_label:
+      media.videoResolution = video_resolution_label
       touched = True
     if bitrate:
       try:
@@ -190,12 +360,9 @@ def _apply_media_technical(metadata, sidecar, file_path):
         touched = True
       except Exception:
         pass
-    if duration:
-      try:
-        media.duration = int(float(duration) * 1000)
-        touched = True
-      except Exception:
-        pass
+    if duration_ms:
+      media.duration = duration_ms
+      touched = True
     if width and height:
       try:
         media.aspectRatio = round(float(width) / float(height), 3)
@@ -211,11 +378,19 @@ def _apply_media_technical(metadata, sidecar, file_path):
       if container:
         part.container = container
         touched = True
+      if duration_ms:
+        try:
+          part.duration = duration_ms
+          touched = True
+        except Exception:
+          pass
+      if apply_part_streams(part, sidecar):
+        touched = True
 
   return touched
 
 
-def _apply_sidecar(metadata, sidecar, file_path):
+def apply_sidecar(metadata, sidecar, file_path):
   if not sidecar:
     sidecar = {}
 
@@ -244,36 +419,45 @@ def _apply_sidecar(metadata, sidecar, file_path):
   if art:
     metadata.art = art
 
-  if _apply_media_technical(metadata, sidecar, file_path):
-    Log('[GitHub Vault] applied media technical metadata (container=%s)' % _infer_container(sidecar, file_path))
+  if apply_media_technical(metadata, sidecar, file_path):
+    Log('[GitHub Vault] applied media technical metadata (container=%s, duration=%s)' % (
+      infer_container(sidecar, file_path),
+      sidecar.get('duration_sec'),
+    ))
+
+
+def resolve_metadata_target(metadata, media, file_path):
+  for season_key in media.seasons or {}:
+    season = media.seasons[season_key]
+    for episode_key in season.episodes or {}:
+      episode_media = season.episodes[episode_key]
+      for item in episode_media.items or []:
+        for part in item.parts or []:
+          if part.file == file_path:
+            return metadata.seasons[season_key].episodes[episode_key]
+      for part in episode_media.parts or []:
+        if part.file == file_path:
+          return metadata.seasons[season_key].episodes[episode_key]
+  return metadata
+
+
+def enrich_all(metadata, media, label):
+  touched = False
+  for file_path in iter_media_part_files(media):
+    if not is_vault_item(file_path):
+      continue
+    target = resolve_metadata_target(metadata, media, file_path)
+    sidecar = load_sidecar(file_path) or {}
+    apply_sidecar(target, sidecar, file_path)
+    touched = True
+    Log('[GitHub Vault] enriched %s metadata for %s' % (label, file_path))
+  if not touched:
+    Log('[GitHub Vault] %s enrich skipped — no vault parts found on media tree' % label)
 
 
 def enrich_movie(metadata, media):
-  try:
-    part = media.items[0].parts[0]
-  except Exception:
-    return
-  if not is_vault_item(part.file):
-    return
-  sidecar = _load_sidecar(part.file) or {}
-  _apply_sidecar(metadata, sidecar, part.file)
-  Log('[GitHub Vault] enriched movie metadata for %s' % part.file)
+  enrich_all(metadata, media, 'movie')
 
 
 def enrich_tv(metadata, media):
-  touched = False
-  for season_key in media.seasons:
-    for episode_key in media.seasons[season_key].episodes:
-      episode_media = media.seasons[season_key].episodes[episode_key].items[0]
-      try:
-        part = episode_media.parts[0]
-      except Exception:
-        continue
-      if not is_vault_item(part.file):
-        continue
-      sidecar = _load_sidecar(part.file) or {}
-      episode_metadata = metadata.seasons[season_key].episodes[episode_key]
-      _apply_sidecar(episode_metadata, sidecar, part.file)
-      touched = True
-  if touched:
-    Log('[GitHub Vault] enriched TV metadata for %s' % media.title)
+  enrich_all(metadata, media, 'TV')

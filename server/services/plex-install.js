@@ -1,5 +1,6 @@
 const apiKeys = require('./api-keys');
 const appUrl = require('./app-url');
+const db = require('../db/database');
 const fs = require('fs');
 const path = require('path');
 const userSettings = require('./user-settings');
@@ -29,7 +30,84 @@ function resolveLibraryPath(settings, body, serverUrl) {
 function shouldInstallLocalFiles(serverUrl) {
   if (process.env.PLEX_INTEGRATE_LOCAL === '1') return true;
   if (process.env.PLEX_INTEGRATE_LOCAL === '0') return false;
+  if (plexPatches.canInstallAgentLocally()) return true;
   return plexClient.isLocalPlexHost(serverUrl);
+}
+
+async function installAgentLocally(userId, req, {
+  plexUrl,
+  plexToken,
+  plexLibraryPath,
+  patchBundled = true,
+  applyAgent = true,
+} = {}) {
+  if (!plexPatches.canInstallAgentLocally()) {
+    throw new Error(
+      'Cannot write to local Plex data folder. Run this on the Plex machine: npm run plex:install-agent',
+    );
+  }
+
+  const settings = userSettings.getSettings(userId);
+  const token = plexToken || userSettings.getPlexToken(userId);
+  const serverUrl = plexUrl || settings.plex_server_url || plexClient.DEFAULT_PLEX_URL;
+  const paths = plexPatches.resolvePaths();
+  const vaultUrl = req ? appUrl.getAppUrl(req) : (process.env.APP_URL || 'https://vault.arktic.top');
+  let apiKey = null;
+  try {
+    apiKey = getOrCreateApiKey(userId).key;
+  } catch {
+    apiKey = null;
+  }
+
+  const installResult = plexPatches.installAgentFiles(paths.plexDataDir, {
+    patchBundled,
+    vaultUrl,
+    apiKey,
+  });
+
+  let agentApply = null;
+  let agentApplyError = null;
+  if (applyAgent && token) {
+    try {
+      await plexClient.testConnection(serverUrl, token);
+      const libraryPath = plexLibraryPath || settings.plex_library_path || paths.libraryPath;
+      const section = await plexClient.resolveVaultLibrarySection(serverUrl, token, {
+        libraryPath,
+        sectionKey: settings.plex_section_key,
+        title: LIBRARY_TITLE,
+      });
+      if (section?.key) {
+        agentApply = await plexClient.applyGitHubVaultAgent(serverUrl, token, section);
+        agentApply.library_title = section.title;
+        agentApply.library_path = section.locations?.[0] || libraryPath;
+        const row = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+        if (row) {
+          const settingsPatch = { plex_section_key: section.key };
+          if (plexToken) settingsPatch.plex_token = plexToken;
+          if (plexUrl) settingsPatch.plex_server_url = serverUrl;
+          if (libraryPath) settingsPatch.plex_library_path = libraryPath;
+          userSettings.updateSettings(userId, settingsPatch);
+        } else {
+          agentApply.settings_note = 'Vault DB user not found — agent applied in Plex; sign in to vault app to persist settings';
+        }
+      } else {
+        agentApplyError = 'GitHub Vault library not found in Plex — integrate first';
+      }
+    } catch (err) {
+      agentApplyError = err.message;
+    }
+  }
+
+  return {
+    success: installResult.ok,
+    ...installResult,
+    agent_apply: agentApply,
+    agent_apply_error: agentApplyError,
+    plex_data_dir: paths.plexDataDir,
+    message: installResult.ok
+      ? 'GitHub Vault agent installed. Restart Plex Media Server, then refresh library metadata.'
+      : 'Agent install incomplete — check steps',
+  };
 }
 
 function getOrCreateApiKey(userId) {
@@ -121,6 +199,26 @@ async function integratePlex(userId, req, {
     path: libraryPath,
   });
 
+  if (token && libraryResult.section?.key) {
+    try {
+      const agentApply = await plexClient.applyGitHubVaultAgent(
+        serverUrl,
+        token,
+        libraryResult.section,
+      );
+      steps.push({ step: 'library_agent', ok: true, detail: agentApply });
+    } catch (err) {
+      steps.push({
+        step: 'library_agent',
+        ok: false,
+        error: err.message,
+        detail: installLocal
+          ? 'Restart Plex Media Server, then run npm run plex:install-agent'
+          : 'Run npm run plex:install-agent on the Plex machine after restart',
+      });
+    }
+  }
+
   userSettings.updateSettings(userId, {
     plex_sync_enabled: true,
     plex_library_path: libraryPath,
@@ -202,5 +300,6 @@ function getIntegrationStatus() {
 
 module.exports = {
   integratePlex,
+  installAgentLocally,
   getIntegrationStatus,
 };

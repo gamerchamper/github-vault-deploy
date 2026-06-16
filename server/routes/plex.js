@@ -78,6 +78,22 @@ router.post('/integrate', async (req, res) => {
   }
 });
 
+router.post('/install-agent', async (req, res) => {
+  try {
+    const plexInstall = require('../services/plex-install');
+    const result = await plexInstall.installAgentLocally(req.user.id, req, {
+      plexUrl: req.body?.plex_server_url,
+      plexToken: req.body?.plex_token,
+      plexLibraryPath: req.body?.plex_library_path,
+      patchBundled: req.body?.patch_bundled !== false,
+      applyAgent: req.body?.apply_agent !== false,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.get('/integration-status', (req, res) => {
   try {
     const plexInstall = require('../services/plex-install');
@@ -90,8 +106,29 @@ router.get('/integration-status', (req, res) => {
 router.get('/manifest', async (req, res) => {
   try {
     const plexLibrarySync = require('../services/plex-library-sync');
+    const prewarm = req.query.prewarm === '1' || req.query.prewarm === 'true';
     const { manifest, stats } = await plexLibrarySync.buildSyncManifest(req.user.id, req);
+    if (prewarm) {
+      const warmed = await plexLibrarySync.prewarmManifestFiles(req.user.id, manifest);
+      return res.json({ manifest: { ...manifest, stats, prewarm: warmed }, stats });
+    }
     res.json({ manifest: { ...manifest, stats }, stats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/prewarm', async (req, res) => {
+  try {
+    const plexLibrarySync = require('../services/plex-library-sync');
+    const fileIds = Array.isArray(req.body?.file_ids) ? req.body.file_ids : [];
+    if (fileIds.length) {
+      await require('../services/plex-stream-prewarm').prewarmFiles(req.user.id, fileIds);
+      return res.json({ success: true, warmed: fileIds.length, file_ids: fileIds });
+    }
+    const { manifest } = await plexLibrarySync.buildSyncManifest(req.user.id, req);
+    const warmed = await plexLibrarySync.prewarmManifestFiles(req.user.id, manifest);
+    res.json({ success: true, ...warmed });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -173,6 +210,21 @@ router.post('/test', async (req, res) => {
   }
 });
 
+router.get('/verify', async (req, res) => {
+  try {
+    const userSettings = require('../services/user-settings');
+    const plexVerify = require('../services/plex-verify');
+    const settings = userSettings.getSettings(req.user.id);
+    const result = await plexVerify.verifyIntegration(req.user.id, req, {
+      fileId: req.query.file_id || null,
+      libraryPath: req.query.library_path || settings.plex_library_path,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stream-test/:fileId', async (req, res) => {
   try {
     const db = require('../db/database');
@@ -212,6 +264,29 @@ router.get('/libraries', async (req, res) => {
     if (!token) return res.status(400).json({ error: 'Save a Plex token in Settings first' });
     const libraries = await plexClient.listLibraries(settings.plex_server_url, token);
     res.json({ libraries });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/agent-status', async (req, res) => {
+  try {
+    const plexPatches = require('../services/plex-patches');
+    const plexClient = require('../services/plex-client');
+    const userSettings = require('../services/user-settings');
+    const audit = plexPatches.auditPlexLayout();
+    const token = userSettings.getPlexToken(req.user.id);
+    const settings = userSettings.getSettings(req.user.id);
+    let plex = null;
+    if (token) {
+      plex = await plexClient.getAgentRegistrationStatus(settings.plex_server_url, token);
+    }
+    res.json({
+      ok: audit.runtime.ok && (!plex || plex.agent_applied),
+      bundle: audit.appdata_agent,
+      runtime: audit.runtime,
+      plex,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

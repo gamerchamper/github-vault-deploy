@@ -58,18 +58,22 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
     }
 
     let refresh = null;
+    let analyze = null;
     if (sectionKey) {
-      refresh = await plexClient.refreshLibrary(
-        settings.plex_server_url || plexClient.DEFAULT_PLEX_URL,
-        token,
-        sectionKey,
-      );
+      const plexUrl = settings.plex_server_url || plexClient.DEFAULT_PLEX_URL;
+      refresh = await plexClient.refreshLibrary(plexUrl, token, sectionKey, { force: true });
+      try {
+        analyze = await plexClient.analyzeLibrary(plexUrl, token, sectionKey);
+      } catch (analyzeErr) {
+        analyze = { analyzed: false, error: analyzeErr.message };
+      }
     }
 
     userSettings.markPlexSyncRun(userId, null);
     return {
       ...syncResult,
       refresh,
+      analyze,
       section_key: sectionKey,
     };
   } catch (err) {

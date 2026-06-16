@@ -56,6 +56,9 @@ function getSettings(userId) {
 
 function updateSettings(userId, patch = {}) {
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!row) {
+    throw new Error(`User ${userId} not found — sign in via GitHub in the vault app first`);
+  }
   const current = rowToSettings(row);
   const next = { ...current };
   const nextToken = patch.plex_token !== undefined ? patch.plex_token : row?.plex_token;
@@ -135,7 +138,7 @@ function updateSettings(userId, patch = {}) {
     next.plex_sync_enabled ? 1 : 0,
     next.plex_library_path,
     next.plex_server_url,
-    patch.plex_token !== undefined ? (String(patch.plex_token || '').trim() || null) : row.plex_token,
+    patch.plex_token !== undefined ? (String(patch.plex_token || '').trim() || null) : row?.plex_token,
     next.plex_section_key,
     next.plex_sync_interval_minutes,
     userId,
