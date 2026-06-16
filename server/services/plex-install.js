@@ -106,13 +106,10 @@ async function integratePlex(userId, req, {
   try {
     libraryResult = await plexClient.ensureLibrarySection(serverUrl, token, libraryPath, {
       title: LIBRARY_TITLE,
-      type: 'show',
-      agent: 'com.plexapp.agents.none',
-      scanner: 'GitHub Vault Scanner',
     });
   } catch (err) {
-    const hint = /400/.test(err.message)
-      ? ' Ensure the library folder exists on the Plex machine and Plex can read it.'
+    const hint = /400|path|location|invalid/i.test(err.message)
+      ? ' Create the folder on the Plex machine first and use a Windows path Plex can read.'
       : '';
     throw new Error(`${err.message}${hint}`);
   }

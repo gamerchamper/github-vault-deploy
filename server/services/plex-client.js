@@ -137,7 +137,7 @@ async function findLibraryForPath(plexUrl, token, folderPath) {
   return null;
 }
 
-async function plexFormPost(plexUrl, token, apiPath, fields, { timeoutMs = 20000 } = {}) {
+async function plexFormPost(plexUrl, token, apiPath, fields, { timeoutMs = 20000, headers = {} } = {}) {
   if (!token) throw new Error('Plex token is required');
   const url = buildUrl(plexUrl, apiPath, token, fields);
   const controller = new AbortController();
@@ -147,6 +147,7 @@ async function plexFormPost(plexUrl, token, apiPath, fields, { timeoutMs = 20000
       method: 'POST',
       headers: {
         ...PLEX_CLIENT_HEADERS,
+        ...headers,
         'X-Plex-Token': token,
       },
       signal: controller.signal,
@@ -166,26 +167,70 @@ async function plexFormPost(plexUrl, token, apiPath, fields, { timeoutMs = 20000
   }
 }
 
+function libraryCreateProfiles(title) {
+  return [
+    {
+      label: 'Other Videos (STRM)',
+      name: title,
+      type: 'movie',
+      agent: 'com.plexapp.agents.none',
+      scanner: 'Plex Video Files Scanner',
+      language: 'xn',
+    },
+    {
+      label: 'TV Shows (modern)',
+      name: title,
+      type: 'show',
+      agent: 'tv.plex.agents.series',
+      scanner: 'Plex TV Series',
+      language: 'en-US',
+    },
+    {
+      label: 'TV Shows (legacy)',
+      name: title,
+      type: 'show',
+      agent: 'com.plexapp.agents.none',
+      scanner: 'Plex Series Scanner',
+      language: 'en-US',
+    },
+    {
+      label: 'GitHub Vault Scanner',
+      name: title,
+      type: 'show',
+      agent: 'com.plexapp.agents.none',
+      scanner: 'GitHub Vault Scanner',
+      language: 'en-US',
+    },
+    {
+      label: 'Movies folder',
+      name: title,
+      type: 'movie',
+      agent: 'com.plexapp.agents.none',
+      scanner: 'Plex Movie Scanner',
+      language: 'en-US',
+    },
+  ];
+}
+
 async function createLibrarySection(plexUrl, token, {
   title = 'GitHub Vault',
-  type = 'show',
-  agent = 'com.plexapp.agents.none',
-  scanner = 'Plex Series Scanner',
-  language = 'en-US',
   location,
 } = {}) {
   if (!location) throw new Error('Library location path is required');
 
-  const attempts = [
-    { name: title, type, agent, scanner, language, location },
-    { name: title, type: 'show', agent, scanner: 'Plex Series Scanner', language, location },
-    { name: title, type: 'movie', agent, scanner: 'Plex Video Files Scanner', language, location },
-  ];
-
+  const attempts = libraryCreateProfiles(title);
   let lastError = null;
-  for (const params of attempts) {
+
+  for (const profile of attempts) {
+    const { label, ...params } = profile;
     try {
-      const data = await plexFormPost(plexUrl, token, '/library/sections', params);
+      const headers = params.language && params.language !== 'xn'
+        ? { 'X-Plex-Language': params.language }
+        : {};
+      const data = await plexFormPost(plexUrl, token, '/library/sections', {
+        ...params,
+        location,
+      }, { headers });
       const container = data?.MediaContainer || {};
       const dir = container.Directory || container;
       const created = Array.isArray(dir) ? dir[0] : dir;
@@ -194,19 +239,21 @@ async function createLibrarySection(plexUrl, token, {
       if (!sectionKey) {
         const existing = await findLibraryForPath(plexUrl, token, location)
           || await findLibraryByTitle(plexUrl, token, title);
-        if (existing?.key) return existing;
+        if (existing?.key) return { ...existing, profile: label };
         throw new Error('Plex did not return a library section key');
       }
       return {
         key: sectionKey,
         title: created?.title || title,
-        type: created?.type || type,
+        type: created?.type || params.type,
         locations: [location],
+        profile: label,
       };
     } catch (err) {
-      lastError = err;
+      lastError = new Error(`${label}: ${err.message}`);
     }
   }
+
   throw lastError || new Error('Could not create Plex library');
 }
 
