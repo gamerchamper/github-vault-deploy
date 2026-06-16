@@ -105,7 +105,7 @@ async function syncPlaylist(baseUrl, apiKey, playlistId, outDir, manifest, stats
     const title = safeName(item.title || item.id);
     const fileName = `${padIndex(i + 1)} - ${title}.strm`;
     const filePath = path.join(outDir, fileName);
-    writeStrm(filePath, item.stream_url);
+    writeStrm(filePath, item.strm_url || item.hls_url || item.stream_url);
     manifest.files.push(path.relative(manifest.root, filePath));
     stats.files += 1;
   }
@@ -171,7 +171,7 @@ async function main() {
         : item.title;
       const fileName = `${padIndex(i + 1)} - ${safeName(label)}.strm`;
       const filePath = path.join(continueDir, fileName);
-      writeStrm(filePath, item.stream_url);
+      writeStrm(filePath, item.strm_url || item.hls_url || item.stream_url);
       manifest.files.push(path.relative(manifest.root, filePath));
       stats.files += 1;
     }

@@ -20,6 +20,27 @@ function jobKey(userId, fileId) {
   return `${userId}:${fileId}`;
 }
 
+function isPlexClient(req) {
+  const ua = String(req?.get?.('user-agent') || req?.headers?.['user-agent'] || '');
+  return /Plex/i.test(ua);
+}
+
+async function waitForServePath(session, start, end, timeoutMs = 90000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await session.ensureRange(start, end);
+    } catch {
+      // keep polling
+    }
+    const filePath = session.servePath || session.spillPath;
+    if (filePath && fs.existsSync(filePath)) return filePath;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const filePath = session.servePath || session.spillPath;
+  return filePath && fs.existsSync(filePath) ? filePath : null;
+}
+
 function attachDuration(status, userId, fileId) {
   let durationSec = streamCache.getDurationSec(userId, fileId)
     || cache.get(userId, fileId)?.meta?.duration_sec;
@@ -180,13 +201,16 @@ async function streamChunked(req, res, userId, file, chunks, fileKey, user, { is
     }
   }
 
-  const safeEnd = Math.min(end, file.size - 1);
-  const filePath = session.servePath || session.spillPath;
+  let filePath = session.servePath || session.spillPath;
+  if ((!filePath || !fs.existsSync(filePath)) && isPlexClient(req)) {
+    filePath = await waitForServePath(session, start, end);
+  }
   if (!filePath || !fs.existsSync(filePath)) {
     if (!res.headersSent) res.status(503).json({ error: 'Stream buffer not ready — retry shortly' });
     return;
   }
 
+  const safeEnd = Math.min(end, file.size - 1);
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
   res.setHeader('Cache-Control', mediaCache.mediaCacheControl({ noCache: true }));

@@ -207,11 +207,12 @@ router.get('/status/:id', (req, res) => {
 router.get('/hls/:id/playlist.m3u8', async (req, res) => {
   try {
     const view = viewMode.parseViewParam(req.query.view);
-    const base = `/api/files/hls/${req.params.id}`;
     const fileRec = db.prepare('SELECT id, user_id, name FROM files WHERE id = ?').get(req.params.id);
     if (!fileRec) return res.status(404).send('#EXTM3U\n# File not found\n');
     const baseName = (fileRec.name || 'media').replace(/\.[^.]+$/, '');
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(baseName)}.m3u8"`);
+    const appUrl = require('../services/app-url');
+    const base = appUrl.publicUrl(req, `/api/files/hls/${req.params.id}`);
     await hlsStream.servePlaylist(req, res, fileRec.user_id, req.params.id, base, view);
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ error: err.message });

@@ -763,7 +763,9 @@ function getProgress(userId, playlistId) {
 
 function getContinueWatching(userId, limit = 20) {
   return db.prepare(`
-    SELECT pp.*, p.title AS playlist_title, f.name AS file_name, f.has_thumbnail, f.mime_type
+    SELECT pp.*, p.title AS playlist_title, f.name AS file_name, f.has_thumbnail, f.mime_type,
+           f.has_hls, f.chunk_count,
+           (SELECT COALESCE(SUM(duration), 0) FROM hls_segments WHERE file_id = f.id) AS hls_duration_sec
     FROM playlist_progress pp
     JOIN playlists p ON p.id = pp.playlist_id AND p.user_id = ?
     JOIN files f ON f.id = pp.file_id AND f.is_deleted = 0

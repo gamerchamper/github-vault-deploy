@@ -467,7 +467,10 @@ async function servePlaylist(req, res, userId, fileId, baseUrl, view = null) {
     if (file) {
       const streamCache = require('./stream-cache');
       if (streamCache.getFaststart(userId, fileId, file.size) || cache.get(userId, fileId)) {
-        return res.status(404).json({ error: 'HLS not needed — file cached' });
+        const appUrl = require('./app-url');
+        const stream = appUrl.publicUrl(req, `/api/files/stream/${fileId}`);
+        res.redirect(302, stream);
+        return;
       }
     }
   }

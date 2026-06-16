@@ -39,7 +39,7 @@ function playlistEntries(items, relDir) {
     const baseName = `${padIndex(i + 1)} - ${title}`;
     const strmRel = relPath(relDir, `${baseName}.strm`);
     const sidecarRel = relPath(relDir, `${baseName}.vault-item.json`);
-    entries.push({ path: strmRel, content: `${item.stream_url}\n` });
+    entries.push({ path: strmRel, content: `${item.strm_url || item.hls_url || item.stream_url}\n` });
     entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecarPayload(item), null, 2)}\n` });
     keepPaths.push(strmRel, sidecarRel);
   }
@@ -91,7 +91,7 @@ function buildSyncManifest(userId, req) {
       const baseName = `${padIndex(i + 1)} - ${safeName(label)}`;
       const strmRel = relPath('Continue Watching', `${baseName}.strm`);
       const sidecarRel = relPath('Continue Watching', `${baseName}.vault-item.json`);
-      manifest.entries.push({ path: strmRel, content: `${item.stream_url}\n` });
+      manifest.entries.push({ path: strmRel, content: `${item.strm_url || item.hls_url || item.stream_url}\n` });
       manifest.entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecarPayload(item), null, 2)}\n` });
       manifest.keep_paths.push(strmRel, sidecarRel);
       stats.files += 1;

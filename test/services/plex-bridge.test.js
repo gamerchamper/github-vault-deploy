@@ -12,6 +12,7 @@ describe('plex-bridge', () => {
       mime_type: 'video/mp4',
       has_thumbnail: 1,
       has_hls: 1,
+      chunk_count: 4,
       size: 1000,
     }, req);
 
@@ -19,6 +20,21 @@ describe('plex-bridge', () => {
     assert.match(item.stream_url, /\/api\/files\/stream\/file-1$/);
     assert.match(item.thumbnail_url, /\/api\/files\/thumbnail\/file-1$/);
     assert.match(item.hls_url, /\/api\/files\/hls\/file-1\/playlist\.m3u8$/);
+    assert.strictEqual(item.strm_url, item.hls_url);
+  });
+
+  it('mapItem uses progressive stream for non-chunked video', () => {
+    const item = plexBridge.mapItem({
+      id: 'file-2',
+      name: 'clip.mp4',
+      mime_type: 'video/mp4',
+      chunk_count: 1,
+      has_hls: 0,
+    }, req);
+
+    assert.match(item.stream_url, /\/api\/files\/stream\/file-2$/);
+    assert.strictEqual(item.hls_url, null);
+    assert.strictEqual(item.strm_url, item.stream_url);
   });
 
   it('mapContinueEntry uses file_id', () => {

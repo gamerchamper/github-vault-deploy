@@ -1,5 +1,6 @@
 const playlists = require('./playlists');
 const appUrl = require('./app-url');
+const mp4 = require('./mp4');
 
 function mediaBase(req) {
   return appUrl.getAppUrl(req);
@@ -16,6 +17,18 @@ function streamUrl(req, fileId) {
 
 function hlsUrl(req, fileId) {
   return `${mediaBase(req)}/api/files/hls/${fileId}/playlist.m3u8`;
+}
+
+/** Chunked vault MP4s need HLS for Plex — progressive /api/files/stream often 503s while decrypting. */
+function shouldUseHlsForPlex(item) {
+  const isVideo = (item.mime_type || '').startsWith('video/');
+  if (!isVideo || !mp4.isMp4(item.name, item.mime_type)) return false;
+  return (Number(item.chunk_count) || 0) >= 2 || !!item.has_hls;
+}
+
+function strmUrl(req, item) {
+  if (shouldUseHlsForPlex(item)) return hlsUrl(req, item.id);
+  return streamUrl(req, item.id);
 }
 
 function mapPlaylistSummary(playlist, req) {
@@ -62,7 +75,8 @@ function mapItem(item, req) {
     completed: item.completed,
     position_seconds: item.position_seconds,
     stream_url: streamUrl(req, item.id),
-    hls_url: item.has_hls ? hlsUrl(req, item.id) : null,
+    hls_url: shouldUseHlsForPlex(item) ? hlsUrl(req, item.id) : null,
+    strm_url: strmUrl(req, item),
     thumbnail_url: item.has_thumbnail ? thumbUrl(req, item.id) : null,
   };
 }
@@ -76,6 +90,7 @@ function mapContinueEntry(entry, req) {
       mime_type: entry.mime_type,
       has_thumbnail: entry.has_thumbnail,
       has_hls: entry.has_hls,
+      chunk_count: entry.chunk_count,
       hls_duration_sec: entry.hls_duration_sec,
       progress_pct: entry.progress_pct,
       completed: entry.completed,
