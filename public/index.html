@@ -1005,8 +1005,9 @@
             <input type="checkbox" id="settings-plex-sync-enabled">
             <span>Enable automatic Plex sync</span>
           </label>
-          <label class="form-label" for="settings-plex-library-path">Library folder</label>
-          <input type="text" id="settings-plex-library-path" class="form-input" placeholder="Auto-set on integrate" autocomplete="off" spellcheck="false">
+          <label class="form-label" for="settings-plex-library-path">Library folder (on Plex machine)</label>
+          <input type="text" id="settings-plex-library-path" class="form-input" placeholder="C:\Users\You\AppData\Local\Plex Media Server\GitHub Vault" autocomplete="off" spellcheck="false">
+          <p class="form-hint">Must exist on the Plex server and match what Plex can read. Create the folder first if needed.</p>
           <label class="form-label" for="settings-plex-server-url">Plex server URL</label>
           <input type="text" id="settings-plex-server-url" class="form-input" value="http://127.0.0.1:32400" autocomplete="off" spellcheck="false">
           <label class="form-label" for="settings-plex-token">Plex token</label>
@@ -1229,6 +1230,6 @@
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
   <script src="/js/local-upload.js?v=1.0.2"></script>
-  <script src="/js/app.js?v=1.0.15"></script>
+  <script src="/js/app.js?v=1.0.16"></script>
 </body>
 </html>

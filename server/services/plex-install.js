@@ -1,11 +1,36 @@
 const apiKeys = require('./api-keys');
 const appUrl = require('./app-url');
+const fs = require('fs');
+const path = require('path');
 const userSettings = require('./user-settings');
 const plexClient = require('./plex-client');
 const plexPatches = require('./plex-patches');
 const plexAutoSync = require('./plex-auto-sync');
 
 const LIBRARY_TITLE = 'GitHub Vault';
+
+function resolveLibraryPath(settings, body, serverUrl) {
+  const fromBody = String(body?.plex_library_path || '').trim();
+  const fromSettings = String(settings?.plex_library_path || '').trim();
+  const explicit = fromBody || fromSettings;
+  if (explicit) return explicit;
+
+  if (plexClient.isLocalPlexHost(serverUrl)) {
+    return plexPatches.ensureVaultLibraryDir(plexPatches.defaultPlexDataDir());
+  }
+
+  throw new Error(
+    'Set the library folder to a path on your Plex machine before integrating '
+    + '(e.g. C:\\Users\\You\\AppData\\Local\\Plex Media Server\\GitHub Vault). '
+    + 'Vault cannot guess this path when Plex is on another host.',
+  );
+}
+
+function shouldInstallLocalFiles(serverUrl) {
+  if (process.env.PLEX_INTEGRATE_LOCAL === '1') return true;
+  if (process.env.PLEX_INTEGRATE_LOCAL === '0') return false;
+  return plexClient.isLocalPlexHost(serverUrl);
+}
 
 function getOrCreateApiKey(userId) {
   const keys = apiKeys.listKeys(userId);
@@ -21,6 +46,7 @@ function getOrCreateApiKey(userId) {
 async function integratePlex(userId, req, {
   plexUrl,
   plexToken,
+  plexLibraryPath,
   patchBundled = true,
   runInitialSync = true,
 } = {}) {
@@ -29,8 +55,9 @@ async function integratePlex(userId, req, {
   if (!token) throw new Error('Plex token is required — paste it in Settings or pass plex_token');
 
   const serverUrl = plexUrl || settings.plex_server_url || plexClient.DEFAULT_PLEX_URL;
+  const libraryPath = resolveLibraryPath(settings, { plex_library_path: plexLibraryPath }, serverUrl);
+  const installLocal = shouldInstallLocalFiles(serverUrl);
   const paths = plexPatches.resolvePaths();
-  const libraryPath = plexPatches.ensureVaultLibraryDir(paths.plexDataDir);
   const vaultUrl = appUrl.getAppUrl(req);
   const keyInfo = getOrCreateApiKey(userId);
 
@@ -40,31 +67,36 @@ async function integratePlex(userId, req, {
 
   const steps = [];
 
-  const deployed = plexPatches.deployUserPlugins(paths.plexDataDir);
-  steps.push({ step: 'plugins', ok: true, detail: `Deployed ${deployed.length} bundle(s) to ${paths.pluginsDir}` });
+  if (installLocal) {
+    fs.mkdirSync(libraryPath, { recursive: true });
 
-  const prefFiles = plexPatches.writePluginPreferences(paths.plexDataDir, {
-    vaultUrl,
-    apiKey: keyInfo.key,
-  });
-  steps.push({ step: 'preferences', ok: true, detail: prefFiles });
+    const deployed = plexPatches.deployUserPlugins(paths.plexDataDir);
+    steps.push({ step: 'plugins', ok: true, detail: `Deployed ${deployed.length} bundle(s) to ${paths.pluginsDir}` });
 
-  if (patchBundled) {
-    const patchResult = plexPatches.applyBundledPatches(paths.bundledPluginsDir);
-    steps.push({
-      step: 'bundled_patches',
-      ok: patchResult.ok,
-      detail: patchResult.steps || [],
-      error: patchResult.error || null,
-      bundledPluginsDir: paths.bundledPluginsDir,
+    const prefFiles = plexPatches.writePluginPreferences(paths.plexDataDir, {
+      vaultUrl,
+      apiKey: keyInfo.key,
     });
-    if (!patchResult.ok) {
+    steps.push({ step: 'preferences', ok: true, detail: prefFiles });
+
+    if (patchBundled) {
+      const patchResult = plexPatches.applyBundledPatches(paths.bundledPluginsDir);
       steps.push({
-        step: 'bundled_patches_warning',
-        ok: false,
-        detail: 'Set PLEX_RESOURCES_DIR to your Plex Resources folder if auto-detect failed.',
+        step: 'bundled_patches',
+        ok: patchResult.ok,
+        detail: patchResult.steps || [],
+        error: patchResult.error || null,
+        bundledPluginsDir: paths.bundledPluginsDir,
       });
     }
+  } else {
+    steps.push({
+      step: 'remote_mode',
+      ok: true,
+      detail: 'Skipped local plugin/patch install — Plex is not on this server. '
+        + 'Copy bundles from integrate/plex/patches and re-run Integrate on the Plex machine, '
+        + 'or set PLEX_INTEGRATE_LOCAL=1 if vault shares Plex filesystem.',
+    });
   }
 
   await plexClient.testConnection(serverUrl, token);
@@ -79,13 +111,10 @@ async function integratePlex(userId, req, {
       scanner: 'GitHub Vault Scanner',
     });
   } catch (err) {
-    libraryResult = await plexClient.ensureLibrarySection(serverUrl, token, libraryPath, {
-      title: LIBRARY_TITLE,
-      type: 'show',
-      agent: 'com.plexapp.agents.none',
-      scanner: 'Plex Series Scanner',
-    });
-    steps.push({ step: 'library_fallback_scanner', ok: true, detail: err.message });
+    const hint = /400/.test(err.message)
+      ? ' Ensure the library folder exists on the Plex machine and Plex can read it.'
+      : '';
+    throw new Error(`${err.message}${hint}`);
   }
   steps.push({
     step: 'library',
@@ -103,21 +132,33 @@ async function integratePlex(userId, req, {
     plex_section_key: libraryResult.section?.key || null,
   });
 
-  const manifestPath = plexPatches.writeIntegrationManifest(paths.plexDataDir, {
-    integrated_at: new Date().toISOString(),
-    vault_url: vaultUrl,
-    library_path: libraryPath,
-    bundled_plugins_dir: paths.bundledPluginsDir,
-    plex_data_dir: paths.plexDataDir,
-    api_key_id: keyInfo.keyId,
-    api_key_preview: keyInfo.key ? `${keyInfo.key.slice(0, 8)}…` : null,
-  });
-  steps.push({ step: 'manifest', ok: true, path: manifestPath });
+  const manifestPath = installLocal
+    ? plexPatches.writeIntegrationManifest(paths.plexDataDir, {
+      integrated_at: new Date().toISOString(),
+      vault_url: vaultUrl,
+      library_path: libraryPath,
+      bundled_plugins_dir: paths.bundledPluginsDir,
+      plex_data_dir: paths.plexDataDir,
+      api_key_id: keyInfo.keyId,
+      api_key_preview: keyInfo.key ? `${keyInfo.key.slice(0, 8)}…` : null,
+      remote_plex: !installLocal,
+    })
+    : null;
+  if (manifestPath) steps.push({ step: 'manifest', ok: true, path: manifestPath });
 
   let syncResult = null;
   if (runInitialSync) {
-    syncResult = await plexAutoSync.runSyncForUser(userId, req, { force: true });
-    steps.push({ step: 'initial_sync', ok: true, stats: syncResult.stats });
+    if (!installLocal) {
+      steps.push({
+        step: 'initial_sync_skipped',
+        ok: false,
+        detail: 'Sync skipped — vault cannot write STRM files to a remote Plex path. '
+          + 'Run vault on the Plex machine or mount the library folder into vault.',
+      });
+    } else {
+      syncResult = await plexAutoSync.runSyncForUser(userId, req, { force: true });
+      steps.push({ step: 'initial_sync', ok: true, stats: syncResult.stats });
+    }
   }
 
   return {
@@ -130,8 +171,11 @@ async function integratePlex(userId, req, {
     api_key_reused: keyInfo.reused,
     steps,
     sync: syncResult,
-    restart_plex: true,
-    message: 'Integration complete. Restart Plex Media Server so patched plugins load.',
+    restart_plex: installLocal,
+    remote_plex: !installLocal,
+    message: installLocal
+      ? 'Integration complete. Restart Plex Media Server so patched plugins load.'
+      : 'Plex library linked remotely. Install plugins on the Plex machine and run vault locally for sync.',
   };
 }
 

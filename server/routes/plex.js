@@ -68,6 +68,7 @@ router.post('/integrate', async (req, res) => {
     const result = await plexInstall.integratePlex(req.user.id, req, {
       plexUrl: req.body?.plex_server_url,
       plexToken: req.body?.plex_token,
+      plexLibraryPath: req.body?.plex_library_path,
       patchBundled: req.body?.patch_bundled !== false,
       runInitialSync: req.body?.run_initial_sync !== false,
     });

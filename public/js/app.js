@@ -1129,14 +1129,22 @@ const App = {
     await App.withButton(btn, async () => {
       try {
         const tokenInput = document.getElementById('settings-plex-token')?.value?.trim();
+        const libraryPath = document.getElementById('settings-plex-library-path')?.value?.trim();
+        if (!libraryPath) {
+          this.toast('Set the library folder path on your Plex machine first', 'error');
+          return;
+        }
+        await this.saveSettings({ silent: true });
         const body = {
           plex_server_url: document.getElementById('settings-plex-server-url')?.value?.trim(),
+          plex_library_path: libraryPath,
         };
         if (tokenInput) body.plex_token = tokenInput;
         const result = await API.plex.integrate(body);
         const stats = result.sync?.stats || {};
+        const remoteNote = result.remote_plex ? ' (remote Plex — install plugins on Plex machine)' : '';
         this.toast(
-          `Plex integrated — library at ${result.library_path}${stats.files ? `, ${stats.files} files synced` : ''}. Restart Plex.`,
+          `Plex integrated — library at ${result.library_path}${stats.files ? `, ${stats.files} files synced` : ''}${remoteNote}`,
           'success',
         );
         const { settings } = await API.settings.get();
