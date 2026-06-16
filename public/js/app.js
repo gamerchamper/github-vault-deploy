@@ -1136,12 +1136,23 @@ const App = {
 
   async syncPlexToLocalFolder() {
     const btn = document.getElementById('btn-sync-plex-local');
+    if (!window.PlexLocalSync?.supported()) {
+      this.toast('Use Chrome or Edge on desktop to write files to a local folder', 'error');
+      return;
+    }
+
+    // showDirectoryPicker must run during the click gesture — before any await.
+    let folderPromise;
+    try {
+      folderPromise = PlexLocalSync.pickFolder();
+    } catch (err) {
+      this.toast(err.message, 'error');
+      return;
+    }
+
     await App.withButton(btn, async () => {
       try {
-        if (!window.PlexLocalSync?.supported()) {
-          this.toast('Use Chrome or Edge on desktop to write files to a local folder', 'error');
-          return;
-        }
+        const folder = await folderPromise;
         await this.saveSettings({ silent: true });
         const syncData = await API.plex.sync({ local_only: true });
         const manifest = syncData.manifest || (await API.plex.manifest()).manifest;
@@ -1150,7 +1161,6 @@ const App = {
           this.toast('Nothing to sync — add playlists in GitHub Vault first', 'info');
           return;
         }
-        const folder = await PlexLocalSync.pickFolder();
         const written = await PlexLocalSync.applyManifest(manifest, folder);
         try {
           await API.plex.refresh();
