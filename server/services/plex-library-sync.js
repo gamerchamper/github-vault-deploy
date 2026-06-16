@@ -24,6 +24,11 @@ function strmBaseName(index, item) {
   const title = safeName(item.title || item.id);
   const base = `${padIndex(index)} - ${title}`;
   const mime = item.mime_type || '';
+  if (mime.startsWith('audio/')) {
+    if (/\.(mp3|m4a|flac|ogg|wav|opus|aac)$/i.test(title)) return base;
+    if (/\.mp3$/i.test(item.title || '')) return `${base}.mp3`;
+    return `${base}.mp3`;
+  }
   if (!mime.startsWith('video/')) return base;
   if (/\.(mkv|webm|mp4|m4v|mov|avi)$/i.test(title)) return base;
   if (/\.mkv$/i.test(item.title || '')) return `${base}.mkv`;
@@ -34,26 +39,38 @@ function strmBaseName(index, item) {
 function sidecarPayload(item, probe = null) {
   const name = item.title || '';
   const isVideo = (item.mime_type || '').startsWith('video/');
+  const isAudio = (item.mime_type || '').startsWith('audio/');
   const fallback = {};
   if (isVideo && !probe?.container) {
     if (/\.mkv$/i.test(name)) fallback.container = 'mkv';
     else if (/\.webm$/i.test(name)) fallback.container = 'webm';
     else fallback.container = 'mp4';
   }
+  if (isAudio && !probe?.container) {
+    if (/\.m4a$/i.test(name)) fallback.container = 'm4a';
+    else fallback.container = 'mp3';
+  }
   if (isVideo && !probe?.video_codec) {
     fallback.video_codec = 'h264';
     fallback.audio_codec = 'aac';
   }
+  if (isAudio && !probe?.audio_codec) {
+    fallback.audio_codec = 'mp3';
+    fallback.audio_channels = 2;
+  }
+  const streamUrl = item.strm_url || item.stream_url || null;
   return {
     title: item.title || safeName(item.id) || 'Untitled',
     summary: item.summary || null,
     thumbnail_url: item.thumbnail_url || null,
     file_id: item.id || null,
     mime_type: item.mime_type || null,
+    stream_url: streamUrl,
+    size_bytes: item.size || probe?.size || null,
     position_seconds: item.position_seconds || null,
     duration_sec: probe?.duration_sec || item.duration_sec || null,
     ...fallback,
-    ...plexMediaProbe.sidecarProbeFields(probe),
+    ...plexMediaProbe.sidecarProbeFields(probe, { audioOnly: isAudio }),
   };
 }
 
@@ -77,8 +94,16 @@ async function playlistEntries(userId, items, relDir, req) {
     const strmRel = relPath(relDir, `${baseName}.strm`);
     const sidecarRel = relPath(relDir, `${baseName}.vault-item.json`);
     const sidecar = await sidecarPayloadForItem(userId, item, req);
+    const sidecarContent = `${JSON.stringify(sidecar, null, 2)}\n`;
     entries.push({ path: strmRel, content: `${item.strm_url || item.hls_url || item.stream_url}\n` });
-    entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecar, null, 2)}\n` });
+    entries.push({ path: sidecarRel, content: sidecarContent });
+    if (item.id) {
+      entries.push({
+        path: relPath('.vault-sidecars', `${item.id}.vault-item.json`),
+        content: sidecarContent,
+      });
+      keepPaths.push(relPath('.vault-sidecars', `${item.id}.vault-item.json`));
+    }
     keepPaths.push(strmRel, sidecarRel);
   }
   return { entries, count: items.length, keepPaths };
@@ -132,8 +157,16 @@ async function buildSyncManifest(userId, req) {
       const strmRel = relPath('Continue Watching', `${baseName}.strm`);
       const sidecarRel = relPath('Continue Watching', `${baseName}.vault-item.json`);
       const sidecar = await sidecarPayloadForItem(userId, item, req);
+      const sidecarContent = `${JSON.stringify(sidecar, null, 2)}\n`;
       manifest.entries.push({ path: strmRel, content: `${item.strm_url || item.hls_url || item.stream_url}\n` });
-      manifest.entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecar, null, 2)}\n` });
+      manifest.entries.push({ path: sidecarRel, content: sidecarContent });
+      if (item.id) {
+        manifest.entries.push({
+          path: relPath('.vault-sidecars', `${item.id}.vault-item.json`),
+          content: sidecarContent,
+        });
+        manifest.keep_paths.push(relPath('.vault-sidecars', `${item.id}.vault-item.json`));
+      }
       manifest.keep_paths.push(strmRel, sidecarRel);
       stats.files += 1;
     }
@@ -200,7 +233,7 @@ function pruneRemoved(output, keepRelativePaths) {
       }
     }
   };
-  for (const sub of ['Playlists', 'Collections', 'Continue Watching']) {
+  for (const sub of ['Playlists', 'Collections', 'Continue Watching', '.vault-sidecars']) {
     const subPath = path.join(output, sub);
     if (fs.existsSync(subPath)) walk(subPath);
   }

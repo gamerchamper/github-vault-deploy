@@ -145,7 +145,7 @@ async function verifyIntegration(userId, req, { fileId = null, libraryPath = nul
       'Settings → Manage → Plugins — GitHub Vault should be listed',
       'Library → ⋯ → Manage Library → Edit → Advanced → Agent → choose "GitHub Vault" (legacy UI, not cloud providers)',
       'Or run: PLEX_TOKEN=... npm run plex:install-agent — or npm run plex:test-agent -- --apply',
-      'Re-sync STRM files — sync writes sidecars then injects container/streams into Plex library DB (Plex agents cannot set metadata.media on movies)',
+      'Re-sync STRM files — sync writes sidecars, injects stream metadata into Plex DB, and applies episode thumbnails via Plex API',
       'Restart Plex Media Server after sync, then retry playback',
     ],
   };

@@ -32,6 +32,35 @@ function loadSidecar(strmPath) {
   }
 }
 
+function readStrmUrl(strmPath) {
+  if (!strmPath || !fs.existsSync(strmPath)) return null;
+  try {
+    const line = fs.readFileSync(strmPath, 'utf8').trim().split(/\r?\n/)[0].trim();
+    return /^https?:\/\//i.test(line) ? line : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function partNeedsRemoteUrl(partFile) {
+  if (!partFile) return true;
+  if (/^https?:\/\//i.test(partFile)) return false;
+  return /\.strm$/i.test(partFile);
+}
+
+function sidecarSizeBytes(sidecar) {
+  const raw = sidecar?.size_bytes ?? sidecar?.size;
+  const size = Number(raw);
+  return Number.isFinite(size) && size > 0 ? Math.round(size) : null;
+}
+
+function isAudioSidecar(sidecar) {
+  const mime = String(sidecar?.mime_type || '').toLowerCase();
+  if (mime.startsWith('audio/')) return true;
+  const container = String(sidecar?.container || '').toLowerCase();
+  return ['mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav', 'aac'].includes(container);
+}
+
 function durationMs(sidecar) {
   const raw = sidecar?.duration_sec;
   if (raw == null || raw === '') return null;
@@ -43,9 +72,29 @@ function durationMs(sidecar) {
 function sidecarToMediaFields(sidecar) {
   if (!sidecar || sidecar.error) return null;
   const duration = durationMs(sidecar);
+  const bitrate = Number(sidecar.bitrate) || null;
+  const audioOnly = isAudioSidecar(sidecar);
+
+  if (audioOnly) {
+    let container = sidecar.container || 'mp3';
+    if (!container && String(sidecar.mime_type || '').includes('mpeg')) container = 'mp3';
+    return {
+      container,
+      duration,
+      video_codec: null,
+      audio_codec: sidecar.audio_codec || sidecar.audioCodec || 'mp3',
+      audio_channels: Number(sidecar.audio_channels) || 2,
+      width: null,
+      height: null,
+      bitrate: bitrate ? Math.round(bitrate / 1000) : null,
+      display_aspect_ratio: null,
+      video_profile: null,
+      audioOnly: true,
+    };
+  }
+
   const width = Number(sidecar.width) || null;
   const height = Number(sidecar.height) || null;
-  const bitrate = Number(sidecar.bitrate) || null;
   let container = sidecar.container || 'mp4';
   if (!container && String(sidecar.mime_type || '').includes('mp4')) container = 'mp4';
 
@@ -63,6 +112,7 @@ function sidecarToMediaFields(sidecar) {
     bitrate: bitrate ? Math.round(bitrate / 1000) : null,
     display_aspect_ratio: aspect,
     video_profile: sidecar.video_profile || 'high',
+    audioOnly: false,
   };
 }
 
@@ -77,7 +127,75 @@ function partHasStreams(db, partId) {
   return (row?.n || 0) >= 2;
 }
 
-function injectSidecarIntoMediaRow(db, mediaItemId, partId, sidecar) {
+function partHasRequiredStreams(db, partId, audioOnly = false) {
+  if (audioOnly) {
+    const row = db.prepare(
+      'SELECT COUNT(*) AS n FROM media_streams WHERE media_part_id = ? AND stream_type_id = ?',
+    ).get(partId, STREAM_AUDIO);
+    return (row?.n || 0) >= 1;
+  }
+  return partHasStreams(db, partId);
+}
+
+function metadataNeedsThumbnail(db, metadataItemId, thumbnailUrl) {
+  if (!thumbnailUrl || !metadataItemId) return false;
+  const row = db.prepare(
+    'SELECT user_thumb_url FROM metadata_items WHERE id = ?',
+  ).get(metadataItemId);
+  return !row || row.user_thumb_url !== thumbnailUrl;
+}
+
+function injectThumbnailIntoMetadata(db, metadataItemId, sidecar) {
+  const thumbnailUrl = sidecar?.thumbnail_url;
+  if (!thumbnailUrl || !metadataItemId) {
+    return { patched: false, reason: 'no_thumbnail' };
+  }
+  if (!metadataNeedsThumbnail(db, metadataItemId, thumbnailUrl)) {
+    return { patched: false, skipped: true, thumbnail_url: thumbnailUrl };
+  }
+
+  const ts = nowDt();
+  try {
+    const existing = db.prepare(
+      'SELECT user_art_url FROM metadata_items WHERE id = ?',
+    ).get(metadataItemId);
+    const artUrl = existing?.user_art_url || thumbnailUrl;
+    db.prepare(`
+      UPDATE metadata_items SET
+        user_thumb_url = @thumbnailUrl,
+        user_art_url = @artUrl,
+        updated_at = @ts
+      WHERE id = @metadataItemId
+    `).run({ thumbnailUrl, artUrl, ts, metadataItemId });
+  } catch (err) {
+    return { patched: false, reason: err.message };
+  }
+
+  return { patched: true, thumbnail_url: thumbnailUrl };
+}
+
+function patchPartToRemoteUrl(db, partId, strmPath, sidecar) {
+  const remoteUrl = readStrmUrl(strmPath);
+  if (!remoteUrl) {
+    return { patched: false, reason: 'no_strm_url' };
+  }
+
+  const ts = nowDt();
+  const size = sidecarSizeBytes(sidecar);
+  if (size) {
+    db.prepare(`
+      UPDATE media_parts SET file = @file, size = @size, updated_at = @ts WHERE id = @partId
+    `).run({ file: remoteUrl, size, ts, partId });
+  } else {
+    db.prepare(`
+      UPDATE media_parts SET file = @file, updated_at = @ts WHERE id = @partId
+    `).run({ file: remoteUrl, ts, partId });
+  }
+
+  return { patched: true, remote_url: remoteUrl, size };
+}
+
+function injectSidecarIntoMediaRow(db, mediaItemId, partId, sidecar, strmPath = null) {
   const fields = sidecarToMediaFields(sidecar);
   if (!fields) {
     return { ok: false, reason: 'invalid_sidecar' };
@@ -116,20 +234,39 @@ function injectSidecarIntoMediaRow(db, mediaItemId, partId, sidecar) {
   }
 
   let streamsAdded = 0;
-  if (!partHasStreams(db, partId)) {
-    db.prepare(`
-      INSERT INTO media_streams (
-        stream_type_id, media_item_id, codec, "index", media_part_id, channels, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(STREAM_VIDEO, mediaItemId, fields.video_codec, 0, partId, null, ts, ts);
-    streamsAdded += 1;
+  if (!partHasRequiredStreams(db, partId, fields.audioOnly)) {
+    if (!fields.audioOnly) {
+      db.prepare(`
+        INSERT INTO media_streams (
+          stream_type_id, media_item_id, codec, "index", media_part_id, channels, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(STREAM_VIDEO, mediaItemId, fields.video_codec, 0, partId, null, ts, ts);
+      streamsAdded += 1;
+    }
 
     db.prepare(`
       INSERT INTO media_streams (
         stream_type_id, media_item_id, codec, "index", media_part_id, channels, created_at, updated_at, "default"
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(STREAM_AUDIO, mediaItemId, fields.audio_codec, 1, partId, fields.audio_channels, ts, ts, 1);
+    `).run(
+      STREAM_AUDIO,
+      mediaItemId,
+      fields.audio_codec,
+      fields.audioOnly ? 0 : 1,
+      partId,
+      fields.audio_channels,
+      ts,
+      ts,
+      1,
+    );
     streamsAdded += 1;
+  }
+
+  let remote = null;
+  if (strmPath && partNeedsRemoteUrl(
+    db.prepare('SELECT file FROM media_parts WHERE id = ?').get(partId)?.file,
+  )) {
+    remote = patchPartToRemoteUrl(db, partId, strmPath, sidecar);
   }
 
   return {
@@ -137,6 +274,9 @@ function injectSidecarIntoMediaRow(db, mediaItemId, partId, sidecar) {
     container: fields.container,
     duration: fields.duration,
     streams_added: streamsAdded,
+    audio_only: fields.audioOnly,
+    remote_url: remote?.remote_url || null,
+    part_size: remote?.size || null,
   };
 }
 
@@ -144,8 +284,35 @@ function normalizePathCompare(p) {
   return path.resolve(String(p || '')).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
-function listStrmMediaRows(db, libraryPath, sectionKey = null) {
-  const prefix = normalizePathCompare(libraryPath);
+function normalizeFileCompare(p) {
+  return path.resolve(String(p || '')).replace(/\\/g, '/').toLowerCase();
+}
+
+function listStrmFiles(libraryPath) {
+  if (!libraryPath || !fs.existsSync(libraryPath)) return [];
+  const root = path.resolve(libraryPath);
+  const files = [];
+  const stack = [root];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (/\.strm$/i.test(entry.name)) files.push(full);
+    }
+  }
+  return files;
+}
+
+function findMediaRowForStrm(db, strmPath, sectionKey = null) {
+  const streamUrl = readStrmUrl(strmPath);
+  const strmNorm = normalizeFileCompare(strmPath);
   let sql = `
     SELECT
       mi.id AS media_item_id,
@@ -157,8 +324,7 @@ function listStrmMediaRows(db, libraryPath, sectionKey = null) {
       mi.library_section_id
     FROM media_parts mp
     JOIN media_items mi ON mi.id = mp.media_item_id
-    WHERE mp.file LIKE '%.strm'
-      AND mi.deleted_at IS NULL
+    WHERE mi.deleted_at IS NULL
       AND mp.deleted_at IS NULL
   `;
   const params = [];
@@ -167,7 +333,22 @@ function listStrmMediaRows(db, libraryPath, sectionKey = null) {
     params.push(Number(sectionKey));
   }
   const rows = db.prepare(sql).all(...params);
-  return rows.filter((row) => normalizePathCompare(row.part_file).includes(prefix));
+  for (const row of rows) {
+    const fileNorm = normalizeFileCompare(row.part_file);
+    if (fileNorm === strmNorm) {
+      return { ...row, strm_path: strmPath };
+    }
+    if (streamUrl && row.part_file === streamUrl) {
+      return { ...row, strm_path: strmPath, remote: true };
+    }
+  }
+  return null;
+}
+
+function listStrmMediaRows(db, libraryPath, sectionKey = null) {
+  return listStrmFiles(libraryPath)
+    .map((strmPath) => findMediaRowForStrm(db, strmPath, sectionKey))
+    .filter(Boolean);
 }
 
 function repairVaultLibraryFromSidecars(libraryPath, {
@@ -191,18 +372,22 @@ function repairVaultLibraryFromSidecars(libraryPath, {
 
   const tx = db.transaction(() => {
     for (const row of rows) {
-      const sidecar = loadSidecar(row.part_file);
+      const sidecar = loadSidecar(row.strm_path || row.part_file);
       if (!sidecar || sidecar.error) {
         results.push({
-          part_file: row.part_file,
+          part_file: row.strm_path || row.part_file,
           ok: false,
           reason: sidecar?.error ? `sidecar_error: ${sidecar.error}` : 'missing_sidecar',
         });
         continue;
       }
 
-      if (row.container && row.duration && partHasStreams(db, row.part_id)) {
-        results.push({ part_file: row.part_file, ok: true, skipped: true });
+      const fields = sidecarToMediaFields(sidecar);
+      const streamsOk = partHasRequiredStreams(db, row.part_id, fields?.audioOnly);
+      const metaComplete = row.container && row.duration && streamsOk;
+      const needsRemote = partNeedsRemoteUrl(row.part_file);
+      if (metaComplete && !needsRemote) {
+        results.push({ part_file: row.strm_path || row.part_file, ok: true, skipped: true });
         continue;
       }
 
@@ -216,8 +401,14 @@ function repairVaultLibraryFromSidecars(libraryPath, {
         continue;
       }
 
-      const inject = injectSidecarIntoMediaRow(db, row.media_item_id, row.part_id, sidecar);
-      results.push({ part_file: row.part_file, ...inject });
+      const inject = injectSidecarIntoMediaRow(
+        db,
+        row.media_item_id,
+        row.part_id,
+        sidecar,
+        row.strm_path || row.part_file,
+      );
+      results.push({ part_file: row.strm_path || row.part_file, ...inject });
       if (inject.ok) repaired += 1;
     }
   });
@@ -241,7 +432,12 @@ module.exports = {
   defaultPlexLibraryDbPath,
   sidecarPathForStrm,
   loadSidecar,
+  readStrmUrl,
+  partNeedsRemoteUrl,
+  isAudioSidecar,
   sidecarToMediaFields,
+  patchPartToRemoteUrl,
+  injectThumbnailIntoMetadata,
   injectSidecarIntoMediaRow,
   listStrmMediaRows,
   repairVaultLibraryFromSidecars,

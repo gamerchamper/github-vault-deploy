@@ -63,7 +63,6 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
     }
 
     let refresh = null;
-    let analyze = null;
     let repair = null;
     let agentApply = null;
     if (sectionKey) {
@@ -80,16 +79,11 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
         }
       }
       refresh = await plexClient.refreshLibrary(plexUrl, token, sectionKey, { force: true });
-      await sleep(5000);
-      try {
-        analyze = await plexClient.analyzeLibrary(plexUrl, token, sectionKey);
-      } catch (analyzeErr) {
-        analyze = { analyzed: false, error: analyzeErr.message };
-      }
+      await sleep(8000);
       try {
         repair = await plexMetadataRepair.repairSectionMetadata(plexUrl, token, sectionKey, {
           libraryPath: settings.plex_library_path,
-          delayMs: 2000,
+          delayMs: 1000,
           skipAnalyze: true,
         });
       } catch (repairErr) {
@@ -102,7 +96,6 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
       ...syncResult,
       agent_apply: agentApply,
       refresh,
-      analyze,
       repair,
       section_key: sectionKey,
     };

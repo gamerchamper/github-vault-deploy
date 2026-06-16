@@ -141,6 +141,37 @@ async function refreshMetadataItem(plexUrl, token, ratingKey, { force = false } 
   return { refreshed: true, ratingKey: String(ratingKey), force: !!force };
 }
 
+async function setMetadataPoster(plexUrl, token, ratingKey, {
+  thumbUrl = null,
+  artUrl = null,
+  lock = true,
+} = {}) {
+  if (!ratingKey) throw new Error('Plex metadata rating key is required');
+  if (!thumbUrl && !artUrl) throw new Error('thumbUrl or artUrl is required');
+  const fields = {};
+  if (thumbUrl) {
+    fields['thumb.url'] = thumbUrl;
+    if (lock) fields['thumb.locked'] = 1;
+  }
+  if (artUrl) {
+    fields['art.url'] = artUrl;
+    if (lock) fields['art.locked'] = 1;
+  }
+  await plexFormWrite(
+    plexUrl,
+    token,
+    `/library/metadata/${encodeURIComponent(ratingKey)}`,
+    fields,
+    { method: 'PUT' },
+  );
+  return {
+    ok: true,
+    ratingKey: String(ratingKey),
+    thumb_url: thumbUrl || null,
+    art_url: artUrl || null,
+  };
+}
+
 function flattenMetadata(container) {
   const raw = container?.Metadata ?? container?.metadata ?? [];
   return Array.isArray(raw) ? raw : (raw ? [raw] : []);
@@ -463,6 +494,7 @@ module.exports = {
   analyzeLibrary,
   analyzeMetadataItem,
   refreshMetadataItem,
+  setMetadataPoster,
   listSectionMetadata,
   metadataMediaSummary,
   metadataNeedsAnalysis,

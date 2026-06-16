@@ -1,3 +1,4 @@
+const fs = require('fs');
 const plexClient = require('./plex-client');
 const sidecarDbRepair = require('./plex-sidecar-db-repair');
 
@@ -7,7 +8,8 @@ function sleep(ms) {
 
 /**
  * Inject container/duration/streams from .vault-item.json sidecars into Plex library DB.
- * Plex Movie agent models cannot set metadata.media — scanner leaves STRM items empty.
+ * Also rewrites media_parts.file from local .strm paths to the remote stream URL so Plex
+ * Transcoder fetches HTTP media instead of passing the 26-byte STRM text file to ffmpeg.
  */
 function repairSectionFromSidecars(libraryPath, sectionKey) {
   if (!libraryPath) {
@@ -17,7 +19,77 @@ function repairSectionFromSidecars(libraryPath, sectionKey) {
 }
 
 /**
- * Re-run sidecar DB repair, then agent refresh on items still missing media info.
+ * Apply vault thumbnail_url values through the Plex HTTP API.
+ * Direct metadata_items writes fail on Plex's custom SQLite tokenizer.
+ */
+async function applySidecarThumbnailsViaPlex(plexUrl, token, libraryPath, {
+  sectionKey = null,
+  dbPath = null,
+  itemDelayMs = 150,
+} = {}) {
+  if (!libraryPath) {
+    return { ok: false, error: 'libraryPath is required for thumbnail repair' };
+  }
+  if (!plexUrl || !token) {
+    return { ok: false, error: 'Plex URL and token are required for thumbnail repair' };
+  }
+
+  const resolvedDb = dbPath || sidecarDbRepair.defaultPlexLibraryDbPath();
+  if (!resolvedDb || !fs.existsSync(resolvedDb)) {
+    return { ok: false, error: 'Plex library database not found', db_path: resolvedDb };
+  }
+
+  const Database = require('better-sqlite3');
+  const db = new Database(resolvedDb, { readonly: true });
+  const rows = sidecarDbRepair.listStrmMediaRows(db, libraryPath, sectionKey);
+  db.close();
+
+  const results = [];
+  for (const row of rows) {
+    const sidecar = sidecarDbRepair.loadSidecar(row.strm_path || row.part_file);
+    const thumbUrl = sidecar?.thumbnail_url;
+    if (!thumbUrl || !row.metadata_item_id) {
+      results.push({
+        metadata_id: row.metadata_item_id || null,
+        part_file: row.strm_path || row.part_file,
+        ok: false,
+        reason: thumbUrl ? 'missing_metadata_id' : 'missing_thumbnail',
+      });
+      continue;
+    }
+
+    try {
+      await plexClient.setMetadataPoster(plexUrl, token, row.metadata_item_id, {
+        thumbUrl,
+        artUrl: sidecar.art_url || thumbUrl,
+      });
+      results.push({
+        metadata_id: row.metadata_item_id,
+        part_file: row.strm_path || row.part_file,
+        ok: true,
+        thumbnail_url: thumbUrl,
+      });
+    } catch (err) {
+      results.push({
+        metadata_id: row.metadata_item_id,
+        part_file: row.strm_path || row.part_file,
+        ok: false,
+        error: err.message,
+      });
+    }
+    if (itemDelayMs > 0) await sleep(itemDelayMs);
+  }
+
+  return {
+    ok: true,
+    total: rows.length,
+    applied: results.filter((entry) => entry.ok).length,
+    results,
+  };
+}
+
+/**
+ * Re-run sidecar DB repair, apply posters via Plex API, then refresh items still missing media info.
  */
 async function repairSectionMetadata(plexUrl, token, sectionKey, {
   libraryPath = null,
@@ -29,8 +101,14 @@ async function repairSectionMetadata(plexUrl, token, sectionKey, {
   if (!sectionKey) throw new Error('Plex library section key is required');
 
   let sidecarDb = null;
+  let thumbnails = null;
   if (libraryPath) {
     sidecarDb = repairSectionFromSidecars(libraryPath, sectionKey);
+    try {
+      thumbnails = await applySidecarThumbnailsViaPlex(plexUrl, token, libraryPath, { sectionKey });
+    } catch (err) {
+      thumbnails = { ok: false, error: err.message };
+    }
   }
 
   if (delayMs > 0) await sleep(delayMs);
@@ -67,11 +145,13 @@ async function repairSectionMetadata(plexUrl, token, sectionKey, {
     repaired: results.filter((entry) => entry.ok).length,
     still_broken: stillBroken,
     sidecar_db: sidecarDb,
+    thumbnails,
     results,
   };
 }
 
 module.exports = {
   repairSectionFromSidecars,
+  applySidecarThumbnailsViaPlex,
   repairSectionMetadata,
 };

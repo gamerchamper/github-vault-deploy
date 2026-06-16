@@ -52,6 +52,8 @@ function inferProbeFromFile(file) {
   }
   if (/\.mkv$/i.test(name)) probe.container = 'mkv';
   else if (/\.webm$/i.test(name)) probe.container = 'webm';
+  else if (/\.mp3$/i.test(name)) probe.container = 'mp3';
+  else if (/\.m4a$/i.test(name)) probe.container = 'm4a';
   else if (/\.mp4$/i.test(name) || mp4.isMp4(name, mime)) probe.container = 'mp4';
 
   return Object.keys(probe).length ? probe : null;
@@ -113,7 +115,7 @@ async function getProbeInfo(userId, fileOrId, req, { allowRemoteProbe = false } 
   return { ...inferProbeFromFile(file), ...cached };
 }
 
-function sidecarProbeFields(probe) {
+function sidecarProbeFields(probe, { audioOnly = false } = {}) {
   if (!probe) return {};
   const videoResolution = probe.video_resolution || mp4.videoResolutionLabel(probe.height);
   const fields = {
@@ -128,6 +130,13 @@ function sidecarProbeFields(probe) {
     video_resolution: videoResolution || null,
     bitrate: probe.bitrate || null,
   };
+  if (audioOnly) {
+    delete fields.video_codec;
+    delete fields.video_profile;
+    delete fields.width;
+    delete fields.height;
+    delete fields.video_resolution;
+  }
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value != null));
 }
 

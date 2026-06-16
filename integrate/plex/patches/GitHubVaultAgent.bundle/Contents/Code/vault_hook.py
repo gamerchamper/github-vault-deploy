@@ -46,6 +46,58 @@ def is_vault_stream_url(url):
   return any(marker in normalized for marker in VAULT_URL_MARKERS)
 
 
+def extract_file_id_from_stream_url(url):
+  if not url:
+    return None
+  try:
+    normalized = url.replace('\\', '/')
+    marker = '/api/files/stream/'
+    if marker not in normalized:
+      return None
+    tail = normalized.split(marker, 1)[1]
+    file_id = tail.split('/', 1)[0].strip()
+    if len(file_id) == 36:
+      return file_id
+  except Exception:
+    pass
+  return None
+
+
+def is_audio_sidecar(sidecar):
+  if not sidecar:
+    return False
+  mime = (sidecar.get('mime_type') or '').lower()
+  if mime.startswith('audio/'):
+    return True
+  container = (sidecar.get('container') or '').lower()
+  return container in ('mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav', 'aac')
+
+
+def resolve_vault_library_root(file_path):
+  if not file_path or is_vault_stream_url(file_path):
+    return None
+  try:
+    current = os.path.dirname(os.path.abspath(file_path))
+    while current and len(current) > 3:
+      if is_vault_path(current):
+        return current
+      parent = os.path.dirname(current)
+      if parent == current:
+        break
+      current = parent
+  except Exception:
+    pass
+  return None
+
+
+def vault_library_root_from_media(media):
+  for file_path in collect_media_part_files(media):
+    root = resolve_vault_library_root(file_path)
+    if root:
+      return root
+  return None
+
+
 def has_vault_sidecar(file_path):
   if not file_path:
     return False
@@ -64,12 +116,27 @@ def is_vault_item(file_path):
   return is_vault_stream_url(read_strm_url(file_path))
 
 
-def load_sidecar(file_path):
+def load_sidecar(file_path, library_root=None):
+  if is_vault_stream_url(file_path):
+    file_id = extract_file_id_from_stream_url(file_path)
+    if file_id and library_root:
+      candidate = os.path.join(library_root, '.vault-sidecars', file_id + '.vault-item.json')
+      text = read_text_file(candidate)
+      if text:
+        try:
+          return JSON.ObjectFromString(text)
+        except Exception, err:
+          Log('[GitHub Vault] sidecar read failed (%s): %s' % (candidate, err))
+
   base, ext = os.path.splitext(file_path)
   candidates = [
     base + '.vault-item.json',
     os.path.join(os.path.dirname(file_path), '.vault-item.json'),
   ]
+  root = library_root or resolve_vault_library_root(file_path)
+  file_id = extract_file_id_from_stream_url(read_strm_url(file_path) or (file_path if is_vault_stream_url(file_path) else ''))
+  if file_id and root:
+    candidates.insert(0, os.path.join(root, '.vault-sidecars', file_id + '.vault-item.json'))
   for candidate in candidates:
     if not os.path.isfile(candidate):
       continue
@@ -120,8 +187,16 @@ def infer_container(sidecar, file_path):
     return 'mkv'
   if mime.startswith('video/'):
     return 'mp4'
+  if mime.startswith('audio/') or 'mpeg' in mime or 'mp3' in mime:
+    if 'mp4' in mime or 'm4a' in mime:
+      return 'm4a'
+    return 'mp3'
 
   name = os.path.basename(file_path or '').lower()
+  if name.endswith('.mp3.strm') or '.mp3.' in name:
+    return 'mp3'
+  if name.endswith('.m4a.strm') or '.m4a.' in name:
+    return 'm4a'
   if name.endswith('.mkv.strm') or '.mkv.' in name:
     return 'mkv'
   if name.endswith('.webm.strm') or '.webm.' in name:
@@ -138,6 +213,13 @@ def infer_container(sidecar, file_path):
       return 'webm'
     if url_lower.endswith('.mp4') or url_lower.endswith('.m4v'):
       return 'mp4'
+    if url_lower.endswith('.mp3'):
+      return 'mp3'
+    if url_lower.endswith('.m4a'):
+      return 'm4a'
+
+  if is_audio_sidecar(sidecar):
+    return sidecar.get('container') or 'mp3'
 
   return 'mp4'
 
@@ -147,6 +229,56 @@ def safe_attr(obj, name, default=None):
     return getattr(obj, name)
   except Exception:
     return default
+
+
+def read_metadata_media(metadata):
+  """Plex MetadataObject.media — use direct access; getattr often fails in RestrictedPython."""
+  if not metadata:
+    return None
+  try:
+    return metadata.media
+  except Exception, err:
+    Log('[GitHub Vault] metadata.media read failed: %s' % err)
+  return None
+
+
+def ensure_metadata_media(metadata, video_codec, video_profile, audio_codec=None, audio_only=False):
+  media_kit = read_metadata_media(metadata)
+  if media_kit:
+    return media_kit
+
+  if audio_only:
+    codec = audio_codec or 'mp3'
+    try:
+      metadata.media.addAudioCodec(codec)
+      media_kit = read_metadata_media(metadata)
+      if media_kit:
+        Log('[GitHub Vault] created metadata.media via addAudioCodec(%s)' % codec)
+        return media_kit
+    except Exception, err:
+      Log('[GitHub Vault] addAudioCodec failed: %s' % err)
+  else:
+    profile = video_profile or 'high'
+    codec = video_codec or 'h264'
+    try:
+      metadata.media.addVideoCodec(codec, profile)
+      media_kit = read_metadata_media(metadata)
+      if media_kit:
+        Log('[GitHub Vault] created metadata.media via addVideoCodec(%s, %s)' % (codec, profile))
+        return media_kit
+    except Exception, err:
+      Log('[GitHub Vault] addVideoCodec failed: %s' % err)
+
+  try:
+    metadata.media.add()
+    media_kit = read_metadata_media(metadata)
+    if media_kit:
+      Log('[GitHub Vault] created metadata.media via media.add()')
+      return media_kit
+  except Exception, err:
+    Log('[GitHub Vault] media.add failed: %s' % err)
+
+  return None
 
 
 def collect_media_part_files(media):
@@ -229,12 +361,15 @@ def apply_part_streams(part, sidecar):
   if not part:
     return False
 
+  audio_only = is_audio_sidecar(sidecar)
   has_video, has_audio = part_stream_flags(part)
-  if has_video and has_audio:
+  if audio_only and has_audio:
+    return False
+  if not audio_only and has_video and has_audio:
     return False
 
   video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or 'h264'
-  audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or 'aac'
+  audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or ('mp3' if audio_only else 'aac')
   video_profile = sidecar.get('video_profile') or 'high'
   audio_channels = sidecar.get('audio_channels') or 2
   width = sidecar.get('width')
@@ -242,7 +377,7 @@ def apply_part_streams(part, sidecar):
   bitrate = sidecar.get('bitrate')
   touched = False
 
-  if not has_video:
+  if not has_video and not audio_only:
     video = None
     try:
       video = part.addStream(1)
@@ -304,7 +439,7 @@ def apply_part_streams(part, sidecar):
     if audio is not None:
       try:
         audio.codec = audio_codec
-        audio.index = 1
+        audio.index = 0 if audio_only else 1
         audio.channels = int(audio_channels)
         audio.selected = True
         touched = True
@@ -335,14 +470,10 @@ def apply_media_technical(metadata, sidecar, file_path):
   if not sidecar:
     sidecar = {}
 
-  media_kit = safe_attr(metadata, 'media')
-  if not media_kit:
-    Log('[GitHub Vault] metadata has no media kit — descriptive fields only (use GitHub Vault agent as primary for streams)')
-    return False
-
   container = infer_container(sidecar, file_path)
-  video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or 'h264'
-  audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or 'aac'
+  audio_only = is_audio_sidecar(sidecar)
+  video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or ('h264' if not audio_only else None)
+  audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or ('mp3' if audio_only else 'aac')
   video_profile = sidecar.get('video_profile') or 'high'
   audio_channels = sidecar.get('audio_channels') or 2
   width = sidecar.get('width')
@@ -357,6 +488,11 @@ def apply_media_technical(metadata, sidecar, file_path):
     except Exception:
       duration_ms = None
 
+  media_kit = ensure_metadata_media(metadata, video_codec, video_profile, audio_codec, audio_only)
+  if not media_kit:
+    Log('[GitHub Vault] technical media skipped — Plex Movie agents have no metadata.media; use vault sync DB repair')
+    return False
+
   touched = False
   try:
     media_items = list(media_kit) if media_kit else []
@@ -365,16 +501,11 @@ def apply_media_technical(metadata, sidecar, file_path):
 
   if not media_items:
     try:
-      media_items = [media_kit.addVideoCodec(video_codec, video_profile)]
+      media_items = [media_kit.add()]
       touched = True
-    except Exception, err:
-      Log('[GitHub Vault] addVideoCodec failed: %s' % err)
-      try:
-        media_items = [media_kit.add()]
-        touched = True
-      except Exception, err2:
-        Log('[GitHub Vault] media.add failed: %s' % err2)
-        return False
+    except Exception, err2:
+      Log('[GitHub Vault] media.add failed: %s' % err2)
+      return False
 
   for media in media_items:
     if container:
@@ -459,6 +590,10 @@ def apply_sidecar(metadata, sidecar, file_path):
   thumb = sidecar.get('thumbnail_url')
   if thumb:
     metadata.thumbs[thumb] = Proxy.Media(thumb)
+    try:
+      metadata.posters[thumb] = Proxy.Media(thumb)
+    except Exception:
+      pass
     if not metadata.art:
       metadata.art = thumb
 
@@ -508,6 +643,7 @@ def resolve_episode_metadata(metadata, media, file_path):
 
 def enrich_all(metadata, media, label, for_tv=False):
   touched = False
+  library_root = vault_library_root_from_media(media)
   for file_path in collect_media_part_files(media):
     if not is_vault_item(file_path):
       continue
@@ -515,7 +651,7 @@ def enrich_all(metadata, media, label, for_tv=False):
       target = resolve_episode_metadata(metadata, media, file_path)
     else:
       target = metadata
-    sidecar = load_sidecar(file_path) or {}
+    sidecar = load_sidecar(file_path, library_root) or {}
     apply_sidecar(target, sidecar, file_path)
     touched = True
     Log('[GitHub Vault] enriched %s metadata for %s' % (label, file_path))
