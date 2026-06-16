@@ -10,21 +10,30 @@ const AGENT_BUNDLE_NAME = 'GitHubVaultAgent.bundle';
 const AGENT_PATCH_SRC = path.join(PATCHES_ROOT, AGENT_BUNDLE_NAME);
 const CHANNEL_BUNDLE_SRC = path.join(PORTABLE_PLUGINS_DIR, 'GitHubVault.bundle');
 
+const VAULT_HOOK_PRELOAD_MARKER = '[GitHub Vault hook preload]';
+
+const VAULT_HOOK_PRELOAD = `
+# [GitHub Vault hook preload]
+try:
+  import vault_hook as github_vault_hook
+except Exception, github_vault_hook_err:
+  github_vault_hook = None
+  Log('[GitHub Vault] vault_hook preload failed: %s' % github_vault_hook_err)
+`;
+
 const MOVIE_HOOK = `
     # [GitHub Vault hook]
     try:
-      ghv = __import__('vault_hook')
-      if ghv:
-        ghv.enrich_movie(metadata, media)
+      if github_vault_hook:
+        github_vault_hook.enrich_movie(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] movie hook: %s' % e)`;
 
 const TV_HOOK = `
     # [GitHub Vault hook]
     try:
-      ghv = __import__('vault_hook')
-      if ghv:
-        ghv.enrich_tv(metadata, media)
+      if github_vault_hook:
+        github_vault_hook.enrich_tv(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] TV hook: %s' % e)`;
 
@@ -134,12 +143,41 @@ function writeXmlPref(filePath, prefs) {
   fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
 }
 
+function validateRestrictedPythonSource(label, source) {
+  const issues = [];
+  const lines = source.split('\n');
+  lines.forEach((line, index) => {
+    const lineNo = index + 1;
+    if (/^\s*def\s+_/.test(line)) {
+      issues.push(`${label}:${lineNo} uses def _* (RestrictedPython SyntaxError)`);
+    }
+    if (/\byield\b/.test(line)) {
+      issues.push(`${label}:${lineNo} uses yield (RestrictedPython SyntaxError)`);
+    }
+    if (/\bopen\s*\(/.test(line)) {
+      issues.push(`${label}:${lineNo} uses open() (RestrictedPython blocks in agent hooks)`);
+    }
+    if (/\b__import__\s*\(/.test(line)) {
+      issues.push(`${label}:${lineNo} uses __import__() (RestrictedPython SyntaxError)`);
+    }
+  });
+  return { ok: issues.length === 0, issues };
+}
+
 function injectLocalMediaHooks(initPath) {
   if (!fs.existsSync(initPath)) {
     return { ok: false, reason: 'LocalMedia __init__.py not found' };
   }
   let content = fs.readFileSync(initPath, 'utf8');
   let changed = false;
+
+  if (!content.includes(VAULT_HOOK_PRELOAD_MARKER)) {
+    const preloadAnchor = 'from mutagen.oggvorbis import OggVorbis\n';
+    if (content.includes(preloadAnchor)) {
+      content = content.replace(preloadAnchor, `${preloadAnchor}${VAULT_HOOK_PRELOAD}`);
+      changed = true;
+    }
+  }
 
   if (!content.includes('[GitHub Vault hook]')) {
     for (const movieAnchor of MOVIE_HOOK_ANCHORS) {
@@ -174,8 +212,20 @@ function injectLocalMediaHooks(initPath) {
     );
     changed = true;
   }
+  if (/__import__\('vault_hook'\)/.test(content)) {
+    content = content.replace(
+      /    # \[GitHub Vault hook\]\r?\n    try:\r?\n      ghv = __import__\('vault_hook'\)\r?\n      if ghv:\r?\n        ghv\.enrich_movie\(metadata, media\)\r?\n    except Exception, e:\r?\n      Log\('\[GitHub Vault\] movie hook: %s' % e\)/,
+      MOVIE_HOOK.trim(),
+    );
+    content = content.replace(
+      /    # \[GitHub Vault hook\]\r?\n    try:\r?\n      ghv = __import__\('vault_hook'\)\r?\n      if ghv:\r?\n        ghv\.enrich_tv\(metadata, media\)\r?\n    except Exception, e:\r?\n      Log\('\[GitHub Vault\] TV hook: %s' % e\)/,
+      TV_HOOK.trim(),
+    );
+    changed = true;
+  }
   if (changed) fs.writeFileSync(initPath, content, 'utf8');
-  return { ok: true, changed };
+  const validation = validateRestrictedPythonSource(path.basename(initPath), content);
+  return { ok: validation.ok, changed, validation };
 }
 
 function applyBundledPatches(bundledPluginsDir) {
@@ -309,6 +359,9 @@ function validateAgentPython(bundleDir) {
       }
       if (/\bopen\s*\(/.test(line)) {
         issues.push(`${file}:${lineNo} uses open() (RestrictedPython blocks in agent hooks)`);
+      }
+      if (/\b__import__\s*\(/.test(line)) {
+        issues.push(`${file}:${lineNo} uses __import__() (RestrictedPython SyntaxError)`);
       }
     });
   }
@@ -581,6 +634,7 @@ module.exports = {
   ensureVaultLibraryDir,
   writeIntegrationManifest,
   injectLocalMediaHooks,
+  validateRestrictedPythonSource,
   copyDirRecursive,
   removeBundledAgentDuplicates,
   syncPortableRepoPlugins,

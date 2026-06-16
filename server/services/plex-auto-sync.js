@@ -88,7 +88,9 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
       }
       try {
         repair = await plexMetadataRepair.repairSectionMetadata(plexUrl, token, sectionKey, {
-          delayMs: 5000,
+          libraryPath: settings.plex_library_path,
+          delayMs: 2000,
+          skipAnalyze: true,
         });
       } catch (repairErr) {
         repair = { error: repairErr.message };

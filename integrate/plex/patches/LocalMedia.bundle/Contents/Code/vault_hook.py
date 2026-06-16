@@ -149,6 +149,45 @@ def safe_attr(obj, name, default=None):
     return default
 
 
+def read_metadata_media(metadata):
+  """Plex MetadataObject.media — use direct access; getattr often fails in RestrictedPython."""
+  if not metadata:
+    return None
+  try:
+    return metadata.media
+  except Exception, err:
+    Log('[GitHub Vault] metadata.media read failed: %s' % err)
+  return None
+
+
+def ensure_metadata_media(metadata, video_codec, video_profile):
+  media_kit = read_metadata_media(metadata)
+  if media_kit:
+    return media_kit
+
+  profile = video_profile or 'high'
+  codec = video_codec or 'h264'
+  try:
+    metadata.media.addVideoCodec(codec, profile)
+    media_kit = read_metadata_media(metadata)
+    if media_kit:
+      Log('[GitHub Vault] created metadata.media via addVideoCodec(%s, %s)' % (codec, profile))
+      return media_kit
+  except Exception, err:
+    Log('[GitHub Vault] addVideoCodec failed: %s' % err)
+
+  try:
+    metadata.media.add()
+    media_kit = read_metadata_media(metadata)
+    if media_kit:
+      Log('[GitHub Vault] created metadata.media via media.add()')
+      return media_kit
+  except Exception, err:
+    Log('[GitHub Vault] media.add failed: %s' % err)
+
+  return None
+
+
 def collect_media_part_files(media):
   """Collect local file paths from a Plex MediaTree (movie or TV)."""
   files = []
@@ -335,11 +374,6 @@ def apply_media_technical(metadata, sidecar, file_path):
   if not sidecar:
     sidecar = {}
 
-  media_kit = safe_attr(metadata, 'media')
-  if not media_kit:
-    Log('[GitHub Vault] metadata has no media kit — descriptive fields only (use GitHub Vault agent as primary for streams)')
-    return False
-
   container = infer_container(sidecar, file_path)
   video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or 'h264'
   audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or 'aac'
@@ -357,6 +391,11 @@ def apply_media_technical(metadata, sidecar, file_path):
     except Exception:
       duration_ms = None
 
+  media_kit = ensure_metadata_media(metadata, video_codec, video_profile)
+  if not media_kit:
+    Log('[GitHub Vault] technical media skipped — Plex Movie agents have no metadata.media; use vault sync DB repair')
+    return False
+
   touched = False
   try:
     media_items = list(media_kit) if media_kit else []
@@ -368,12 +407,12 @@ def apply_media_technical(metadata, sidecar, file_path):
       media_items = [media_kit.addVideoCodec(video_codec, video_profile)]
       touched = True
     except Exception, err:
-      Log('[GitHub Vault] addVideoCodec failed: %s' % err)
+      Log('[GitHub Vault] media_kit.addVideoCodec failed: %s' % err)
       try:
         media_items = [media_kit.add()]
         touched = True
       except Exception, err2:
-        Log('[GitHub Vault] media.add failed: %s' % err2)
+        Log('[GitHub Vault] media_kit.add failed: %s' % err2)
         return False
 
   for media in media_items:

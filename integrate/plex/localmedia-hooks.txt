@@ -1,11 +1,19 @@
 # LocalMedia __init__.py injection markers for GitHub Vault
 
+PRELOAD = '''
+# [GitHub Vault hook preload]
+try:
+  import vault_hook as github_vault_hook
+except Exception, github_vault_hook_err:
+  github_vault_hook = None
+  Log('[GitHub Vault] vault_hook preload failed: %s' % github_vault_hook_err)
+'''
+
 MOVIE_HOOK = '''
     # [GitHub Vault hook]
     try:
-      ghv = __import__('vault_hook')
-      if ghv:
-        ghv.enrich_movie(metadata, media)
+      if github_vault_hook:
+        github_vault_hook.enrich_movie(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] movie hook: %s' % e)
 '''
@@ -13,9 +21,8 @@ MOVIE_HOOK = '''
 TV_HOOK = '''
     # [GitHub Vault hook]
     try:
-      ghv = __import__('vault_hook')
-      if ghv:
-        ghv.enrich_tv(metadata, media)
+      if github_vault_hook:
+        github_vault_hook.enrich_tv(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] TV hook: %s' % e)
 '''

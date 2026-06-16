@@ -62,6 +62,12 @@ describe('plex-agent-bundle', () => {
     assert.doesNotMatch(initPy, /MetadataSearchResult\(id='githubvault'/);
   });
 
+  it('rejects __import__ in agent hook Python', () => {
+    const python = plexPatches.validateAgentPython(patchBundle);
+    const importIssue = python.issues.find((issue) => /__import__/.test(issue));
+    assert.strictEqual(importIssue, undefined, importIssue || 'unexpected __import__ in agent code');
+  });
+
   it('compareAgentBundleStructure requires Agent plugin class', () => {
     const structure = plexPatches.compareAgentBundleStructure(patchBundle);
     assert.strictEqual(structure.ok, true, structure.issues.join('; '));
