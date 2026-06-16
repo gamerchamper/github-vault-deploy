@@ -24,13 +24,14 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
   }
 
   const settings = userSettings.getSettings(userId);
+  const token = userSettings.getPlexToken(userId);
   if (!settings.plex_sync_enabled && !force) {
     throw new Error('Plex library sync is disabled');
   }
   if (!settings.plex_library_path) {
     throw new Error('Set a Plex library folder path in Settings');
   }
-  if (!settings.plex_token) {
+  if (!token) {
     throw new Error('Set your Plex token in Settings');
   }
 
@@ -44,10 +45,10 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
     );
 
     let sectionKey = settings.plex_section_key || null;
-    if (!sectionKey && settings.plex_server_url && settings.plex_token) {
+    if (!sectionKey && settings.plex_server_url && token) {
       const match = await plexClient.findLibraryForPath(
         settings.plex_server_url,
-        settings.plex_token,
+        token,
         settings.plex_library_path,
       );
       if (match?.key) {
@@ -60,7 +61,7 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
     if (sectionKey) {
       refresh = await plexClient.refreshLibrary(
         settings.plex_server_url || plexClient.DEFAULT_PLEX_URL,
-        settings.plex_token,
+        token,
         sectionKey,
       );
     }

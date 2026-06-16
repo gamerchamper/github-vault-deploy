@@ -1030,12 +1030,18 @@ const App = {
     document.getElementById('settings-plex-sync-enabled').checked = !!settings?.plex_sync_enabled;
     document.getElementById('settings-plex-library-path').value = settings?.plex_library_path || '';
     document.getElementById('settings-plex-server-url').value = settings?.plex_server_url || 'http://127.0.0.1:32400';
-    document.getElementById('settings-plex-token').value = '';
+    const tokenField = document.getElementById('settings-plex-token');
+    if (tokenField) {
+      tokenField.value = '';
+      tokenField.placeholder = settings?.plex_token_set
+        ? `Saved (${settings.plex_token_preview}) — leave blank to keep`
+        : 'Paste Plex token from View XML in Plex Web';
+    }
     document.getElementById('settings-plex-sync-interval').value = String(settings?.plex_sync_interval_minutes || 30);
     const tokenHint = document.getElementById('settings-plex-token-hint');
     if (tokenHint) {
       tokenHint.textContent = settings?.plex_token_set
-        ? `Saved token: ${settings.plex_token_preview} (leave blank to keep)`
+        ? `Token is saved (${settings.plex_token_preview}). The field stays empty for security — only paste again to replace it.`
         : 'Get your token from Plex Web → any item → View XML → X-Plex-Token in the URL';
     }
     const status = document.getElementById('settings-plex-sync-status');
