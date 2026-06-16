@@ -1018,6 +1018,11 @@ const App = {
           : 'Last auto run: never';
       }
       this.updateAutoRepoHint(settings);
+      const plexCmd = document.getElementById('settings-plex-sync-cmd');
+      if (plexCmd) {
+        const base = (this.lastAppUrl || window.location.origin).replace(/\/+$/, '');
+        plexCmd.textContent = `npm run plex:sync -- --url ${base} --key gv_YOUR_KEY --out "D:/Plex/GitHub Vault"`;
+      }
       modal.classList.remove('hidden');
     } catch (err) {
       this.toast(err.message, 'error');

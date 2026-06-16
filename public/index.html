@@ -994,6 +994,12 @@
           <p class="form-hint" id="settings-auto-repo-hint">Every 60 minutes, create 5 repos (~5 GB) while enabled.</p>
           <p class="form-hint" id="settings-auto-repo-last-run">Last auto run: never</p>
         </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Plex integration</h3>
+          <p class="modal-desc">Modern Plex does not load third-party channel plugins in <strong>Settings → Plugins</strong>. Sync playlists as a scannable STRM library instead:</p>
+          <pre class="settings-code" id="settings-plex-sync-cmd">npm run plex:sync -- --url https://your-vault --key gv_… --out "D:/Plex/GitHub Vault"</pre>
+          <p class="form-hint">Run from the vault repo on a machine that can write to a folder Plex scans. Then add that folder as an <strong>Other Videos</strong> library. See <code>clients/plex-sync/README.md</code>.</p>
+        </section>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-secondary" data-close="settings-modal">Close</button>

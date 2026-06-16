@@ -1,0 +1,38 @@
+const assert = require('assert');
+const plexBridge = require('../../server/services/plex-bridge');
+
+describe('plex-bridge', () => {
+  const req = { get: () => null, secure: false };
+
+  it('mapItem builds stream and thumbnail urls', () => {
+    const item = plexBridge.mapItem({
+      id: 'file-1',
+      name: 'episode.mkv',
+      display_name: 'Pilot',
+      mime_type: 'video/mp4',
+      has_thumbnail: 1,
+      has_hls: 1,
+      size: 1000,
+    }, req);
+
+    assert.strictEqual(item.title, 'Pilot');
+    assert.match(item.stream_url, /\/api\/files\/stream\/file-1$/);
+    assert.match(item.thumbnail_url, /\/api\/files\/thumbnail\/file-1$/);
+    assert.match(item.hls_url, /\/api\/files\/hls\/file-1\/playlist\.m3u8$/);
+  });
+
+  it('mapContinueEntry uses file_id', () => {
+    const item = plexBridge.mapContinueEntry({
+      file_id: 'abc',
+      file_name: 'Show S01E01.mp4',
+      mime_type: 'video/mp4',
+      has_thumbnail: 1,
+      playlist_id: 'pl-1',
+      playlist_title: 'My Show',
+    }, req);
+
+    assert.strictEqual(item.id, 'abc');
+    assert.strictEqual(item.playlist_title, 'My Show');
+    assert.match(item.stream_url, /\/api\/files\/stream\/abc$/);
+  });
+});

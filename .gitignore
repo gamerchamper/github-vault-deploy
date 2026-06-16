@@ -6,3 +6,4 @@ data/sessions.db
 uploads/
 *.db
 .DS_Store
+/Plex Media Server

@@ -211,6 +211,7 @@ app.use('/api/public', publicRoutes);
 app.use('/api/cache', cacheRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/plex', requireAuth, ensureSetup, require('./routes/plex'));
 app.use('/api/accounts', accountRoutes);
 app.use('/api/viewers', viewerRoutes);
 app.use('/api/bandwidth', bandwidthRoutes);

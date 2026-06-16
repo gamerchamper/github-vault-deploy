@@ -1703,6 +1703,19 @@ body::before {
   margin: 0;
 }
 
+.settings-code {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .cache-files-table-wrap {
   max-height: min(420px, 55vh);
   overflow: auto;
