@@ -1,0 +1,22 @@
+# LocalMedia __init__.py injection markers for GitHub Vault
+
+MOVIE_HOOK = '''
+    # [GitHub Vault hook]
+    try:
+      import vault_hook
+      vault_hook.enrich_movie(metadata, media)
+    except Exception, e:
+      Log('[GitHub Vault] movie hook: %s' % e)
+'''
+
+TV_HOOK = '''
+    # [GitHub Vault hook]
+    try:
+      import vault_hook
+      vault_hook.enrich_tv(metadata, media)
+    except Exception, e:
+      Log('[GitHub Vault] TV hook: %s' % e)
+'''
+
+MOVIE_ANCHOR = '      video_helper.process_metadata(metadata)'
+TV_ANCHOR = '        pass\n\n#####################################################################################################################\n\nclass localMediaArtistCommon'

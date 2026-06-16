@@ -378,6 +378,14 @@ const API = {
     update: (patch) => API.patch('/api/settings', patch),
   },
 
+  plex: {
+    sync: () => API.post('/api/plex/sync'),
+    integrate: (body) => API.post('/api/plex/integrate', body),
+    integrationStatus: () => API.get('/api/plex/integration-status'),
+    test: (body) => API.post('/api/plex/test', body),
+    libraries: () => API.get('/api/plex/libraries'),
+  },
+
   tasks: {
     list: (opts = {}) => {
       const params = new URLSearchParams();

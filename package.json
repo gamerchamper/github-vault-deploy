@@ -23,7 +23,8 @@
     "migrate-to-mysql": "node scripts/migrate-to-mysql.js",
     "deploy:push": "node scripts/push-deploy-repo.js",
     "deploy:push:dry-run": "node scripts/push-deploy-repo.js --dry-run",
-    "plex:sync": "node clients/plex-sync/sync.js"
+    "plex:sync": "node clients/plex-sync/sync.js",
+    "plex:integrate": "node scripts/plex-integrate.js"
   },
   "dependencies": {
     "@octokit/rest": "^21.1.1",

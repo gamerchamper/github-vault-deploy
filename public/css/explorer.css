@@ -1716,6 +1716,13 @@ body::before {
   word-break: break-all;
 }
 
+.settings-plex-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .cache-files-table-wrap {
   max-height: min(420px, 55vh);
   overflow: auto;

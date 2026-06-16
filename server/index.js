@@ -298,6 +298,13 @@ app.listen(PORT, () => {
     console.warn('[auto-repo] startup skipped:', err.message);
   }
 
+  try {
+    const plexAutoSync = require('./services/plex-auto-sync');
+    plexAutoSync.startPlexAutoSync();
+  } catch (err) {
+    console.warn('[plex-sync] startup skipped:', err.message);
+  }
+
   // Schedule daily audit log cleanup (runs once per 24h, first run after 1 hour)
   setTimeout(() => {
     try {

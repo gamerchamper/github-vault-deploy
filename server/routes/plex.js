@@ -62,4 +62,68 @@ router.get('/continue', (req, res) => {
   }
 });
 
+router.post('/integrate', async (req, res) => {
+  try {
+    const plexInstall = require('../services/plex-install');
+    const result = await plexInstall.integratePlex(req.user.id, req, {
+      plexUrl: req.body?.plex_server_url,
+      plexToken: req.body?.plex_token,
+      patchBundled: req.body?.patch_bundled !== false,
+      runInitialSync: req.body?.run_initial_sync !== false,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/integration-status', (req, res) => {
+  try {
+    const plexInstall = require('../services/plex-install');
+    res.json(plexInstall.getIntegrationStatus());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/sync', async (req, res) => {
+  try {
+    const plexAutoSync = require('../services/plex-auto-sync');
+    const result = await plexAutoSync.runSyncForUser(req.user.id, req, { force: true });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/test', async (req, res) => {
+  try {
+    const userSettings = require('../services/user-settings');
+    const plexClient = require('../services/plex-client');
+    const settings = userSettings.getSettings(req.user.id);
+    const token = req.body?.plex_token || userSettings.getPlexToken(req.user.id);
+    const plexUrl = req.body?.plex_server_url || settings.plex_server_url;
+    if (!token) return res.status(400).json({ error: 'Plex token is required' });
+    const identity = await plexClient.testConnection(plexUrl, token);
+    const libraries = await plexClient.listLibraries(plexUrl, token);
+    res.json({ success: true, identity, libraries });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/libraries', async (req, res) => {
+  try {
+    const userSettings = require('../services/user-settings');
+    const plexClient = require('../services/plex-client');
+    const settings = userSettings.getSettings(req.user.id);
+    const token = userSettings.getPlexToken(req.user.id);
+    if (!token) return res.status(400).json({ error: 'Save a Plex token in Settings first' });
+    const libraries = await plexClient.listLibraries(settings.plex_server_url, token);
+    res.json({ libraries });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 module.exports = router;

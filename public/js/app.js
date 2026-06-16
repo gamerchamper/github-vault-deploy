@@ -1018,35 +1018,176 @@ const App = {
           : 'Last auto run: never';
       }
       this.updateAutoRepoHint(settings);
-      const plexCmd = document.getElementById('settings-plex-sync-cmd');
-      if (plexCmd) {
-        const base = (this.lastAppUrl || window.location.origin).replace(/\/+$/, '');
-        plexCmd.textContent = `npm run plex:sync -- --url ${base} --key gv_YOUR_KEY --out "D:/Plex/GitHub Vault"`;
-      }
+      this.applyPlexSettingsToForm(settings);
+      await this.refreshPlexIntegrationStatus();
       modal.classList.remove('hidden');
     } catch (err) {
       this.toast(err.message, 'error');
     }
   },
 
-  async saveSettings() {
+  applyPlexSettingsToForm(settings) {
+    document.getElementById('settings-plex-sync-enabled').checked = !!settings?.plex_sync_enabled;
+    document.getElementById('settings-plex-library-path').value = settings?.plex_library_path || '';
+    document.getElementById('settings-plex-server-url').value = settings?.plex_server_url || 'http://127.0.0.1:32400';
+    document.getElementById('settings-plex-token').value = '';
+    document.getElementById('settings-plex-sync-interval').value = String(settings?.plex_sync_interval_minutes || 30);
+    const tokenHint = document.getElementById('settings-plex-token-hint');
+    if (tokenHint) {
+      tokenHint.textContent = settings?.plex_token_set
+        ? `Saved token: ${settings.plex_token_preview} (leave blank to keep)`
+        : 'Get your token from Plex Web → any item → View XML → X-Plex-Token in the URL';
+    }
+    const status = document.getElementById('settings-plex-sync-status');
+    if (status) {
+      let line = settings?.plex_last_sync_at
+        ? `Last sync: ${new Date(settings.plex_last_sync_at).toLocaleString()}`
+        : 'Last sync: never';
+      if (settings?.plex_last_sync_error) line += ` · Error: ${settings.plex_last_sync_error}`;
+      status.textContent = line;
+    }
+    this.populatePlexSectionSelect(settings?.plex_section_key || '');
+  },
+
+  populatePlexSectionSelect(selectedKey = '') {
+    const select = document.getElementById('settings-plex-section-key');
+    if (!select) return;
+    const keep = select.value;
+    select.innerHTML = '<option value="">Auto-detect on sync</option>';
+    if (selectedKey) {
+      const opt = document.createElement('option');
+      opt.value = selectedKey;
+      opt.textContent = `Library #${selectedKey}`;
+      opt.selected = true;
+      select.appendChild(opt);
+    } else if (keep) {
+      select.value = keep;
+    }
+  },
+
+  readPlexSettingsPatch() {
+    const tokenInput = document.getElementById('settings-plex-token')?.value?.trim();
+    const patch = {
+      plex_sync_enabled: document.getElementById('settings-plex-sync-enabled')?.checked,
+      plex_library_path: document.getElementById('settings-plex-library-path')?.value?.trim() || null,
+      plex_server_url: document.getElementById('settings-plex-server-url')?.value?.trim() || 'http://127.0.0.1:32400',
+      plex_sync_interval_minutes: parseInt(document.getElementById('settings-plex-sync-interval')?.value, 10),
+      plex_section_key: document.getElementById('settings-plex-section-key')?.value || null,
+    };
+    if (tokenInput) patch.plex_token = tokenInput;
+    return patch;
+  },
+
+  async testPlexConnection() {
+    const btn = document.getElementById('btn-test-plex');
+    await App.withButton(btn, async () => {
+      try {
+        const body = {
+          plex_server_url: document.getElementById('settings-plex-server-url')?.value?.trim(),
+        };
+        const tokenInput = document.getElementById('settings-plex-token')?.value?.trim();
+        if (tokenInput) body.plex_token = tokenInput;
+        const result = await API.plex.test(body);
+        const select = document.getElementById('settings-plex-section-key');
+        if (select && result.libraries?.length) {
+          select.innerHTML = '<option value="">Auto-detect on sync</option>';
+          for (const lib of result.libraries) {
+            const opt = document.createElement('option');
+            opt.value = lib.key;
+            opt.textContent = `${lib.title} (${lib.type || 'library'})`;
+            select.appendChild(opt);
+          }
+        }
+        this.toast(`Connected to ${result.identity?.name || 'Plex'}`, 'success');
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
+  },
+
+  async syncPlexNow() {
+    const btn = document.getElementById('btn-sync-plex-now');
+    await App.withButton(btn, async () => {
+      try {
+        await this.saveSettings({ silent: true });
+        const result = await API.plex.sync();
+        const stats = result.stats || {};
+        this.toast(
+          `Plex synced — ${stats.files || 0} files, ${stats.playlists || 0} playlists${result.refresh ? ', library refresh started' : ''}`,
+          'success',
+        );
+        const { settings } = await API.settings.get();
+        this.applyPlexSettingsToForm(settings);
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
+  },
+
+  async integratePlexNow() {
+    const btn = document.getElementById('btn-integrate-plex');
+    await App.withButton(btn, async () => {
+      try {
+        const tokenInput = document.getElementById('settings-plex-token')?.value?.trim();
+        const body = {
+          plex_server_url: document.getElementById('settings-plex-server-url')?.value?.trim(),
+        };
+        if (tokenInput) body.plex_token = tokenInput;
+        const result = await API.plex.integrate(body);
+        const stats = result.sync?.stats || {};
+        this.toast(
+          `Plex integrated — library at ${result.library_path}${stats.files ? `, ${stats.files} files synced` : ''}. Restart Plex.`,
+          'success',
+        );
+        const { settings } = await API.settings.get();
+        this.applyPlexSettingsToForm(settings);
+        await this.refreshPlexIntegrationStatus();
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
+  },
+
+  async refreshPlexIntegrationStatus() {
+    const el = document.getElementById('settings-plex-integrate-status');
+    if (!el) return;
+    try {
+      const status = await API.plex.integrationStatus();
+      const parts = [];
+      if (status.plugins_installed) parts.push('Plugins installed');
+      if (status.manifest?.integrated_at) {
+        parts.push(`Integrated ${new Date(status.manifest.integrated_at).toLocaleString()}`);
+      }
+      if (status.paths?.libraryPath) parts.push(`Library: ${status.paths.libraryPath}`);
+      if (status.paths?.bundledPluginsDir) parts.push('Bundled plugins patched');
+      else if (status.paths?.resourcesDir) parts.push('Bundled patch path not found — set PLEX_RESOURCES_DIR');
+      el.textContent = parts.length ? parts.join(' · ') : 'Not integrated yet';
+    } catch {
+      el.textContent = '';
+    }
+  },
+
+  async saveSettings(opts = {}) {
     const btn = document.getElementById('btn-save-settings');
     const enabled = document.getElementById('settings-auto-repo-enabled')?.checked;
     const intervalMinutes = parseInt(document.getElementById('settings-auto-repo-interval')?.value, 10);
     const gb = parseInt(document.getElementById('settings-auto-repo-gb')?.value, 10);
     const linkedRaw = document.getElementById('settings-auto-repo-account')?.value;
     const linkedAccountId = linkedRaw ? parseInt(linkedRaw, 10) : null;
+    const plexPatch = this.readPlexSettingsPatch();
 
-    await App.withButton(btn, async () => {
+    const run = async () => {
       try {
         const { settings, autoRepoTaskId } = await API.settings.update({
           auto_repo_enabled: enabled,
           auto_repo_interval_minutes: intervalMinutes,
           auto_repo_gb: gb,
           auto_repo_linked_account_id: linkedAccountId,
+          ...plexPatch,
         });
         this.lastSettings = settings;
         this.updateAutoRepoHint(settings);
+        this.applyPlexSettingsToForm(settings);
         const lastRun = document.getElementById('settings-auto-repo-last-run');
         if (lastRun) {
           lastRun.textContent = settings.auto_repo_last_run_at
@@ -1060,11 +1201,15 @@ const App = {
           TaskPanel.removeLocal(`auto-repo-${this.currentUser.id}`);
           TaskPanel.stopCountdownTick();
         }
-        this.toast('Settings saved', 'success');
+        if (!opts.silent) this.toast('Settings saved', 'success');
       } catch (err) {
         this.toast(err.message, 'error');
+        throw err;
       }
-    });
+    };
+
+    if (opts.silent) return run();
+    return App.withButton(btn, run);
   },
 
   handleSettingsQuickAction(action) {
@@ -1325,6 +1470,9 @@ const App = {
     document.getElementById('btn-repos').addEventListener('click', () => this.showRepoModal());
     document.getElementById('btn-settings')?.addEventListener('click', () => this.openSettingsModal());
     document.getElementById('btn-save-settings')?.addEventListener('click', () => this.saveSettings());
+    document.getElementById('btn-test-plex')?.addEventListener('click', () => this.testPlexConnection());
+    document.getElementById('btn-integrate-plex')?.addEventListener('click', () => this.integratePlexNow());
+    document.getElementById('btn-sync-plex-now')?.addEventListener('click', () => this.syncPlexNow());
     document.getElementById('settings-modal')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-settings-action]');
       if (!btn) return;

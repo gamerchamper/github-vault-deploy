@@ -219,6 +219,14 @@ async function createTables() {
     'ALTER TABLE users ADD COLUMN auto_repo_gb INT DEFAULT 5',
     'ALTER TABLE users ADD COLUMN auto_repo_linked_account_id INT NULL',
     'ALTER TABLE users ADD COLUMN auto_repo_last_run_at DATETIME NULL',
+    'ALTER TABLE users ADD COLUMN plex_sync_enabled TINYINT DEFAULT 0',
+    'ALTER TABLE users ADD COLUMN plex_library_path TEXT NULL',
+    'ALTER TABLE users ADD COLUMN plex_server_url TEXT NULL',
+    'ALTER TABLE users ADD COLUMN plex_token TEXT NULL',
+    'ALTER TABLE users ADD COLUMN plex_section_key TEXT NULL',
+    'ALTER TABLE users ADD COLUMN plex_sync_interval_minutes INT DEFAULT 30',
+    'ALTER TABLE users ADD COLUMN plex_last_sync_at DATETIME NULL',
+    'ALTER TABLE users ADD COLUMN plex_last_sync_error TEXT NULL',
   ]) {
     try {
       await pool.execute(stmt);

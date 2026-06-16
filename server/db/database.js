@@ -330,6 +330,14 @@ ensureColumn('users', 'auto_repo_interval_minutes', 'INTEGER DEFAULT 60');
 ensureColumn('users', 'auto_repo_gb', 'INTEGER DEFAULT 5');
 ensureColumn('users', 'auto_repo_linked_account_id', 'INTEGER');
 ensureColumn('users', 'auto_repo_last_run_at', 'TEXT');
+ensureColumn('users', 'plex_sync_enabled', 'INTEGER DEFAULT 0');
+ensureColumn('users', 'plex_library_path', 'TEXT');
+ensureColumn('users', 'plex_server_url', 'TEXT');
+ensureColumn('users', 'plex_token', 'TEXT');
+ensureColumn('users', 'plex_section_key', 'TEXT');
+ensureColumn('users', 'plex_sync_interval_minutes', 'INTEGER DEFAULT 30');
+ensureColumn('users', 'plex_last_sync_at', 'TEXT');
+ensureColumn('users', 'plex_last_sync_error', 'TEXT');
 
 try {
   db.exec(`

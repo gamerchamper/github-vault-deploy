@@ -1,0 +1,16 @@
+[
+  {
+    "id": "vault_url",
+    "type": "text",
+    "label": "GitHub Vault URL",
+    "default": "",
+    "option": "false"
+  },
+  {
+    "id": "api_key",
+    "type": "text",
+    "label": "API Key (gv_…)",
+    "default": "",
+    "option": "hidden"
+  }
+]
