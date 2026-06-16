@@ -1138,6 +1138,7 @@ const App = {
     await App.withButton(btn, async () => {
       try {
         const folder = await folderPromise;
+        App.toast('Writing STRM files to selected folder…', 'info');
         await this.saveSettings({ silent: true });
         const syncData = await API.plex.sync({ local_only: true });
         const manifest = syncData.manifest || (await API.plex.manifest()).manifest;
@@ -3146,3 +3147,4 @@ document.addEventListener('keydown', (e) => {
 })
 
 document.addEventListener('DOMContentLoaded', () => App.init());
+window.App = App;

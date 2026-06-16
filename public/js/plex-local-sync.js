@@ -25,16 +25,35 @@ const PlexLocalSync = {
       window.App?.toast('Use Chrome or Edge on desktop to write files to a local folder', 'error');
       return false;
     }
+    const app = window.App;
+    if (!app?.continuePlexLocalSync) {
+      alert('Vault is still loading — wait a moment and try again.');
+      return false;
+    }
     let folderPromise;
     try {
       folderPromise = this.requestFolderPicker();
     } catch (err) {
-      window.App?.toast(err.message, 'error');
+      app.toast(err.message, 'error');
       return false;
     }
     const btn = document.getElementById('btn-sync-plex-local');
-    window.App?.continuePlexLocalSync(folderPromise, btn);
+    app.continuePlexLocalSync(folderPromise, btn).catch((err) => {
+      if (err?.name === 'AbortError') return;
+      app.toast(err?.message || String(err), 'error');
+    });
     return false;
+  },
+
+  async ensurePermission(dirHandle) {
+    if (!dirHandle?.queryPermission) return;
+    let perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') {
+      perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+    }
+    if (perm !== 'granted') {
+      throw new Error('Folder permission denied — cannot write STRM files');
+    }
   },
 
   async getDirectory(dirHandle, parts, { create = false } = {}) {
@@ -59,6 +78,7 @@ const PlexLocalSync = {
   },
 
   async applyManifest(manifest, rootHandle) {
+    await this.ensurePermission(rootHandle);
     const entries = manifest?.entries || [];
     for (const entry of entries) {
       await this.writeEntry(rootHandle, entry);
