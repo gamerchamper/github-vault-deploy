@@ -379,7 +379,9 @@ const API = {
   },
 
   plex: {
-    sync: () => API.post('/api/plex/sync'),
+    sync: (body) => API.post('/api/plex/sync', body),
+    manifest: () => API.get('/api/plex/manifest'),
+    refresh: () => API.post('/api/plex/refresh'),
     integrate: (body) => API.post('/api/plex/integrate', body),
     integrationStatus: () => API.get('/api/plex/integration-status'),
     test: (body) => API.post('/api/plex/test', body),

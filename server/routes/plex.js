@@ -87,12 +87,71 @@ router.get('/integration-status', (req, res) => {
   }
 });
 
+router.get('/manifest', (req, res) => {
+  try {
+    const plexLibrarySync = require('../services/plex-library-sync');
+    const { manifest, stats } = plexLibrarySync.buildSyncManifest(req.user.id, req);
+    res.json({ manifest: { ...manifest, stats }, stats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/refresh', async (req, res) => {
+  try {
+    const userSettings = require('../services/user-settings');
+    const plexClient = require('../services/plex-client');
+    const settings = userSettings.getSettings(req.user.id);
+    const token = userSettings.getPlexToken(req.user.id);
+    if (!token) return res.status(400).json({ error: 'Save a Plex token in Settings first' });
+    let sectionKey = settings.plex_section_key;
+    if (!sectionKey && settings.plex_library_path) {
+      const match = await plexClient.findLibraryForPath(
+        settings.plex_server_url,
+        token,
+        settings.plex_library_path,
+      ) || await plexClient.findLibraryByTitle(settings.plex_server_url, token, 'GitHub Vault');
+      sectionKey = match?.key || null;
+    }
+    if (!sectionKey) return res.status(400).json({ error: 'Could not find GitHub Vault library in Plex' });
+    const refresh = await plexClient.refreshLibrary(settings.plex_server_url, token, sectionKey);
+    userSettings.markPlexSyncRun(req.user.id, null);
+    res.json({ success: true, refresh, section_key: sectionKey });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/sync', async (req, res) => {
   try {
     const plexAutoSync = require('../services/plex-auto-sync');
+    const plexLibrarySync = require('../services/plex-library-sync');
+    const userSettings = require('../services/user-settings');
+    const settings = userSettings.getSettings(req.user.id);
+
+    if (req.body?.local_only || !plexLibrarySync.canWriteLibraryPath(settings.plex_library_path)) {
+      const { manifest, stats } = plexLibrarySync.buildSyncManifest(req.user.id, req);
+      return res.json({
+        success: true,
+        local_sync_required: true,
+        manifest: { ...manifest, stats },
+        stats,
+        message: 'Use "Write to folder on this PC" to save STRM files where Plex can read them.',
+      });
+    }
+
     const result = await plexAutoSync.runSyncForUser(req.user.id, req, { force: true });
     res.json({ success: true, ...result });
   } catch (err) {
+    if (err.code === 'LOCAL_SYNC_REQUIRED') {
+      return res.json({
+        success: true,
+        local_sync_required: true,
+        manifest: { ...err.manifest, stats: err.stats },
+        stats: err.stats,
+        message: err.message,
+      });
+    }
     res.status(400).json({ error: err.message });
   }
 });

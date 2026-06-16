@@ -145,16 +145,20 @@ async function integratePlex(userId, req, {
 
   let syncResult = null;
   if (runInitialSync) {
-    if (!installLocal) {
-      steps.push({
-        step: 'initial_sync_skipped',
-        ok: false,
-        detail: 'Sync skipped — vault cannot write STRM files to a remote Plex path. '
-          + 'Run vault on the Plex machine or mount the library folder into vault.',
-      });
-    } else {
+    const plexLibrarySync = require('./plex-library-sync');
+    if (plexLibrarySync.canWriteLibraryPath(libraryPath)) {
       syncResult = await plexAutoSync.runSyncForUser(userId, req, { force: true });
       steps.push({ step: 'initial_sync', ok: true, stats: syncResult.stats });
+    } else {
+      const { manifest, stats } = plexLibrarySync.buildSyncManifest(userId, req);
+      steps.push({
+        step: 'initial_sync_local',
+        ok: true,
+        stats,
+        detail: 'Library linked. Click "Write to folder on this PC" in Settings to populate STRM files.',
+        entry_count: manifest.entries.length,
+      });
+      syncResult = { local_sync_required: true, stats, manifest };
     }
   }
 

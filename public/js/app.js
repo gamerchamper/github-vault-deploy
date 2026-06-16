@@ -1111,6 +1111,10 @@ const App = {
       try {
         await this.saveSettings({ silent: true });
         const result = await API.plex.sync();
+        if (result.local_sync_required) {
+          this.toast('Server cannot write locally — use "Write to folder on this PC"', 'info');
+          return;
+        }
         const stats = result.stats || {};
         this.toast(
           `Plex synced — ${stats.files || 0} files, ${stats.playlists || 0} playlists${result.refresh ? ', library refresh started' : ''}`,
@@ -1119,6 +1123,38 @@ const App = {
         const { settings } = await API.settings.get();
         this.applyPlexSettingsToForm(settings);
       } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
+  },
+
+  async syncPlexToLocalFolder() {
+    const btn = document.getElementById('btn-sync-plex-local');
+    await App.withButton(btn, async () => {
+      try {
+        if (!window.PlexLocalSync?.supported()) {
+          this.toast('Use Chrome or Edge on desktop to write files to a local folder', 'error');
+          return;
+        }
+        await this.saveSettings({ silent: true });
+        const syncData = await API.plex.sync({ local_only: true });
+        const manifest = syncData.manifest || (await API.plex.manifest()).manifest;
+        const stats = syncData.stats || manifest.stats || {};
+        if (!manifest?.entries?.length) {
+          this.toast('Nothing to sync — add playlists in GitHub Vault first', 'info');
+          return;
+        }
+        const folder = await PlexLocalSync.pickFolder();
+        const written = await PlexLocalSync.applyManifest(manifest, folder);
+        try {
+          await API.plex.refresh();
+        } catch (refreshErr) {
+          this.toast(`Wrote ${written} files. Plex refresh failed: ${refreshErr.message}`, 'info');
+          return;
+        }
+        this.toast(`Wrote ${stats.files || written} STRM files — Plex library refresh started`, 'success');
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
         this.toast(err.message, 'error');
       }
     });
@@ -1142,11 +1178,14 @@ const App = {
         if (tokenInput) body.plex_token = tokenInput;
         const result = await API.plex.integrate(body);
         const stats = result.sync?.stats || {};
-        const remoteNote = result.remote_plex ? ' (remote Plex — install plugins on Plex machine)' : '';
+        const remoteNote = result.remote_plex ? ' Use "Write to folder on this PC" next.' : '';
         this.toast(
-          `Plex integrated — library at ${result.library_path}${stats.files ? `, ${stats.files} files synced` : ''}${remoteNote}`,
+          `Plex integrated${stats.files ? ` — ${stats.files} files synced` : remoteNote}`,
           'success',
         );
+        if (result.sync?.local_sync_required) {
+          setTimeout(() => this.toast('Click "Write to folder on this PC" and select your GitHub Vault folder', 'info'), 800);
+        }
         const { settings } = await API.settings.get();
         this.applyPlexSettingsToForm(settings);
         await this.refreshPlexIntegrationStatus();
@@ -1480,6 +1519,7 @@ const App = {
     document.getElementById('btn-save-settings')?.addEventListener('click', () => this.saveSettings());
     document.getElementById('btn-test-plex')?.addEventListener('click', () => this.testPlexConnection());
     document.getElementById('btn-integrate-plex')?.addEventListener('click', () => this.integratePlexNow());
+    document.getElementById('btn-sync-plex-local')?.addEventListener('click', () => this.syncPlexToLocalFolder());
     document.getElementById('btn-sync-plex-now')?.addEventListener('click', () => this.syncPlexNow());
     document.getElementById('settings-modal')?.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-settings-action]');
