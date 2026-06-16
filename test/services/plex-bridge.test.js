@@ -20,10 +20,10 @@ describe('plex-bridge', () => {
     assert.match(item.stream_url, /\/api\/files\/stream\/file-1$/);
     assert.match(item.thumbnail_url, /\/api\/files\/thumbnail\/file-1$/);
     assert.match(item.hls_url, /\/api\/files\/hls\/file-1\/playlist\.m3u8$/);
-    assert.strictEqual(item.strm_url, item.hls_url);
+    assert.strictEqual(item.strm_url, item.stream_url);
   });
 
-  it('mapItem uses progressive stream for non-chunked video', () => {
+  it('mapItem uses stream url for STRM even when HLS unavailable', () => {
     const item = plexBridge.mapItem({
       id: 'file-2',
       name: 'clip.mp4',

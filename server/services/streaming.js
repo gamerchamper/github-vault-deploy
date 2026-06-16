@@ -271,10 +271,18 @@ async function streamFile(req, res, userId, fileId, view = null) {
       if (!faststart) {
         const cached = cache.get(userId, fileId);
         if (cached) {
-          streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
-            console.warn(`Faststart build deferred (${fileId}):`, err.message);
-          });
-          return serveRange(req, res, cached.path, file.mime_type, file.name, file.size);
+          if (isPlexClient(req)) {
+            try {
+              faststart = await streamCache.ensureFaststartFromBin(userId, file, cached.path, null);
+            } catch (err) {
+              console.warn(`Faststart for Plex deferred (${fileId}):`, err.message);
+            }
+          } else {
+            streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
+              console.warn(`Faststart build deferred (${fileId}):`, err.message);
+            });
+            return serveRange(req, res, cached.path, file.mime_type, file.name, file.size);
+          }
         }
       }
       if (faststart) {

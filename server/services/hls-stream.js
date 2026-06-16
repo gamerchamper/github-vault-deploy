@@ -461,20 +461,6 @@ async function waitForFirstSegment(session, timeoutMs = 45000) {
 }
 
 async function servePlaylist(req, res, userId, fileId, baseUrl, view = null) {
-  const usePrimaryCache = !view || view.type === 'primary';
-  if (usePrimaryCache) {
-    const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
-    if (file) {
-      const streamCache = require('./stream-cache');
-      if (streamCache.getFaststart(userId, fileId, file.size) || cache.get(userId, fileId)) {
-        const appUrl = require('./app-url');
-        const stream = appUrl.publicUrl(req, `/api/files/stream/${fileId}`);
-        res.redirect(302, stream);
-        return;
-      }
-    }
-  }
-
   const session = await getOrCreateHlsSession(userId, fileId, view);
   if (!session) return res.status(404).json({ error: 'HLS not available' });
 
