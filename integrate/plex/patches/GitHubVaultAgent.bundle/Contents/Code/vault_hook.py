@@ -5,6 +5,7 @@ import os
 import json
 
 VAULT_PATH_MARKERS = ('github vault', 'github-vault', 'github_vault')
+VAULT_URL_MARKERS = ('/api/files/stream/', 'vault.arktic.top', 'github-vault')
 
 
 def _is_vault_path(path):
@@ -12,6 +13,43 @@ def _is_vault_path(path):
     return False
   normalized = path.replace('\\', '/').lower()
   return any(marker in normalized for marker in VAULT_PATH_MARKERS)
+
+
+def _read_strm_url(file_path):
+  if not file_path or not file_path.lower().endswith('.strm'):
+    return None
+  try:
+    handle = open(file_path, 'r')
+    url = handle.read().strip().split('\n')[0].strip()
+    handle.close()
+    return url or None
+  except Exception:
+    return None
+
+
+def _is_vault_stream_url(url):
+  if not url:
+    return False
+  normalized = url.replace('\\', '/').lower()
+  return any(marker in normalized for marker in VAULT_URL_MARKERS)
+
+
+def _has_vault_sidecar(file_path):
+  if not file_path:
+    return False
+  base, _ = os.path.splitext(file_path)
+  return os.path.isfile(base + '.vault-item.json')
+
+
+def is_vault_item(file_path):
+  """Public helper for GitHubVaultAgent — sidecar, folder, or vault stream URL."""
+  if not file_path:
+    return False
+  if _has_vault_sidecar(file_path):
+    return True
+  if _is_vault_path(file_path):
+    return True
+  return _is_vault_stream_url(_read_strm_url(file_path))
 
 
 def _load_sidecar(file_path):
@@ -54,13 +92,50 @@ def _video_resolution(height):
   return None
 
 
-def _apply_media_technical(metadata, sidecar):
-  if not sidecar:
-    return False
+def _infer_container(sidecar, file_path):
+  container = sidecar.get('container') if sidecar else None
+  if container:
+    return container
 
-  container = sidecar.get('container')
-  video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec')
-  audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec')
+  mime = (sidecar.get('mime_type') if sidecar else None) or ''
+  mime = mime.lower()
+  if 'mp4' in mime or mime == 'video/mp4':
+    return 'mp4'
+  if 'webm' in mime:
+    return 'webm'
+  if 'matroska' in mime or 'mkv' in mime:
+    return 'mkv'
+  if mime.startswith('video/'):
+    return 'mp4'
+
+  name = os.path.basename(file_path or '').lower()
+  if name.endswith('.mkv.strm') or '.mkv.' in name:
+    return 'mkv'
+  if name.endswith('.webm.strm') or '.webm.' in name:
+    return 'webm'
+  if name.endswith('.mp4.strm') or '.mp4.' in name:
+    return 'mp4'
+
+  url = _read_strm_url(file_path)
+  if url:
+    url_lower = url.lower().split('?')[0]
+    if url_lower.endswith('.mkv'):
+      return 'mkv'
+    if url_lower.endswith('.webm'):
+      return 'webm'
+    if url_lower.endswith('.mp4') or url_lower.endswith('.m4v'):
+      return 'mp4'
+
+  return 'mp4'
+
+
+def _apply_media_technical(metadata, sidecar, file_path):
+  if not sidecar:
+    sidecar = {}
+
+  container = _infer_container(sidecar, file_path)
+  video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or 'h264'
+  audio_codec = sidecar.get('audio_codec') or sidecar.get('audioCodec') or 'aac'
   video_profile = sidecar.get('video_profile') or 'high'
   width = sidecar.get('width')
   height = sidecar.get('height')
@@ -68,19 +143,21 @@ def _apply_media_technical(metadata, sidecar):
   duration = sidecar.get('duration_sec')
   video_resolution = sidecar.get('video_resolution') or _video_resolution(height)
 
-  if not any([container, video_codec, audio_codec, width, height, duration]):
-    return False
-
   touched = False
   media_items = list(metadata.media) if metadata.media else []
 
-  if not media_items and video_codec:
+  if not media_items:
     try:
       media_items = [metadata.media.addVideoCodec(video_codec, video_profile)]
       touched = True
     except Exception, err:
       Log('[GitHub Vault] addVideoCodec failed: %s' % err)
-      return False
+      try:
+        media_items = [metadata.media.add()]
+        touched = True
+      except Exception, err2:
+        Log('[GitHub Vault] media.add failed: %s' % err2)
+        return False
 
   for media in media_items:
     if container:
@@ -138,9 +215,9 @@ def _apply_media_technical(metadata, sidecar):
   return touched
 
 
-def _apply_sidecar(metadata, sidecar):
+def _apply_sidecar(metadata, sidecar, file_path):
   if not sidecar:
-    return
+    sidecar = {}
 
   title = sidecar.get('title')
   if title:
@@ -167,8 +244,8 @@ def _apply_sidecar(metadata, sidecar):
   if art:
     metadata.art = art
 
-  if _apply_media_technical(metadata, sidecar):
-    Log('[GitHub Vault] applied media technical metadata from sidecar')
+  if _apply_media_technical(metadata, sidecar, file_path):
+    Log('[GitHub Vault] applied media technical metadata (container=%s)' % _infer_container(sidecar, file_path))
 
 
 def enrich_movie(metadata, media):
@@ -176,12 +253,11 @@ def enrich_movie(metadata, media):
     part = media.items[0].parts[0]
   except Exception:
     return
-  if not _is_vault_path(part.file):
+  if not is_vault_item(part.file):
     return
-  sidecar = _load_sidecar(part.file)
-  if sidecar:
-    _apply_sidecar(metadata, sidecar)
-    Log('[GitHub Vault] enriched movie metadata for %s' % part.file)
+  sidecar = _load_sidecar(part.file) or {}
+  _apply_sidecar(metadata, sidecar, part.file)
+  Log('[GitHub Vault] enriched movie metadata for %s' % part.file)
 
 
 def enrich_tv(metadata, media):
@@ -193,13 +269,11 @@ def enrich_tv(metadata, media):
         part = episode_media.parts[0]
       except Exception:
         continue
-      if not _is_vault_path(part.file):
+      if not is_vault_item(part.file):
         continue
-      sidecar = _load_sidecar(part.file)
-      if not sidecar:
-        continue
+      sidecar = _load_sidecar(part.file) or {}
       episode_metadata = metadata.seasons[season_key].episodes[episode_key]
-      _apply_sidecar(episode_metadata, sidecar)
+      _apply_sidecar(episode_metadata, sidecar, part.file)
       touched = True
   if touched:
     Log('[GitHub Vault] enriched TV metadata for %s' % media.title)

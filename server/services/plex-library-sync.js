@@ -20,6 +20,18 @@ function relPath(...parts) {
   return path.join(...parts).replace(/\\/g, '/');
 }
 
+function strmBaseName(index, item) {
+  const title = safeName(item.title || item.id);
+  const base = `${padIndex(index)} - ${title}`;
+  const mime = item.mime_type || '';
+  if (mime.startsWith('video/')) {
+    if (/\.mkv$/i.test(item.title || '')) return `${base}.mkv`;
+    if (/\.webm$/i.test(item.title || '')) return `${base}.webm`;
+    return `${base}.mp4`;
+  }
+  return base;
+}
+
 function sidecarPayload(item, probe = null) {
   const name = item.title || '';
   const isVideo = (item.mime_type || '').startsWith('video/');
@@ -29,8 +41,12 @@ function sidecarPayload(item, probe = null) {
     else if (/\.webm$/i.test(name)) fallback.container = 'webm';
     else fallback.container = 'mp4';
   }
+  if (isVideo && !probe?.video_codec) {
+    fallback.video_codec = 'h264';
+    fallback.audio_codec = 'aac';
+  }
   return {
-    title: item.title || null,
+    title: item.title || safeName(item.id) || 'Untitled',
     summary: item.summary || null,
     thumbnail_url: item.thumbnail_url || null,
     file_id: item.id || null,
@@ -49,7 +65,7 @@ async function sidecarPayloadForItem(userId, item, req) {
     display_name: item.title,
     mime_type: item.mime_type,
     size: item.size,
-  }, req, { allowRemoteProbe: false });
+  }, req, { allowRemoteProbe: true });
   return sidecarPayload(item, probe);
 }
 
@@ -58,8 +74,7 @@ async function playlistEntries(userId, items, relDir, req) {
   const keepPaths = [];
   for (let i = 0; i < items.length; i += 1) {
     const item = items[i];
-    const title = safeName(item.title || item.id);
-    const baseName = `${padIndex(i + 1)} - ${title}`;
+    const baseName = strmBaseName(i + 1, item);
     const strmRel = relPath(relDir, `${baseName}.strm`);
     const sidecarRel = relPath(relDir, `${baseName}.vault-item.json`);
     const sidecar = await sidecarPayloadForItem(userId, item, req);
@@ -114,7 +129,7 @@ async function buildSyncManifest(userId, req) {
       const label = item.playlist_title
         ? `${item.playlist_title} - ${item.title}`
         : item.title;
-      const baseName = `${padIndex(i + 1)} - ${safeName(label)}`;
+      const baseName = strmBaseName(i + 1, { ...item, title: label });
       const strmRel = relPath('Continue Watching', `${baseName}.strm`);
       const sidecarRel = relPath('Continue Watching', `${baseName}.vault-item.json`);
       const sidecar = await sidecarPayloadForItem(userId, item, req);

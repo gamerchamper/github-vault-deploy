@@ -179,11 +179,19 @@ function deployUserPlugins(plexDataDir) {
   fs.mkdirSync(pluginsDir, { recursive: true });
   const deployed = [];
 
+  const vaultHookSrc = path.join(PATCHES_ROOT, 'LocalMedia.bundle', 'Contents', 'Code', 'vault_hook.py');
+
   for (const src of BUNDLE_SOURCES) {
     if (!fs.existsSync(src)) continue;
     const name = path.basename(src);
     const dest = path.join(pluginsDir, name);
     copyDirRecursive(src, dest);
+    if (name === 'GitHubVaultAgent.bundle' && fs.existsSync(vaultHookSrc)) {
+      copyFileEnsuringDir(
+        vaultHookSrc,
+        path.join(dest, 'Contents', 'Code', 'vault_hook.py'),
+      );
+    }
     deployed.push(dest);
   }
 

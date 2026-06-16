@@ -1,28 +1,20 @@
 # GitHub Vault metadata agent — appears under Settings → Plugins
 
-VAULT_MARKERS = ('github vault', 'github-vault', 'github_vault')
-
 
 def _is_vault_media(media):
   try:
+    import vault_hook
     if media.items:
-      path = media.items[0].parts[0].file
-    elif media.seasons:
+      return vault_hook.is_vault_item(media.items[0].parts[0].file)
+    if media.seasons:
       for season in media.seasons:
         for episode in media.seasons[season].episodes:
-          return _is_vault_path(media.seasons[season].episodes[episode].items[0].parts[0].file)
-    else:
-      return False
-    return _is_vault_path(path)
+          part = media.seasons[season].episodes[episode].items[0].parts[0].file
+          if vault_hook.is_vault_item(part):
+            return True
+    return False
   except Exception:
     return False
-
-
-def _is_vault_path(path):
-  if not path:
-    return False
-  normalized = path.replace('\\', '/').lower()
-  return any(marker in normalized for marker in VAULT_MARKERS)
 
 
 class GitHubVaultMovieAgent(Agent.Movies):
