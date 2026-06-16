@@ -50,6 +50,13 @@ def _apply_sidecar(metadata, sidecar):
     if not metadata.art:
       metadata.art = thumb
 
+  duration = sidecar.get('duration_sec')
+  if duration:
+    try:
+      metadata.duration = int(float(duration) * 1000)
+    except Exception:
+      pass
+
   art = sidecar.get('art_url') or thumb
   if art:
     metadata.art = art

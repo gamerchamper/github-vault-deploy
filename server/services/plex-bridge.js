@@ -10,17 +10,30 @@ function thumbUrl(req, fileId) {
   return `${mediaBase(req)}/api/files/thumbnail/${fileId}`;
 }
 
-function streamUrl(req, fileId) {
-  return `${mediaBase(req)}/api/files/stream/${fileId}`;
+function streamFileName(item) {
+  let name = String(item.display_name || item.name || item.title || 'video').trim();
+  if (!/\.\w{2,5}$/i.test(name)) {
+    const mime = item.mime_type || '';
+    if (mime.startsWith('video/') || mime.startsWith('audio/')) {
+      name = mime.startsWith('audio/') ? `${name}.mp3` : `${name}.mp4`;
+    }
+  }
+  return name;
+}
+
+function streamUrl(req, fileId, fileName) {
+  const base = `${mediaBase(req)}/api/files/stream/${fileId}`;
+  if (!fileName) return base;
+  return `${base}/${encodeURIComponent(fileName)}`;
 }
 
 function hlsUrl(req, fileId) {
   return `${mediaBase(req)}/api/files/hls/${fileId}/playlist.m3u8`;
 }
 
-/** Plex STRM expects a direct media URL. Progressive stream (faststart MP4) works; m3u8 often breaks Plex. */
+/** Plex STRM expects a direct media URL with a file extension so MDE can detect the container. */
 function strmUrl(req, item) {
-  return streamUrl(req, item.id);
+  return streamUrl(req, item.id, streamFileName(item));
 }
 
 function mapPlaylistSummary(playlist, req) {
@@ -66,7 +79,7 @@ function mapItem(item, req) {
     progress_pct: item.progress_pct,
     completed: item.completed,
     position_seconds: item.position_seconds,
-    stream_url: streamUrl(req, item.id),
+    stream_url: streamUrl(req, item.id, streamFileName(item)),
     hls_url: item.has_hls ? hlsUrl(req, item.id) : null,
     strm_url: strmUrl(req, item),
     thumbnail_url: item.has_thumbnail ? thumbUrl(req, item.id) : null,

@@ -177,22 +177,29 @@ router.get('/view/:id', async (req, res) => {
   }
 });
 
-router.get('/stream/:id', async (req, res) => {
+router.get('/stream/:id', handleStream);
+router.head('/stream/:id', handleStream);
+router.get('/stream/:id/:filename', handleStream);
+router.head('/stream/:id/:filename', handleStream);
+
+async function handleStream(req, res) {
   try {
     const view = viewMode.parseViewParam(req.query.view);
     const fileRec = db.prepare('SELECT id, user_id FROM files WHERE id = ?').get(req.params.id);
     if (!fileRec) return res.status(404).json({ error: 'File not found' });
     const userId = fileRec.user_id;
     const fileId = req.params.id;
-    res.on('finish', () => {
-      const len = parseInt(res.getHeader('Content-Length') || '0', 10);
-      if (len > 0) recordBytes(userId, fileId, len, 'stream');
-    });
+    if (req.method !== 'HEAD') {
+      res.on('finish', () => {
+        const len = parseInt(res.getHeader('Content-Length') || '0', 10);
+        if (len > 0) recordBytes(userId, fileId, len, 'stream');
+      });
+    }
     await streaming.streamFile(req, res, userId, fileId, view);
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
-});
+}
 
 router.get('/status/:id', (req, res) => {
   try {

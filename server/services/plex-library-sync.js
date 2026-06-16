@@ -20,12 +20,22 @@ function relPath(...parts) {
 }
 
 function sidecarPayload(item) {
+  const name = item.title || '';
+  const isVideo = (item.mime_type || '').startsWith('video/');
+  let container = null;
+  if (isVideo) {
+    if (/\.mkv$/i.test(name)) container = 'mkv';
+    else if (/\.webm$/i.test(name)) container = 'webm';
+    else container = 'mp4';
+  }
   return {
     title: item.title || null,
     summary: item.summary || null,
     thumbnail_url: item.thumbnail_url || null,
     file_id: item.id || null,
     mime_type: item.mime_type || null,
+    container,
+    duration_sec: item.duration_sec || null,
     position_seconds: item.position_seconds || null,
   };
 }
@@ -214,6 +224,18 @@ async function syncLibrary(userId, req, outputPath, { prune = true } = {}) {
   if (prune) {
     stats.pruned = pruneRemoved(output, manifest.keep_paths);
   }
+
+  const fileIds = manifest.entries
+    .filter((entry) => entry.path.endsWith('.vault-item.json'))
+    .map((entry) => {
+      try {
+        return JSON.parse(entry.content).file_id;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  require('./plex-stream-prewarm').prewarmFilesBackground(userId, fileIds);
 
   return { output, stats, manifest: diskManifest };
 }

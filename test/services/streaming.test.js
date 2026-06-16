@@ -122,6 +122,19 @@ describe('streaming service - serveRange', function () {
     });
   });
 
+  it('should respond to HEAD without a body', function (done) {
+    const req = { method: 'HEAD', headers: {} };
+    const res = createMockRes();
+
+    streaming.serveRange(req, res, tmpFile, 'video/mp4', 'video.mp4', 1000, (bytes) => {
+      expect(bytes).to.equal(0);
+      expect(res.headers['Content-Type']).to.equal('video/mp4');
+      expect(res.headers['Content-Length']).to.equal(1000);
+      expect(res.end.called).to.be.true;
+      done();
+    });
+  });
+
   it('should handle file deleted before stream', function (done) {
     const req = { headers: { range: 'bytes=0-10' } };
     const res = createMockRes();

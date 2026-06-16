@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const storage = require('./storage');
 const { isChunkMode } = storage;
 const cache = require('./cache');
@@ -20,9 +21,38 @@ function jobKey(userId, fileId) {
   return `${userId}:${fileId}`;
 }
 
-function isPlexClient(req) {
+const EXT_MIME = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mkv': 'video/x-matroska',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+};
+
+function streamMimeType(file) {
+  if (mp4.isMp4(file?.name, file?.mime_type)) return 'video/mp4';
+  const ext = path.extname(String(file?.name || '')).toLowerCase();
+  if (ext && EXT_MIME[ext]) return EXT_MIME[ext];
+  if (file?.mime_type && file.mime_type !== 'application/octet-stream') return file.mime_type;
+  return 'application/octet-stream';
+}
+
+/** Plex/ffprobe probe remote URLs; they need valid headers and a ready MP4 bootstrap. */
+function isRemoteMediaClient(req) {
   const ua = String(req?.get?.('user-agent') || req?.headers?.['user-agent'] || '');
-  return /Plex/i.test(ua);
+  return /Plex|Lavf|ffprobe|libmpv|VideoLAN|MediaServer/i.test(ua);
+}
+
+function serveStreamHead(res, file) {
+  const mimeType = streamMimeType(file);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Content-Length', String(file.size));
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.name)}"`);
+  mediaCache.setMediaCacheHeaders(res);
+  res.status(200).end();
 }
 
 async function waitForServePath(session, start, end, timeoutMs = 90000) {
@@ -156,17 +186,18 @@ async function getFileKey(userId, file) {
 }
 
 async function streamChunked(req, res, userId, file, chunks, fileKey, user, { isMp4 = false, view = null } = {}) {
+  const mimeType = streamMimeType(file);
   const usePrimaryCache = !view || view.type === 'primary';
   if (usePrimaryCache) {
     if (isMp4) {
       const faststart = streamCache.getFaststart(userId, file.id, file.size);
       if (faststart) {
-        return serveRange(req, res, faststart.path, file.mime_type, file.name, faststart.size);
+        return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
       }
     }
     const cached = cache.get(userId, file.id);
     if (cached) {
-      return serveRange(req, res, cached.path, file.mime_type, file.name, file.size);
+      return serveRange(req, res, cached.path, mimeType, file.name, file.size);
     }
   }
 
@@ -192,17 +223,17 @@ async function streamChunked(req, res, userId, file, chunks, fileKey, user, { is
     if (isMp4) {
       const faststart = streamCache.getFaststart(userId, file.id, file.size);
       if (faststart) {
-        return serveRange(req, res, faststart.path, file.mime_type, file.name, faststart.size);
+        return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
       }
     }
     const cached = cache.get(userId, file.id);
     if (cached) {
-      return serveRange(req, res, cached.path, file.mime_type, file.name, file.size);
+      return serveRange(req, res, cached.path, mimeType, file.name, file.size);
     }
   }
 
   let filePath = session.servePath || session.spillPath;
-  if ((!filePath || !fs.existsSync(filePath)) && isPlexClient(req)) {
+  if ((!filePath || !fs.existsSync(filePath)) && isRemoteMediaClient(req)) {
     filePath = await waitForServePath(session, start, end);
   }
   if (!filePath || !fs.existsSync(filePath)) {
@@ -212,7 +243,7 @@ async function streamChunked(req, res, userId, file, chunks, fileKey, user, { is
 
   const safeEnd = Math.min(end, file.size - 1);
   res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+  res.setHeader('Content-Type', mimeType);
   res.setHeader('Cache-Control', mediaCache.mediaCacheControl({ noCache: true }));
 
   if (hasRange || file.size > 4 * 1024 * 1024) {
@@ -256,6 +287,12 @@ async function streamFile(req, res, userId, fileId, view = null) {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file || file.is_folder) throw new Error('File not found');
 
+  if (req.method === 'HEAD') {
+    serveStreamHead(res, file);
+    return;
+  }
+
+  const mimeType = streamMimeType(file);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const chunks = db.prepare(
     'SELECT c.*, r.full_name, r.default_branch FROM chunks c JOIN storage_repos r ON c.repo_id = r.id WHERE c.file_id = ? ORDER BY c.chunk_index'
@@ -271,29 +308,29 @@ async function streamFile(req, res, userId, fileId, view = null) {
       if (!faststart) {
         const cached = cache.get(userId, fileId);
         if (cached) {
-          if (isPlexClient(req)) {
+          if (isRemoteMediaClient(req)) {
             try {
               faststart = await streamCache.ensureFaststartFromBin(userId, file, cached.path, null);
             } catch (err) {
-              console.warn(`Faststart for Plex deferred (${fileId}):`, err.message);
+              console.warn(`Faststart for remote media client deferred (${fileId}):`, err.message);
             }
           } else {
             streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
               console.warn(`Faststart build deferred (${fileId}):`, err.message);
             });
-            return serveRange(req, res, cached.path, file.mime_type, file.name, file.size);
+            return serveRange(req, res, cached.path, mimeType, file.name, file.size);
           }
         }
       }
       if (faststart) {
-        return serveRange(req, res, faststart.path, file.mime_type, file.name, faststart.size);
+        return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
       }
     }
 
     if (usePrimaryCache) {
       const cached = cache.get(userId, fileId);
       if (cached) {
-        return serveRange(req, res, cached.path, file.mime_type, file.name, file.size);
+        return serveRange(req, res, cached.path, mimeType, file.name, file.size);
       }
     }
 
@@ -303,7 +340,7 @@ async function streamFile(req, res, userId, fileId, view = null) {
   if (usePrimaryCache) {
     const cached = cache.get(userId, fileId);
     if (cached) {
-      return serveRange(req, res, cached.path, file.mime_type, file.name, file.size);
+      return serveRange(req, res, cached.path, mimeType, file.name, file.size);
     }
   }
 
@@ -355,6 +392,7 @@ async function streamPublic(req, res, file) {
 function serveRange(req, res, filePath, mimeType, fileName, knownSize, onComplete = null) {
   const size = knownSize || fs.statSync(filePath).size;
   const { start, end } = parseRange(req.headers.range, size);
+  const isHead = req.method === 'HEAD';
 
   const etag = mediaCache.etagFromPath(filePath);
   if (!req.headers.range && mediaCache.sendNotModifiedIfMatch(req, res, etag)) {
@@ -366,32 +404,36 @@ function serveRange(req, res, filePath, mimeType, fileName, knownSize, onComplet
   res.setHeader('Content-Type', mimeType || 'application/octet-stream');
   mediaCache.setMediaCacheHeaders(res);
 
-  let bytesSent;
-  let responded = false;
-
   if (!req.headers.range) {
     res.setHeader('Content-Length', size);
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
-    bytesSent = size;
-    responded = true;
-    pipeReadStream(res, filePath, 0, size - 1, () => onComplete?.(bytesSent));
+    if (isHead) {
+      res.status(200).end();
+      onComplete?.(0);
+      return;
+    }
+    pipeReadStream(res, filePath, 0, size - 1, () => onComplete?.(size));
     return;
   }
 
   if (start >= size) {
     res.status(416).setHeader('Content-Range', `bytes */${size}`);
-    bytesSent = 0;
     res.end();
     onComplete?.(0);
     return;
   }
 
   const safeEnd = Math.min(end, size - 1);
-  bytesSent = safeEnd - start + 1;
+  const bytesSent = safeEnd - start + 1;
   res.status(206);
   res.setHeader('Content-Range', `bytes ${start}-${safeEnd}/${size}`);
   res.setHeader('Content-Length', bytesSent);
   res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
+  if (isHead) {
+    res.end();
+    onComplete?.(0);
+    return;
+  }
   pipeReadStream(res, filePath, start, safeEnd, () => onComplete?.(bytesSent));
 }
 
@@ -421,4 +463,6 @@ module.exports = {
   getStatus,
   getFileKey,
   serveRange,
+  streamMimeType,
+  serveStreamHead,
 };
