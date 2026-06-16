@@ -150,7 +150,7 @@ async function integratePlex(userId, req, {
       syncResult = await plexAutoSync.runSyncForUser(userId, req, { force: true });
       steps.push({ step: 'initial_sync', ok: true, stats: syncResult.stats });
     } else {
-      const { manifest, stats } = plexLibrarySync.buildSyncManifest(userId, req);
+      const { manifest, stats } = await plexLibrarySync.buildSyncManifest(userId, req);
       steps.push({
         step: 'initial_sync_local',
         ok: true,

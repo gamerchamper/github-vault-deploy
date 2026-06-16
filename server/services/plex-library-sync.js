@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const plexBridge = require('./plex-bridge');
+const plexMediaProbe = require('./plex-media-probe');
 const appUrl = require('./app-url');
 
 function safeName(name, max = 140) {
@@ -19,14 +20,14 @@ function relPath(...parts) {
   return path.join(...parts).replace(/\\/g, '/');
 }
 
-function sidecarPayload(item) {
+function sidecarPayload(item, probe = null) {
   const name = item.title || '';
   const isVideo = (item.mime_type || '').startsWith('video/');
-  let container = null;
-  if (isVideo) {
-    if (/\.mkv$/i.test(name)) container = 'mkv';
-    else if (/\.webm$/i.test(name)) container = 'webm';
-    else container = 'mp4';
+  const fallback = {};
+  if (isVideo && !probe?.container) {
+    if (/\.mkv$/i.test(name)) fallback.container = 'mkv';
+    else if (/\.webm$/i.test(name)) fallback.container = 'webm';
+    else fallback.container = 'mp4';
   }
   return {
     title: item.title || null,
@@ -34,13 +35,25 @@ function sidecarPayload(item) {
     thumbnail_url: item.thumbnail_url || null,
     file_id: item.id || null,
     mime_type: item.mime_type || null,
-    container,
-    duration_sec: item.duration_sec || null,
     position_seconds: item.position_seconds || null,
+    duration_sec: probe?.duration_sec || item.duration_sec || null,
+    ...fallback,
+    ...plexMediaProbe.sidecarProbeFields(probe),
   };
 }
 
-function playlistEntries(items, relDir) {
+async function sidecarPayloadForItem(userId, item, req) {
+  const probe = await plexMediaProbe.getProbeInfo(userId, {
+    id: item.id,
+    name: item.title,
+    display_name: item.title,
+    mime_type: item.mime_type,
+    size: item.size,
+  }, req, { allowRemoteProbe: false });
+  return sidecarPayload(item, probe);
+}
+
+async function playlistEntries(userId, items, relDir, req) {
   const entries = [];
   const keepPaths = [];
   for (let i = 0; i < items.length; i += 1) {
@@ -49,14 +62,15 @@ function playlistEntries(items, relDir) {
     const baseName = `${padIndex(i + 1)} - ${title}`;
     const strmRel = relPath(relDir, `${baseName}.strm`);
     const sidecarRel = relPath(relDir, `${baseName}.vault-item.json`);
+    const sidecar = await sidecarPayloadForItem(userId, item, req);
     entries.push({ path: strmRel, content: `${item.strm_url || item.hls_url || item.stream_url}\n` });
-    entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecarPayload(item), null, 2)}\n` });
+    entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecar, null, 2)}\n` });
     keepPaths.push(strmRel, sidecarRel);
   }
   return { entries, count: items.length, keepPaths };
 }
 
-function buildSyncManifest(userId, req) {
+async function buildSyncManifest(userId, req) {
   const manifest = {
     vault_url: appUrl.getAppUrl(req),
     synced_at: new Date().toISOString(),
@@ -69,7 +83,7 @@ function buildSyncManifest(userId, req) {
 
   for (const playlist of hub.playlists || []) {
     const full = plexBridge.getPlaylist(userId, playlist.id, req);
-    const batch = playlistEntries(full.items || [], relPath('Playlists', safeName(full.title)));
+    const batch = await playlistEntries(userId, full.items || [], relPath('Playlists', safeName(full.title)), req);
     manifest.entries.push(...batch.entries);
     manifest.keep_paths.push(...batch.keepPaths);
     stats.files += batch.count;
@@ -80,9 +94,11 @@ function buildSyncManifest(userId, req) {
     const full = plexBridge.getCollection(userId, collection.id, req);
     for (const playlist of full.playlists || []) {
       const pl = plexBridge.getPlaylist(userId, playlist.id, req);
-      const batch = playlistEntries(
+      const batch = await playlistEntries(
+        userId,
         pl.items || [],
         relPath('Collections', safeName(full.title), safeName(pl.title)),
+        req,
       );
       manifest.entries.push(...batch.entries);
       manifest.keep_paths.push(...batch.keepPaths);
@@ -101,8 +117,9 @@ function buildSyncManifest(userId, req) {
       const baseName = `${padIndex(i + 1)} - ${safeName(label)}`;
       const strmRel = relPath('Continue Watching', `${baseName}.strm`);
       const sidecarRel = relPath('Continue Watching', `${baseName}.vault-item.json`);
+      const sidecar = await sidecarPayloadForItem(userId, item, req);
       manifest.entries.push({ path: strmRel, content: `${item.strm_url || item.hls_url || item.stream_url}\n` });
-      manifest.entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecarPayload(item), null, 2)}\n` });
+      manifest.entries.push({ path: sidecarRel, content: `${JSON.stringify(sidecar, null, 2)}\n` });
       manifest.keep_paths.push(strmRel, sidecarRel);
       stats.files += 1;
     }
@@ -178,7 +195,7 @@ function pruneRemoved(output, keepRelativePaths) {
 
 async function syncLibrary(userId, req, outputPath, { prune = true } = {}) {
   if (!outputPath) throw new Error('Plex library path is required');
-  const { manifest, stats } = buildSyncManifest(userId, req);
+  const { manifest, stats } = await buildSyncManifest(userId, req);
 
   if (requiresBrowserSync(outputPath)) {
     const err = new Error(

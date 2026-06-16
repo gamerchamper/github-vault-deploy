@@ -42,7 +42,23 @@ function streamMimeType(file) {
 /** Plex/ffprobe probe remote URLs; they need valid headers and a ready MP4 bootstrap. */
 function isRemoteMediaClient(req) {
   const ua = String(req?.get?.('user-agent') || req?.headers?.['user-agent'] || '');
-  return /Plex|Lavf|ffprobe|libmpv|VideoLAN|MediaServer/i.test(ua);
+  if (/Plex|Lavf|ffprobe|libmpv|VideoLAN|MediaServer|ExoPlayerLib|stagefright|Datahunter|Player/i.test(ua)) {
+    return true;
+  }
+  if (req?.headers?.range && !ua) return true;
+  return false;
+}
+
+async function ensureFaststartForRemoteClient(req, userId, file, chunks, fileKey, user, status = null) {
+  let faststart = streamCache.getFaststart(userId, file.id, file.size);
+  if (faststart) return faststart;
+
+  const cached = cache.get(userId, file.id);
+  if (cached) {
+    return streamCache.ensureFaststartFromBin(userId, file, cached.path, status);
+  }
+
+  return streamCache.ensureFaststartCache(userId, file, chunks, fileKey, user, status);
 }
 
 function serveStreamHead(res, file) {
@@ -305,21 +321,20 @@ async function streamFile(req, res, userId, fileId, view = null) {
 
     if (usePrimaryCache && isMp4) {
       let faststart = streamCache.getFaststart(userId, fileId, file.size);
+      if (!faststart && isRemoteMediaClient(req)) {
+        try {
+          faststart = await ensureFaststartForRemoteClient(req, userId, file, chunks, fileKey, user);
+        } catch (err) {
+          console.warn(`Faststart required for remote media client (${fileId}):`, err.message);
+        }
+      }
       if (!faststart) {
         const cached = cache.get(userId, fileId);
-        if (cached) {
-          if (isRemoteMediaClient(req)) {
-            try {
-              faststart = await streamCache.ensureFaststartFromBin(userId, file, cached.path, null);
-            } catch (err) {
-              console.warn(`Faststart for remote media client deferred (${fileId}):`, err.message);
-            }
-          } else {
-            streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
-              console.warn(`Faststart build deferred (${fileId}):`, err.message);
-            });
-            return serveRange(req, res, cached.path, mimeType, file.name, file.size);
-          }
+        if (cached && !isRemoteMediaClient(req)) {
+          streamCache.ensureFaststartFromBin(userId, file, cached.path, null).catch((err) => {
+            console.warn(`Faststart build deferred (${fileId}):`, err.message);
+          });
+          return serveRange(req, res, cached.path, mimeType, file.name, file.size);
         }
       }
       if (faststart) {

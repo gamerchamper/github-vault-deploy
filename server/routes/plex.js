@@ -87,10 +87,10 @@ router.get('/integration-status', (req, res) => {
   }
 });
 
-router.get('/manifest', (req, res) => {
+router.get('/manifest', async (req, res) => {
   try {
     const plexLibrarySync = require('../services/plex-library-sync');
-    const { manifest, stats } = plexLibrarySync.buildSyncManifest(req.user.id, req);
+    const { manifest, stats } = await plexLibrarySync.buildSyncManifest(req.user.id, req);
     res.json({ manifest: { ...manifest, stats }, stats });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -130,7 +130,7 @@ router.post('/sync', async (req, res) => {
     const settings = userSettings.getSettings(req.user.id);
 
     if (req.body?.local_only || !plexLibrarySync.canWriteLibraryPath(settings.plex_library_path)) {
-      const { manifest, stats } = plexLibrarySync.buildSyncManifest(req.user.id, req);
+      const { manifest, stats } = await plexLibrarySync.buildSyncManifest(req.user.id, req);
       return res.json({
         success: true,
         local_sync_required: true,
@@ -170,6 +170,36 @@ router.post('/test', async (req, res) => {
     res.json({ success: true, identity, libraries });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/stream-test/:fileId', async (req, res) => {
+  try {
+    const db = require('../db/database');
+    const plexStreamTest = require('../services/plex-stream-test');
+    const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(req.params.fileId, req.user.id);
+    if (!file || file.is_folder) return res.status(404).json({ error: 'File not found' });
+    const result = await plexStreamTest.testStreamForPlex(req.user.id, file, req);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/stream-test/:fileId/probe', async (req, res) => {
+  try {
+    const db = require('../db/database');
+    const plexMediaProbe = require('../services/plex-media-probe');
+    const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(req.params.fileId, req.user.id);
+    if (!file || file.is_folder) return res.status(404).json({ error: 'File not found' });
+    const probe = await plexMediaProbe.getProbeInfo(req.user.id, file, req, { allowRemoteProbe: true });
+    res.json({
+      file_id: file.id,
+      probe,
+      sidecar: plexMediaProbe.sidecarProbeFields(probe),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

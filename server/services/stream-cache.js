@@ -71,6 +71,12 @@ async function buildFaststartFromBin(userId, file, binPath, status) {
 
   const size = fs.statSync(p.faststart).size;
   const durationSec = await mp4.probeDuration(p.faststart);
+  let probe = null;
+  try {
+    probe = await mp4.probeMediaInfo(p.faststart);
+  } catch {
+    probe = durationSec ? { duration_sec: durationSec, container: 'mp4' } : null;
+  }
   const baseName = `${userId}_${file.id}`;
 
   fs.writeFileSync(p.meta, JSON.stringify({
@@ -78,8 +84,9 @@ async function buildFaststartFromBin(userId, file, binPath, status) {
     size,
     original_size: file.size,
     name: file.name,
-    duration_sec: durationSec,
+    duration_sec: probe?.duration_sec || durationSec,
     faststart: true,
+    probe,
   }));
 
   diskCache.register({
@@ -144,14 +151,21 @@ async function buildFaststartCache(userId, file, chunks, fileKey, user, status) 
 
   const size = fs.statSync(p.faststart).size;
   const durationSec = await mp4.probeDuration(p.faststart);
+  let probe = null;
+  try {
+    probe = await mp4.probeMediaInfo(p.faststart);
+  } catch {
+    probe = durationSec ? { duration_sec: durationSec, container: 'mp4' } : null;
+  }
   const baseName = `${userId}_${file.id}`;
   fs.writeFileSync(p.meta, JSON.stringify({
     cached_at: Date.now(),
     size,
     original_size: file.size,
     name: file.name,
-    duration_sec: durationSec,
+    duration_sec: probe?.duration_sec || durationSec,
     faststart: true,
+    probe,
   }));
 
   diskCache.prepareSpace(size, diskCache.entryId(userId, file.id, 'faststart'));
