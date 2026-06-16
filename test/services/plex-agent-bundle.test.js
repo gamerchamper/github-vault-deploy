@@ -47,6 +47,12 @@ describe('plex-agent-bundle', () => {
     assert.match(python.issues[0], /yield/);
   });
 
+  it('rejects open() in agent hook Python', () => {
+    const python = plexPatches.validateAgentPython(patchBundle);
+    const openIssue = python.issues.find((issue) => /open\(\)/.test(issue));
+    assert.strictEqual(openIssue, undefined, openIssue || 'unexpected open() in vault_hook');
+  });
+
   it('compareAgentBundleStructure requires Agent plugin class', () => {
     const structure = plexPatches.compareAgentBundleStructure(patchBundle);
     assert.strictEqual(structure.ok, true, structure.issues.join('; '));

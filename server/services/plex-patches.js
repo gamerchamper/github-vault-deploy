@@ -289,6 +289,9 @@ function validateAgentPython(bundleDir) {
       if (/\blambda\b/.test(line)) {
         issues.push(`${file}:${lineNo} uses lambda (RestrictedPython may reject)`);
       }
+      if (/\bopen\s*\(/.test(line)) {
+        issues.push(`${file}:${lineNo} uses open() (RestrictedPython blocks in agent hooks)`);
+      }
     });
   }
   return { ok: issues.length === 0, issues };

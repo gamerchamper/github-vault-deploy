@@ -65,8 +65,20 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
     let refresh = null;
     let analyze = null;
     let repair = null;
+    let agentApply = null;
     if (sectionKey) {
       const plexUrl = settings.plex_server_url || plexClient.DEFAULT_PLEX_URL;
+      const section = await plexClient.resolveVaultLibrarySection(plexUrl, token, {
+        libraryPath: settings.plex_library_path,
+        sectionKey,
+      });
+      if (section && section.agent !== plexClient.GITHUB_VAULT_AGENT_ID) {
+        try {
+          agentApply = await plexClient.applyGitHubVaultAgent(plexUrl, token, section);
+        } catch (agentErr) {
+          agentApply = { error: agentErr.message };
+        }
+      }
       refresh = await plexClient.refreshLibrary(plexUrl, token, sectionKey, { force: true });
       await sleep(5000);
       try {
@@ -86,6 +98,7 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
     userSettings.markPlexSyncRun(userId, null);
     return {
       ...syncResult,
+      agent_apply: agentApply,
       refresh,
       analyze,
       repair,

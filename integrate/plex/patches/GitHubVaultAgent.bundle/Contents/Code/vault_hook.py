@@ -3,7 +3,6 @@
 # Plex RestrictedPython rejects function names starting with "_".
 
 import os
-import json
 
 VAULT_PATH_MARKERS = ('github vault', 'github-vault', 'github_vault')
 VAULT_URL_MARKERS = ('/api/files/stream/', 'vault.arktic.top', 'github-vault')
@@ -16,13 +15,25 @@ def is_vault_path(path):
   return any(marker in normalized for marker in VAULT_PATH_MARKERS)
 
 
+def read_text_file(file_path):
+  if not file_path:
+    return None
+  try:
+    if not os.path.isfile(file_path):
+      return None
+    return StringFromFile(file_path)
+  except Exception:
+    return None
+
+
 def read_strm_url(file_path):
   if not file_path or not file_path.lower().endswith('.strm'):
     return None
   try:
-    handle = open(file_path, 'r')
-    url = handle.read().strip().split('\n')[0].strip()
-    handle.close()
+    text = read_text_file(file_path)
+    if not text:
+      return None
+    url = text.strip().split('\n')[0].strip()
     return url or None
   except Exception:
     return None
@@ -60,14 +71,15 @@ def load_sidecar(file_path):
     os.path.join(os.path.dirname(file_path), '.vault-item.json'),
   ]
   for candidate in candidates:
-    if os.path.isfile(candidate):
-      try:
-        handle = open(candidate, 'r')
-        data = json.load(handle)
-        handle.close()
-        return data
-      except Exception, err:
-        Log('[GitHub Vault] sidecar read failed (%s): %s' % (candidate, err))
+    if not os.path.isfile(candidate):
+      continue
+    text = read_text_file(candidate)
+    if not text:
+      continue
+    try:
+      return JSON.ObjectFromString(text)
+    except Exception, err:
+      Log('[GitHub Vault] sidecar read failed (%s): %s' % (candidate, err))
   return None
 
 
@@ -304,9 +316,29 @@ def apply_part_streams(part, sidecar):
   return touched
 
 
+def media_item_parts(media_item, file_path):
+  try:
+    parts = list(media_item.parts) if media_item.parts else []
+  except Exception:
+    parts = []
+  if not parts and file_path:
+    try:
+      part = media_item.parts.add()
+      part.file = file_path
+      parts = [part]
+    except Exception, err:
+      Log('[GitHub Vault] could not add media part for %s: %s' % (file_path, err))
+  return parts
+
+
 def apply_media_technical(metadata, sidecar, file_path):
   if not sidecar:
     sidecar = {}
+
+  media_kit = safe_attr(metadata, 'media')
+  if not media_kit:
+    Log('[GitHub Vault] metadata has no media kit — descriptive fields only (use GitHub Vault agent as primary for streams)')
+    return False
 
   container = infer_container(sidecar, file_path)
   video_codec = sidecar.get('video_codec') or sidecar.get('videoCodec') or 'h264'
@@ -326,16 +358,19 @@ def apply_media_technical(metadata, sidecar, file_path):
       duration_ms = None
 
   touched = False
-  media_items = list(metadata.media) if metadata.media else []
+  try:
+    media_items = list(media_kit) if media_kit else []
+  except Exception:
+    media_items = []
 
   if not media_items:
     try:
-      media_items = [metadata.media.addVideoCodec(video_codec, video_profile)]
+      media_items = [media_kit.addVideoCodec(video_codec, video_profile)]
       touched = True
     except Exception, err:
       Log('[GitHub Vault] addVideoCodec failed: %s' % err)
       try:
-        media_items = [metadata.media.add()]
+        media_items = [media_kit.add()]
         touched = True
       except Exception, err2:
         Log('[GitHub Vault] media.add failed: %s' % err2)
@@ -392,10 +427,7 @@ def apply_media_technical(metadata, sidecar, file_path):
       except Exception:
         pass
 
-    try:
-      parts = list(media.parts) if media.parts else []
-    except Exception:
-      parts = []
+    parts = media_item_parts(media, file_path)
     for part in parts:
       if container:
         part.container = container
@@ -441,11 +473,14 @@ def apply_sidecar(metadata, sidecar, file_path):
   if art:
     metadata.art = art
 
-  if apply_media_technical(metadata, sidecar, file_path):
+  technical = apply_media_technical(metadata, sidecar, file_path)
+  if technical:
     Log('[GitHub Vault] applied media technical metadata (container=%s, duration=%s)' % (
       infer_container(sidecar, file_path),
       sidecar.get('duration_sec'),
     ))
+  elif sidecar:
+    Log('[GitHub Vault] applied descriptive metadata for %s' % (file_path or 'unknown'))
 
 
 def resolve_episode_metadata(metadata, media, file_path):
