@@ -53,6 +53,15 @@ describe('plex-agent-bundle', () => {
     assert.strictEqual(openIssue, undefined, openIssue || 'unexpected open() in vault_hook');
   });
 
+  it('uses per-item part.hash search ids like Personal Media', () => {
+    const initPy = fs.readFileSync(
+      path.join(patchBundle, 'Contents', 'Code', '__init__.py'),
+      'utf8',
+    );
+    assert.match(initPy, /parts\[0\]\.hash/);
+    assert.doesNotMatch(initPy, /MetadataSearchResult\(id='githubvault'/);
+  });
+
   it('compareAgentBundleStructure requires Agent plugin class', () => {
     const structure = plexPatches.compareAgentBundleStructure(patchBundle);
     assert.strictEqual(structure.ok, true, structure.issues.join('; '));

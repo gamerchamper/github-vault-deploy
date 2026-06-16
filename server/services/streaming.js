@@ -404,15 +404,14 @@ async function streamPublic(req, res, file) {
   const remote = isRemoteMediaClient(req);
   const mimeType = streamMimeType(file);
 
-  if (req.method === 'HEAD') {
-    serveStreamHead(res, file);
-    return;
-  }
-
   if (isChunkMode(file, chunks) && isMp4 && remote) {
     const fileKey = await getFileKey(file.user_id, file);
     try {
       const faststart = await waitForFaststartReady(file.user_id, file, chunks, fileKey, user);
+      if (req.method === 'HEAD') {
+        serveStreamHead(res, file, faststart.size);
+        return;
+      }
       return serveRange(req, res, faststart.path, mimeType, file.name, faststart.size);
     } catch (err) {
       console.warn(`[stream] public remote client could not get faststart (${file.id}): ${err.message}`);
@@ -422,6 +421,11 @@ async function streamPublic(req, res, file) {
       }
       return;
     }
+  }
+
+  if (req.method === 'HEAD') {
+    serveStreamHead(res, file);
+    return;
   }
 
   if (isChunkMode(file, chunks)) {

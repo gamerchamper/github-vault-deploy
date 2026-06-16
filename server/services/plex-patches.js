@@ -13,16 +13,18 @@ const CHANNEL_BUNDLE_SRC = path.join(PORTABLE_PLUGINS_DIR, 'GitHubVault.bundle')
 const MOVIE_HOOK = `
     # [GitHub Vault hook]
     try:
-      import vault_hook
-      vault_hook.enrich_movie(metadata, media)
+      ghv = __import__('vault_hook')
+      if ghv:
+        ghv.enrich_movie(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] movie hook: %s' % e)`;
 
 const TV_HOOK = `
     # [GitHub Vault hook]
     try:
-      import vault_hook
-      vault_hook.enrich_tv(metadata, media)
+      ghv = __import__('vault_hook')
+      if ghv:
+        ghv.enrich_tv(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] TV hook: %s' % e)`;
 
@@ -156,6 +158,22 @@ function injectLocalMediaHooks(initPath) {
     }
   }
 
+  const oldMovieHook = /import vault_hook\s*\n\s*vault_hook\.enrich_movie/;
+  const oldTvHook = /import vault_hook\s*\n\s*vault_hook\.enrich_tv/;
+  if (oldMovieHook.test(content)) {
+    content = content.replace(
+      /    # \[GitHub Vault hook\]\r?\n    try:\r?\n      import vault_hook\r?\n      vault_hook\.enrich_movie\(metadata, media\)\r?\n    except Exception, e:\r?\n      Log\('\[GitHub Vault\] movie hook: %s' % e\)/,
+      MOVIE_HOOK.trim(),
+    );
+    changed = true;
+  }
+  if (oldTvHook.test(content)) {
+    content = content.replace(
+      /    # \[GitHub Vault hook\]\r?\n    try:\r?\n      import vault_hook\r?\n      vault_hook\.enrich_tv\(metadata, media\)\r?\n    except Exception, e:\r?\n      Log\('\[GitHub Vault\] TV hook: %s' % e\)/,
+      TV_HOOK.trim(),
+    );
+    changed = true;
+  }
   if (changed) fs.writeFileSync(initPath, content, 'utf8');
   return { ok: true, changed };
 }

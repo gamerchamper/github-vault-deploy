@@ -3,8 +3,9 @@
 MOVIE_HOOK = '''
     # [GitHub Vault hook]
     try:
-      import vault_hook
-      vault_hook.enrich_movie(metadata, media)
+      ghv = __import__('vault_hook')
+      if ghv:
+        ghv.enrich_movie(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] movie hook: %s' % e)
 '''
@@ -12,8 +13,9 @@ MOVIE_HOOK = '''
 TV_HOOK = '''
     # [GitHub Vault hook]
     try:
-      import vault_hook
-      vault_hook.enrich_tv(metadata, media)
+      ghv = __import__('vault_hook')
+      if ghv:
+        ghv.enrich_tv(metadata, media)
     except Exception, e:
       Log('[GitHub Vault] TV hook: %s' % e)
 '''
