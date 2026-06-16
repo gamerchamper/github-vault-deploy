@@ -1118,7 +1118,7 @@ const App = {
         await this.saveSettings({ silent: true });
         const result = await API.plex.sync();
         if (result.local_sync_required) {
-          this.toast('Server cannot write locally — use "Write to folder on this PC"', 'info');
+          this.toast(result.message || 'Use "Write to folder on this PC" — server cannot write to your C:\\ path', 'info');
           return;
         }
         const stats = result.stats || {};

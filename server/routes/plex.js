@@ -136,7 +136,8 @@ router.post('/sync', async (req, res) => {
         local_sync_required: true,
         manifest: { ...manifest, stats },
         stats,
-        message: 'Use "Write to folder on this PC" to save STRM files where Plex can read them.',
+        message: 'This path is on your PC — vault.arktic.top cannot write there. '
+          + 'Click "Write to folder on this PC" and select your GitHub Vault folder.',
       });
     }
 

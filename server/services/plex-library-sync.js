@@ -101,6 +101,24 @@ function buildSyncManifest(userId, req) {
   return { manifest, stats };
 }
 
+function isWindowsPath(outputPath) {
+  return /^[a-zA-Z]:[\\/]/.test(String(outputPath || '').trim());
+}
+
+function isUnixAbsolutePath(outputPath) {
+  return String(outputPath || '').trim().startsWith('/');
+}
+
+/** Path targets the user's PC, not this vault server's filesystem. */
+function requiresBrowserSync(outputPath) {
+  const p = String(outputPath || '').trim();
+  if (!p) return true;
+  if (process.platform === 'win32') {
+    return isUnixAbsolutePath(p) && !isWindowsPath(p);
+  }
+  return isWindowsPath(p);
+}
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -112,7 +130,7 @@ function writeEntry(output, entry) {
 }
 
 function canWriteLibraryPath(outputPath) {
-  if (!outputPath) return false;
+  if (!outputPath || requiresBrowserSync(outputPath)) return false;
   try {
     const output = path.resolve(outputPath);
     ensureDir(output);
@@ -150,10 +168,22 @@ function pruneRemoved(output, keepRelativePaths) {
 
 async function syncLibrary(userId, req, outputPath, { prune = true } = {}) {
   if (!outputPath) throw new Error('Plex library path is required');
-  const output = path.resolve(outputPath);
   const { manifest, stats } = buildSyncManifest(userId, req);
 
-  if (!canWriteLibraryPath(output)) {
+  if (requiresBrowserSync(outputPath)) {
+    const err = new Error(
+      'This library path is on your PC, but vault runs on a remote server. '
+      + 'Use "Write to folder on this PC" in Settings — server sync cannot write to C:\\ paths.',
+    );
+    err.code = 'LOCAL_SYNC_REQUIRED';
+    err.manifest = manifest;
+    err.stats = stats;
+    throw err;
+  }
+
+  const output = path.resolve(outputPath);
+
+  if (!canWriteLibraryPath(outputPath)) {
     const err = new Error(
       'Vault server cannot write to this library folder. Use "Write to folder on this PC" in Settings.',
     );
@@ -191,6 +221,7 @@ async function syncLibrary(userId, req, outputPath, { prune = true } = {}) {
 module.exports = {
   safeName,
   buildSyncManifest,
+  requiresBrowserSync,
   canWriteLibraryPath,
   syncLibrary,
 };
