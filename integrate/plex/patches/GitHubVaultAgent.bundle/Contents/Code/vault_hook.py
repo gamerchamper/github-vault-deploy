@@ -8,11 +8,20 @@ VAULT_PATH_MARKERS = ('github vault', 'github-vault', 'github_vault')
 VAULT_URL_MARKERS = ('/api/files/stream/', 'vault.arktic.top', 'github-vault')
 
 
+def string_has_marker(text, markers):
+  if not text:
+    return False
+  for marker in markers:
+    if marker in text:
+      return True
+  return False
+
+
 def is_vault_path(path):
   if not path:
     return False
   normalized = path.replace('\\', '/').lower()
-  return any(marker in normalized for marker in VAULT_PATH_MARKERS)
+  return string_has_marker(normalized, VAULT_PATH_MARKERS)
 
 
 def read_text_file(file_path):
@@ -43,7 +52,7 @@ def is_vault_stream_url(url):
   if not url:
     return False
   normalized = url.replace('\\', '/').lower()
-  return any(marker in normalized for marker in VAULT_URL_MARKERS)
+  return string_has_marker(normalized, VAULT_URL_MARKERS)
 
 
 def extract_file_id_from_stream_url(url):

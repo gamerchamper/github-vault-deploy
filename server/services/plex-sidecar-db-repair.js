@@ -351,6 +351,55 @@ function listStrmMediaRows(db, libraryPath, sectionKey = null) {
     .filter(Boolean);
 }
 
+function auditVaultLibraryPlayback(libraryPath, {
+  dbPath = null,
+  sectionKey = null,
+} = {}) {
+  const resolvedDb = dbPath || defaultPlexLibraryDbPath();
+  if (!resolvedDb || !fs.existsSync(resolvedDb)) {
+    return { ok: false, error: 'Plex library database not found', db_path: resolvedDb };
+  }
+  if (!libraryPath) {
+    return { ok: false, error: 'libraryPath is required' };
+  }
+
+  const Database = require('better-sqlite3');
+  const db = new Database(resolvedDb, { readonly: true });
+  const rows = listStrmMediaRows(db, libraryPath, sectionKey);
+  let needsRepair = 0;
+  let ready = 0;
+  let missingSidecar = 0;
+
+  for (const row of rows) {
+    const sidecar = loadSidecar(row.strm_path || row.part_file);
+    if (!sidecar || sidecar.error) {
+      missingSidecar += 1;
+      needsRepair += 1;
+      continue;
+    }
+    const fields = sidecarToMediaFields(sidecar);
+    const needsRemote = partNeedsRemoteUrl(row.part_file);
+    const streamsOk = partHasRequiredStreams(db, row.part_id, fields?.audioOnly);
+    const playbackReady = !needsRemote && streamsOk;
+    if (playbackReady) {
+      ready += 1;
+    } else {
+      needsRepair += 1;
+    }
+  }
+
+  db.close();
+
+  return {
+    ok: true,
+    db_path: resolvedDb,
+    total_strm: rows.length,
+    ready,
+    needs_repair: needsRepair,
+    missing_sidecar: missingSidecar,
+  };
+}
+
 function repairVaultLibraryFromSidecars(libraryPath, {
   dbPath = null,
   sectionKey = null,
@@ -383,10 +432,10 @@ function repairVaultLibraryFromSidecars(libraryPath, {
       }
 
       const fields = sidecarToMediaFields(sidecar);
-      const streamsOk = partHasRequiredStreams(db, row.part_id, fields?.audioOnly);
-      const metaComplete = row.container && row.duration && streamsOk;
       const needsRemote = partNeedsRemoteUrl(row.part_file);
-      if (metaComplete && !needsRemote) {
+      const streamsOk = partHasRequiredStreams(db, row.part_id, fields?.audioOnly);
+      const playbackReady = !needsRemote && streamsOk;
+      if (playbackReady) {
         results.push({ part_file: row.strm_path || row.part_file, ok: true, skipped: true });
         continue;
       }
@@ -426,6 +475,42 @@ function repairVaultLibraryFromSidecars(libraryPath, {
   };
 }
 
+function discoverVaultLibraryPaths() {
+  const candidates = [];
+  if (process.env.PLEX_VAULT_LIBRARY_PATH) {
+    candidates.push(path.resolve(process.env.PLEX_VAULT_LIBRARY_PATH));
+  }
+
+  const repoRoot = path.resolve(__dirname, '../..');
+  candidates.push(path.join(repoRoot, 'Plex Media Server', 'GitHub Vault'));
+
+  const localBase = process.env.LOCALAPPDATA || process.env.HOME;
+  if (localBase) {
+    candidates.push(path.join(localBase, 'Plex Media Server', 'GitHub Vault'));
+  }
+
+  try {
+    const userSettings = require('./user-settings');
+    for (const row of userSettings.listPlexSyncCandidates()) {
+      if (row.plex_library_path) candidates.push(path.resolve(row.plex_library_path));
+    }
+  } catch {
+    // Vault DB may be unavailable when running standalone repair scripts.
+  }
+
+  const seen = new Set();
+  const paths = [];
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate);
+    const key = resolved.toLowerCase();
+    if (seen.has(key) || !fs.existsSync(resolved)) continue;
+    if (listStrmFiles(resolved).length === 0) continue;
+    seen.add(key);
+    paths.push(resolved);
+  }
+  return paths;
+}
+
 module.exports = {
   STREAM_VIDEO,
   STREAM_AUDIO,
@@ -440,5 +525,7 @@ module.exports = {
   injectThumbnailIntoMetadata,
   injectSidecarIntoMediaRow,
   listStrmMediaRows,
+  discoverVaultLibraryPaths,
+  auditVaultLibraryPlayback,
   repairVaultLibraryFromSidecars,
 };

@@ -205,6 +205,23 @@ describe('plex-sidecar-db-repair', () => {
     verify.close();
   });
 
+  it('discovers vault library paths from PLEX_VAULT_LIBRARY_PATH', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plex-discover-'));
+    const libraryRoot = path.join(tmp, 'GitHub Vault', 'Playlists');
+    fs.mkdirSync(libraryRoot, { recursive: true });
+    fs.writeFileSync(path.join(libraryRoot, 'clip.mp4.strm'), 'https://vault.example/x\n', 'utf8');
+
+    const prev = process.env.PLEX_VAULT_LIBRARY_PATH;
+    process.env.PLEX_VAULT_LIBRARY_PATH = path.join(tmp, 'GitHub Vault');
+    try {
+      const paths = sidecarDbRepair.discoverVaultLibraryPaths();
+      assert.ok(paths.some((entry) => path.resolve(entry) === path.resolve(process.env.PLEX_VAULT_LIBRARY_PATH)));
+    } finally {
+      if (prev == null) delete process.env.PLEX_VAULT_LIBRARY_PATH;
+      else process.env.PLEX_VAULT_LIBRARY_PATH = prev;
+    }
+  });
+
   it('reads stream URL from STRM sidecar files', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plex-strm-'));
     const strmPath = path.join(tmp, 'clip.mp4.strm');
@@ -215,5 +232,62 @@ describe('plex-sidecar-db-repair', () => {
     );
     assert.strictEqual(sidecarDbRepair.partNeedsRemoteUrl(strmPath), true);
     assert.strictEqual(sidecarDbRepair.partNeedsRemoteUrl('https://vault.example/x.mp4'), false);
+  });
+
+  it('audits vault playback readiness from sidecar + DB state', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plex-audit-'));
+    const libraryRoot = path.join(tmp, 'GitHub Vault');
+    const playlistDir = path.join(libraryRoot, 'Playlists', 'Test');
+    fs.mkdirSync(playlistDir, { recursive: true });
+
+    const strmPath = path.join(playlistDir, 'clip.mp4.strm');
+    fs.writeFileSync(strmPath, 'http://127.0.0.1/stream\n', 'utf8');
+    fs.writeFileSync(path.join(playlistDir, 'clip.mp4.vault-item.json'), JSON.stringify({
+      container: 'mp4',
+      duration_sec: 120,
+      video_codec: 'h264',
+      audio_codec: 'aac',
+      audio_channels: 2,
+      width: 1280,
+      height: 720,
+    }), 'utf8');
+
+    const dbPath = path.join(tmp, 'library.db');
+    const Database = require('better-sqlite3');
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE metadata_items (id INTEGER PRIMARY KEY, duration INTEGER, user_thumb_url TEXT, user_art_url TEXT, updated_at INTEGER);
+      CREATE TABLE media_items (
+        id INTEGER PRIMARY KEY, library_section_id INTEGER, metadata_item_id INTEGER,
+        container TEXT, duration INTEGER, video_codec TEXT, audio_codec TEXT, audio_channels INTEGER,
+        width INTEGER, height INTEGER, bitrate INTEGER, display_aspect_ratio REAL,
+        media_analysis_version INTEGER DEFAULT 0, deleted_at INTEGER, updated_at INTEGER
+      );
+      CREATE TABLE media_parts (
+        id INTEGER PRIMARY KEY, media_item_id INTEGER, file TEXT, size INTEGER, duration INTEGER,
+        deleted_at INTEGER, updated_at INTEGER
+      );
+      CREATE TABLE media_streams (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, stream_type_id INTEGER, media_item_id INTEGER,
+        codec TEXT, "index" INTEGER, media_part_id INTEGER, channels INTEGER,
+        created_at INTEGER, updated_at INTEGER, "default" INTEGER DEFAULT 0
+      );
+    `);
+    db.prepare('INSERT INTO metadata_items (id) VALUES (1)').run();
+    db.prepare('INSERT INTO media_items (id, library_section_id, metadata_item_id, container, duration) VALUES (10, 2, 1, \'\', NULL)').run();
+    db.prepare('INSERT INTO media_parts (id, media_item_id, file) VALUES (20, 10, ?)').run(strmPath);
+    db.close();
+
+    const before = sidecarDbRepair.auditVaultLibraryPlayback(libraryRoot, { dbPath, sectionKey: 2 });
+    assert.strictEqual(before.ok, true);
+    assert.strictEqual(before.total_strm, 1);
+    assert.strictEqual(before.ready, 0);
+    assert.strictEqual(before.needs_repair, 1);
+
+    sidecarDbRepair.repairVaultLibraryFromSidecars(libraryRoot, { dbPath, sectionKey: 2 });
+
+    const after = sidecarDbRepair.auditVaultLibraryPlayback(libraryRoot, { dbPath, sectionKey: 2 });
+    assert.strictEqual(after.ready, 1);
+    assert.strictEqual(after.needs_repair, 0);
   });
 });

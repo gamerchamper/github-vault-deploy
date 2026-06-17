@@ -27,7 +27,9 @@
     "plex:integrate": "node scripts/plex-integrate.js",
     "plex:install-agent": "node scripts/plex-install-agent.js",
     "plex:audit": "node scripts/plex-audit.js",
-    "plex:test-agent": "node scripts/plex-test-agent.js"
+    "plex:test-agent": "node scripts/plex-test-agent.js",
+    "plex:repair-db": "node scripts/plex-repair-db.js",
+    "plex:repair-watch": "node scripts/plex-repair-watch.js"
   },
   "dependencies": {
     "@octokit/rest": "^21.1.1",

@@ -305,6 +305,13 @@ app.listen(PORT, () => {
     console.warn('[plex-sync] startup skipped:', err.message);
   }
 
+  try {
+    const plexDbWatchdog = require('./services/plex-db-watchdog');
+    plexDbWatchdog.startPlexDbWatchdog();
+  } catch (err) {
+    console.warn('[plex-db-watchdog] startup skipped:', err.message);
+  }
+
   // Schedule daily audit log cleanup (runs once per 24h, first run after 1 hour)
   setTimeout(() => {
     try {

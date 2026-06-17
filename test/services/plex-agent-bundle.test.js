@@ -62,6 +62,12 @@ describe('plex-agent-bundle', () => {
     assert.doesNotMatch(initPy, /MetadataSearchResult\(id='githubvault'/);
   });
 
+  it('rejects any() in agent hook Python', () => {
+    const python = plexPatches.validateAgentPython(patchBundle);
+    const anyIssue = python.issues.find((issue) => /uses any\(\)/.test(issue));
+    assert.strictEqual(anyIssue, undefined, anyIssue || 'unexpected any() in agent code');
+  });
+
   it('rejects __import__ in agent hook Python', () => {
     const python = plexPatches.validateAgentPython(patchBundle);
     const importIssue = python.issues.find((issue) => /__import__/.test(issue));

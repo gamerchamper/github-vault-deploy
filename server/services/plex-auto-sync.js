@@ -86,6 +86,14 @@ async function runSyncForUser(userId, req, { force = false } = {}) {
           delayMs: 1000,
           skipAnalyze: true,
         });
+        // Agent metadata refresh from library scan can finish after the first repair pass
+        // and rewrite media_parts.file back to local .strm paths. Re-run sidecar DB repair
+        // once the agent queue has had time to settle.
+        await sleep(12000);
+        repair.final_sidecar_db = plexMetadataRepair.repairSectionFromSidecars(
+          settings.plex_library_path,
+          sectionKey,
+        );
       } catch (repairErr) {
         repair = { error: repairErr.message };
       }

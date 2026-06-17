@@ -160,6 +160,12 @@ function validateRestrictedPythonSource(label, source) {
     if (/\b__import__\s*\(/.test(line)) {
       issues.push(`${label}:${lineNo} uses __import__() (RestrictedPython SyntaxError)`);
     }
+    if (/\bany\s*\(/.test(line)) {
+      issues.push(`${label}:${lineNo} uses any() (RestrictedPython NameError in Plex agents)`);
+    }
+    if (/\ball\s*\(/.test(line)) {
+      issues.push(`${label}:${lineNo} uses all() (RestrictedPython NameError in Plex agents)`);
+    }
   });
   return { ok: issues.length === 0, issues };
 }
@@ -362,6 +368,12 @@ function validateAgentPython(bundleDir) {
       }
       if (/\b__import__\s*\(/.test(line)) {
         issues.push(`${file}:${lineNo} uses __import__() (RestrictedPython SyntaxError)`);
+      }
+      if (/\bany\s*\(/.test(line)) {
+        issues.push(`${file}:${lineNo} uses any() (RestrictedPython NameError in Plex agents)`);
+      }
+      if (/\ball\s*\(/.test(line)) {
+        issues.push(`${file}:${lineNo} uses all() (RestrictedPython NameError in Plex agents)`);
       }
     });
   }

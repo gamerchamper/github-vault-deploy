@@ -25,6 +25,8 @@ def vault_tv_search_id(media):
 def is_vault_media(media):
   try:
     import vault_hook
+    if vault_hook is None:
+      return False
     return vault_hook.is_vault_media_tree(media)
   except Exception, err:
     Log('[GitHub Vault agent] vault detection failed: %s' % err)

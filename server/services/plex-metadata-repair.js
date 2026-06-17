@@ -89,7 +89,10 @@ async function applySidecarThumbnailsViaPlex(plexUrl, token, libraryPath, {
 }
 
 /**
- * Re-run sidecar DB repair, apply posters via Plex API, then refresh items still missing media info.
+ * Apply posters via Plex API, optionally refresh legacy items, then run sidecar DB repair last.
+ * Sidecar DB repair must run after any Plex metadata refresh/agent pass — refresh rewrites
+ * media_parts.file back to local .strm paths and clears streams, which makes the transcoder
+ * pass the STRM text file to ffmpeg instead of the remote HTTP URL.
  */
 async function repairSectionMetadata(plexUrl, token, sectionKey, {
   libraryPath = null,
@@ -100,10 +103,10 @@ async function repairSectionMetadata(plexUrl, token, sectionKey, {
 } = {}) {
   if (!sectionKey) throw new Error('Plex library section key is required');
 
-  let sidecarDb = null;
+  if (delayMs > 0) await sleep(delayMs);
+
   let thumbnails = null;
   if (libraryPath) {
-    sidecarDb = repairSectionFromSidecars(libraryPath, sectionKey);
     try {
       thumbnails = await applySidecarThumbnailsViaPlex(plexUrl, token, libraryPath, { sectionKey });
     } catch (err) {
@@ -111,29 +114,37 @@ async function repairSectionMetadata(plexUrl, token, sectionKey, {
     }
   }
 
-  if (delayMs > 0) await sleep(delayMs);
-
   const items = await plexClient.listSectionMetadata(plexUrl, token, sectionKey);
-  const needsRepair = items.filter(plexClient.metadataNeedsAnalysis).slice(0, maxItems);
   const results = [];
+  let needsRepair = [];
 
-  for (const item of needsRepair) {
-    try {
-      await plexClient.refreshMetadataItem(plexUrl, token, item.ratingKey, { force: true });
-      if (!skipAnalyze) {
-        await sleep(itemDelayMs);
-        await plexClient.analyzeMetadataItem(plexUrl, token, item.ratingKey);
+  // Vault .strm items get technical media from sidecars via DB repair. Metadata refresh only
+  // re-triggers the agent/scanner and undoes remote URL + stream injection.
+  if (!libraryPath) {
+    needsRepair = items.filter(plexClient.metadataNeedsAnalysis).slice(0, maxItems);
+    for (const item of needsRepair) {
+      try {
+        await plexClient.refreshMetadataItem(plexUrl, token, item.ratingKey, { force: true });
+        if (!skipAnalyze) {
+          await sleep(itemDelayMs);
+          await plexClient.analyzeMetadataItem(plexUrl, token, item.ratingKey);
+        }
+        results.push({ ratingKey: item.ratingKey, title: item.title, ok: true });
+      } catch (err) {
+        results.push({
+          ratingKey: item.ratingKey,
+          title: item.title,
+          ok: false,
+          error: err.message,
+        });
       }
-      results.push({ ratingKey: item.ratingKey, title: item.title, ok: true });
-    } catch (err) {
-      results.push({
-        ratingKey: item.ratingKey,
-        title: item.title,
-        ok: false,
-        error: err.message,
-      });
+      await sleep(300);
     }
-    await sleep(300);
+  }
+
+  let sidecarDb = null;
+  if (libraryPath) {
+    sidecarDb = repairSectionFromSidecars(libraryPath, sectionKey);
   }
 
   const after = await plexClient.listSectionMetadata(plexUrl, token, sectionKey);
