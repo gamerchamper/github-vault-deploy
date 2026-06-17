@@ -24,6 +24,8 @@ function parseArgs(argv) {
       opts.apiKey = argv[++i];
     } else if ((arg === '--out' || arg === '--output') && argv[i + 1]) {
       opts.output = argv[++i];
+    } else if (arg === '--agent-url' && argv[i + 1]) {
+      opts.agentUrl = argv[++i];
     } else if (arg === '--no-prune') {
       opts.prune = false;
     } else if (arg === '--help' || arg === '-h') {
@@ -43,15 +45,16 @@ Options:
   --key gv_…         Vault API key
   --out PATH         Output folder (default: ./plex-vault-library)
   --config FILE      JSON config with url, apiKey, output, prune
+  --agent-url URL    Future Vault agent URL for local routing (http://127.0.0.1:7420)
   --no-prune         Do not delete removed STRM files
   --help             Show this help
 
 Example:
-  node clients/plex-sync/sync.js --url https://vault.arktic.top --key gv_xxx --out "D:/Plex/Vault"
+  node clients/plex-sync/sync.js --url https://vault.arktic.top --key gv_xxx --out "D:/Plex/Vault" --agent-url http://127.0.0.1:7420
 
-Then in Plex: Add Library → Other Videos → point at the output folder → Scan.
+With --agent-url, STRM files point to the local agent instead of the vault server directly.
+The agent serves HLS playlists from GitHub raw (free) and proxies MP4 streams to vault.
 `);
-}
 
 function safeName(name, max = 140) {
   return String(name || 'Untitled')
@@ -91,11 +94,37 @@ function writeStrm(filePath, streamUrl) {
   fs.writeFileSync(filePath, `${streamUrl}\n`, 'utf8');
 }
 
+function isVaultServerUrl(url) {
+  return /\/api\/files\/(stream|hls)\//.test(url);
+}
+
+function rewriteToAgent(vaultUrl, agentUrl) {
+  const fileMatch = String(vaultUrl).match(/\/api\/files\/(stream|hls)\/([^/?]+)/);
+  if (!fileMatch) return vaultUrl;
+  const fileId = fileMatch[2];
+
+  if (vaultUrl.includes('/hls/')) {
+    return `${agentUrl}/api/m3u8/${fileId}`;
+  }
+
+  const nameMatch = String(vaultUrl).match(/\/api\/files\/stream\/[^/]+\/([^?]+)/);
+  const fileName = nameMatch ? decodeURIComponent(nameMatch[1]) : 'stream';
+  return `${agentUrl}/api/stream/${fileId}/${encodeURIComponent(fileName)}`;
+}
+
+function resolveStreamUrl(item, agentUrl) {
+  const raw = item.strm_url || item.hls_url || item.stream_url;
+  if (agentUrl && isVaultServerUrl(raw)) {
+    return rewriteToAgent(raw, agentUrl);
+  }
+  return raw;
+}
+
 function padIndex(n) {
   return String(n).padStart(2, '0');
 }
 
-async function syncPlaylist(baseUrl, apiKey, playlistId, outDir, manifest, stats) {
+async function syncPlaylist(baseUrl, apiKey, playlistId, outDir, manifest, stats, agentUrl) {
   const playlist = await vaultFetch(baseUrl, apiKey, `/api/plex/playlists/${encodeURIComponent(playlistId)}`);
   ensureDir(outDir);
 
@@ -105,7 +134,7 @@ async function syncPlaylist(baseUrl, apiKey, playlistId, outDir, manifest, stats
     const title = safeName(item.title || item.id);
     const fileName = `${padIndex(i + 1)} - ${title}.strm`;
     const filePath = path.join(outDir, fileName);
-    writeStrm(filePath, item.strm_url || item.hls_url || item.stream_url);
+    writeStrm(filePath, resolveStreamUrl(item, agentUrl));
     manifest.files.push(path.relative(manifest.root, filePath));
     stats.files += 1;
   }
@@ -122,10 +151,15 @@ async function main() {
   const baseUrl = opts.url || opts.vaultUrl;
   const apiKey = opts.apiKey || opts.key;
   const output = path.resolve(opts.output || opts.out || DEFAULT_OUT);
+  const agentUrl = opts.agentUrl || null;
 
   if (!baseUrl || !apiKey) {
     printHelp();
     process.exit(1);
+  }
+
+  if (agentUrl) {
+    console.log(`Agent URL: ${agentUrl} (STRM files will route through local agent)`);
   }
 
   ensureDir(output);
@@ -144,7 +178,7 @@ async function main() {
   const playlistsDir = path.join(output, 'Playlists');
   for (const playlist of hub.playlists || []) {
     const dir = path.join(playlistsDir, safeName(playlist.title));
-    await syncPlaylist(baseUrl, apiKey, playlist.id, dir, manifest, stats);
+    await syncPlaylist(baseUrl, apiKey, playlist.id, dir, manifest, stats, agentUrl);
     console.log(`  Playlist: ${playlist.title} (${playlist.item_count || '?'} items)`);
   }
 
@@ -154,7 +188,7 @@ async function main() {
     const colDir = path.join(collectionsDir, safeName(col.title));
     for (const playlist of col.playlists || []) {
       const dir = path.join(colDir, safeName(playlist.title));
-      await syncPlaylist(baseUrl, apiKey, playlist.id, dir, manifest, stats);
+      await syncPlaylist(baseUrl, apiKey, playlist.id, dir, manifest, stats, agentUrl);
       console.log(`  Collection: ${col.title} / ${playlist.title}`);
     }
     stats.collections += 1;
@@ -171,7 +205,7 @@ async function main() {
         : item.title;
       const fileName = `${padIndex(i + 1)} - ${safeName(label)}.strm`;
       const filePath = path.join(continueDir, fileName);
-      writeStrm(filePath, item.strm_url || item.hls_url || item.stream_url);
+      writeStrm(filePath, resolveStreamUrl(item, agentUrl));
       manifest.files.push(path.relative(manifest.root, filePath));
       stats.files += 1;
     }

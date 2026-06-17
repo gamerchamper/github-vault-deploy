@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const store = require('./store');
 const vaultUpstream = require('./vault-upstream');
+const streamProxy = require('./stream-proxy');
 
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -11,6 +12,32 @@ function writeEntry(output, entry) {
   const filePath = path.join(output, ...entry.path.split('/'));
   ensureDir(path.dirname(filePath));
   fs.writeFileSync(filePath, entry.content, 'utf8');
+}
+
+function rewriteEntryContent(entry, agentUrl) {
+  if (!agentUrl || !entry.path.endsWith('.strm')) return entry;
+
+  const content = String(entry.content || '').trim();
+  if (streamProxy.isVaultServerUrl(content)) {
+    const rewritten = streamProxy.rewriteToAgent(content, agentUrl);
+    return { ...entry, content: `${rewritten}\n` };
+  }
+
+  return entry;
+}
+
+function rewriteSidecarContent(entry, agentUrl) {
+  if (!agentUrl || !entry.path.endsWith('.vault-item.json')) return entry;
+
+  try {
+    const obj = JSON.parse(entry.content);
+    if (obj.stream_url && streamProxy.isVaultServerUrl(obj.stream_url)) {
+      obj.stream_url = streamProxy.rewriteToAgent(obj.stream_url, agentUrl);
+    }
+    return { ...entry, content: `${JSON.stringify(obj, null, 2)}\n` };
+  } catch {
+    return entry;
+  }
 }
 
 function pruneRemoved(output, keepRelativePaths) {
@@ -42,8 +69,20 @@ function applyManifestToLibrary(config, manifest, stats = {}, { prune = true } =
   const output = path.resolve(outputPath);
   ensureDir(output);
 
+  const agentUrl = config.agent_url || 'http://127.0.0.1:7420';
+
   for (const entry of manifest.entries || []) {
-    writeEntry(output, entry);
+    let rewritten = rewriteEntryContent(entry, agentUrl);
+    rewritten = rewriteSidecarContent(rewritten, agentUrl);
+    writeEntry(output, rewritten);
+  }
+
+  if (manifest._meta) {
+    fs.writeFileSync(
+      path.join(output, '.vault-hls-meta.json'),
+      `${JSON.stringify(manifest._meta, null, 2)}\n`,
+      'utf8',
+    );
   }
 
   const diskManifest = {

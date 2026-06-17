@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const { createPlexApiRouter } = require('./routes/plex-api');
 const { createDashboardRouter } = require('./routes/dashboard');
+const { createStreamProxyRouter } = require('./routes/stream-proxy');
 
 function createApp(getConfig) {
   const app = express();
@@ -11,6 +12,7 @@ function createApp(getConfig) {
     res.json({ ok: true, service: 'future-vault', version: '1.0.0' });
   });
 
+  app.use(createStreamProxyRouter(getConfig));
   app.use('/api/plex', createPlexApiRouter(getConfig));
   app.use(createDashboardRouter(getConfig));
 

@@ -109,14 +109,40 @@ async function playlistEntries(userId, items, relDir, req) {
   return { entries, count: items.length, keepPaths };
 }
 
+function buildHlsMeta(fileIds) {
+  const db = require('../db/database');
+  const unique = [...new Set(fileIds.filter(Boolean))];
+  if (!unique.length) return {};
+
+  const meta = {};
+  const rows = db.prepare(`
+    SELECT f.id, f.has_hls, f.hls_playlist_repo_id, f.hls_playlist_path,
+           r.full_name, r.default_branch
+    FROM files f
+    LEFT JOIN storage_repos r ON f.hls_playlist_repo_id = r.id
+    WHERE f.id IN (${unique.map(() => '?').join(',')})
+  `).all(...unique);
+
+  for (const row of rows) {
+    const entry = { has_hls: !!row.has_hls, hls_raw_url: null };
+    if (entry.has_hls && row.full_name && row.default_branch && row.hls_playlist_path) {
+      entry.hls_raw_url = `https://raw.githubusercontent.com/${row.full_name}/${row.default_branch}/${row.hls_playlist_path}`;
+    }
+    meta[row.id] = entry;
+  }
+  return meta;
+}
+
 async function buildSyncManifest(userId, req) {
   const manifest = {
     vault_url: appUrl.getAppUrl(req),
     synced_at: new Date().toISOString(),
     entries: [],
     keep_paths: [],
+    _meta: {},
   };
   const stats = { playlists: 0, collections: 0, files: 0 };
+  const fileIds = [];
 
   const hub = plexBridge.getHub(userId, req);
 
@@ -125,6 +151,9 @@ async function buildSyncManifest(userId, req) {
     const batch = await playlistEntries(userId, full.items || [], relPath('Playlists', safeName(full.title)), req);
     manifest.entries.push(...batch.entries);
     manifest.keep_paths.push(...batch.keepPaths);
+    for (const item of full.items || []) {
+      if (item.id) fileIds.push(item.id);
+    }
     stats.files += batch.count;
     stats.playlists += 1;
   }
@@ -141,6 +170,9 @@ async function buildSyncManifest(userId, req) {
       );
       manifest.entries.push(...batch.entries);
       manifest.keep_paths.push(...batch.keepPaths);
+      for (const item of pl.items || []) {
+        if (item.id) fileIds.push(item.id);
+      }
       stats.files += batch.count;
       stats.playlists += 1;
     }
@@ -166,11 +198,14 @@ async function buildSyncManifest(userId, req) {
           content: sidecarContent,
         });
         manifest.keep_paths.push(relPath('.vault-sidecars', `${item.id}.vault-item.json`));
+        fileIds.push(item.id);
       }
       manifest.keep_paths.push(strmRel, sidecarRel);
       stats.files += 1;
     }
   }
+
+  manifest._meta = buildHlsMeta(fileIds);
 
   return { manifest, stats };
 }
