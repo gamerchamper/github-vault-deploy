@@ -29,7 +29,13 @@
     "plex:audit": "node scripts/plex-audit.js",
     "plex:test-agent": "node scripts/plex-test-agent.js",
     "plex:repair-db": "node scripts/plex-repair-db.js",
-    "plex:repair-watch": "node scripts/plex-repair-watch.js"
+    "plex:repair-watch": "node scripts/plex-repair-watch.js",
+    "future-vault": "node scripts/run-future-vault.js",
+    "future-vault:dev": "node --watch future-vault/src/cli.js start",
+    "future-vault:install": "npm --prefix future-vault install",
+    "future-vault:desktop": "node scripts/run-future-vault.js desktop",
+    "future-vault:dist": "npm --prefix future-vault run dist",
+    "future-vault:pack": "npm --prefix future-vault run pack"
   },
   "dependencies": {
     "@octokit/rest": "^21.1.1",

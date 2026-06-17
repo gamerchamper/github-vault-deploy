@@ -1,15 +1,29 @@
 [
   {
+    "id": "agent_url",
+    "type": "text",
+    "label": "Future Vault Agent URL",
+    "default": "http://127.0.0.1:7420",
+    "option": "false"
+  },
+  {
+    "id": "agent_api_key",
+    "type": "text",
+    "label": "Future Vault API Key (fv_…)",
+    "default": "",
+    "option": "hidden"
+  },
+  {
     "id": "vault_url",
     "type": "text",
-    "label": "GitHub Vault URL",
+    "label": "GitHub Vault URL (fallback)",
     "default": "",
     "option": "false"
   },
   {
     "id": "api_key",
     "type": "text",
-    "label": "API Key (gv_…)",
+    "label": "GitHub Vault API Key (gv_…)",
     "default": "",
     "option": "hidden"
   }

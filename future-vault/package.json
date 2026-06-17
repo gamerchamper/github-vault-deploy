@@ -1,0 +1,72 @@
+{
+  "name": "future-vault",
+  "version": "1.0.0",
+  "description": "Future Vault — native local agent for Plex sync, cache, and DB repair",
+  "main": "src/desktop-main.js",
+  "bin": {
+    "future-vault": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js start",
+    "desktop": "node src/cli.js desktop",
+    "dev": "node --watch src/cli.js start",
+    "test": "mocha test/**/*.test.js --timeout 15000 --exit",
+    "dist": "electron-builder",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.futurevault.agent",
+    "productName": "Future Vault",
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../server/services",
+        "to": "github-vault/server/services",
+        "filter": [
+          "plex*.js",
+          "user-settings.js",
+          "app-url.js"
+        ]
+      },
+      {
+        "from": "../server/db",
+        "to": "github-vault/server/db",
+        "filter": [
+          "database.js"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities"
+    }
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "dotenv": "^16.4.5",
+    "electron": "^33.4.11",
+    "express": "^4.21.0",
+    "github-vault": "file:.."
+  },
+  "devDependencies": {
+    "chai": "^4.3.10",
+    "electron-builder": "^25.1.8",
+    "mocha": "^10.2.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

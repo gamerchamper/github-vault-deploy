@@ -517,9 +517,41 @@ function deployUserPlugins(plexDataDir) {
   return deployed;
 }
 
-function writePluginPreferences(plexDataDir, { vaultUrl, apiKey }) {
+function readFutureVaultConfig() {
+  try {
+    const os = require('os');
+    let dataDir;
+    if (process.env.FUTURE_VAULT_DATA) {
+      dataDir = path.resolve(process.env.FUTURE_VAULT_DATA);
+    } else if (process.platform === 'win32') {
+      dataDir = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Future Vault');
+    } else if (process.platform === 'darwin') {
+      dataDir = path.join(os.homedir(), 'Library', 'Application Support', 'Future Vault');
+    } else {
+      dataDir = path.join(os.homedir(), '.future-vault');
+    }
+    const configPath = path.join(dataDir, 'config.json');
+    if (!fs.existsSync(configPath)) return null;
+    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writePluginPreferences(plexDataDir, {
+  vaultUrl,
+  apiKey,
+  agentUrl = null,
+  agentApiKey = null,
+} = {}) {
+  const futureVault = readFutureVaultConfig();
+  const prefs = {
+    agent_url: agentUrl || futureVault?.agent_url || 'http://127.0.0.1:7420',
+    agent_api_key: agentApiKey || futureVault?.api_key || apiKey || '',
+    vault_url: vaultUrl || futureVault?.vault_url || '',
+    api_key: apiKey || futureVault?.vault_api_key || '',
+  };
   const prefDir = path.join(plexDataDir, 'Plug-in Support', 'Preferences');
-  const prefs = { vault_url: vaultUrl, api_key: apiKey };
   const files = [
     path.join(prefDir, 'com.githubvault.plex.channel.xml'),
     path.join(prefDir, 'com.githubvault.plex.agent.xml'),

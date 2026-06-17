@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Future Vault</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="mesh"></div>
+  <div class="grid-overlay"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 48 48" fill="none"><path d="M24 4L42 14v20L24 44 6 34V14L24 4z" stroke="currentColor" stroke-width="1.5"/><circle cx="24" cy="24" r="6" fill="currentColor" opacity=".9"/></svg>
+      </div>
+      <div>
+        <h1>Future Vault</h1>
+        <p class="tagline">Local agent · Plex · offline cache</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span class="pill" id="agent-url">—</span>
+      <button type="button" class="btn btn-ghost" id="btn-sync">Sync now</button>
+      <button type="button" class="btn btn-primary" id="btn-repair">Repair Plex DB</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="hero card glass">
+      <div class="hero-glow"></div>
+      <div class="hero-content">
+        <p class="eyebrow">System status</p>
+        <h2 id="hero-title">Initializing…</h2>
+        <p class="hero-sub" id="hero-sub">Connecting to local services</p>
+        <div class="hero-stats">
+          <div class="stat-ring" data-state="unknown" id="ring-vault">
+            <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" class="ring-bg"/><circle cx="50" cy="50" r="42" class="ring-fg"/></svg>
+            <span>Vault</span>
+          </div>
+          <div class="stat-ring" data-state="unknown" id="ring-plex">
+            <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" class="ring-bg"/><circle cx="50" cy="50" r="42" class="ring-fg"/></svg>
+            <span>Plex</span>
+          </div>
+          <div class="stat-ring" data-state="unknown" id="ring-playback">
+            <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" class="ring-bg"/><circle cx="50" cy="50" r="42" class="ring-fg"/></svg>
+            <span>Playback</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="metrics">
+      <article class="card glass metric">
+        <p class="label">Library items</p>
+        <p class="value" id="metric-strm">—</p>
+        <p class="hint" id="metric-playback-hint">Sidecar DB audit</p>
+      </article>
+      <article class="card glass metric">
+        <p class="label">Last sync</p>
+        <p class="value value-sm" id="metric-sync">—</p>
+        <p class="hint" id="metric-sync-source">—</p>
+      </article>
+      <article class="card glass metric">
+        <p class="label">Last repair</p>
+        <p class="value value-sm" id="metric-repair">—</p>
+        <p class="hint" id="metric-repair-hint">—</p>
+      </article>
+      <article class="card glass metric">
+        <p class="label">Auto sync</p>
+        <p class="value value-sm" id="metric-interval">—</p>
+        <p class="hint">Background scheduler</p>
+      </article>
+    </section>
+
+    <section class="split">
+      <article class="card glass panel">
+        <div class="panel-head">
+          <h3>Activity</h3>
+          <span class="live-dot"></span>
+        </div>
+        <ul class="feed" id="event-feed"></ul>
+      </article>
+
+      <article class="card glass panel">
+        <div class="panel-head">
+          <h3>Configuration</h3>
+        </div>
+        <form id="config-form" class="config-form">
+          <label>
+            <span>GitHub Vault URL</span>
+            <input type="url" name="vault_url" placeholder="https://vault.example.com" autocomplete="off">
+          </label>
+          <label>
+            <span>Vault API key</span>
+            <input type="text" name="vault_api_key" placeholder="gv_…" autocomplete="off" spellcheck="false">
+          </label>
+          <label>
+            <span>Plex library folder</span>
+            <input type="text" name="plex_library_path" placeholder="C:\…\GitHub Vault">
+          </label>
+          <label>
+            <span>Plex server URL</span>
+            <input type="url" name="plex_server_url" placeholder="http://127.0.0.1:32400">
+          </label>
+          <label>
+            <span>Plex token</span>
+            <input type="text" name="plex_token" placeholder="Optional — for library refresh" autocomplete="off" spellcheck="false">
+          </label>
+          <label>
+            <span>Section key</span>
+            <input type="text" name="plex_section_key" placeholder="e.g. 2">
+          </label>
+          <label>
+            <span>Sync interval (minutes)</span>
+            <input type="number" name="sync_interval_minutes" min="1" max="1440" value="15">
+          </label>
+          <div class="toggles">
+            <label class="toggle"><input type="checkbox" name="auto_sync" checked> Auto sync</label>
+            <label class="toggle"><input type="checkbox" name="auto_repair" checked> Auto repair</label>
+            <label class="toggle"><input type="checkbox" name="auto_plugin" checked> Maintain plugins</label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save settings</button>
+            <button type="button" class="btn btn-ghost" id="btn-plugins">Fix plugins</button>
+          </div>
+        </form>
+        <div class="api-key-block">
+          <label class="api-key-label">
+            <span>Agent API key (for Plex plugin)</span>
+            <div class="api-key-row">
+              <code id="api-key-display">—</code>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-copy-key">Copy</button>
+            </div>
+          </label>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Closing the window keeps Future Vault in the system tray. Use tray → Quit to fully exit.</span>
+  </footer>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>
