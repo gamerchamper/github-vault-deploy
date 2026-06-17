@@ -117,6 +117,7 @@ function buildHlsMeta(fileIds) {
   const meta = {};
   const rows = db.prepare(`
     SELECT f.id, f.has_hls, f.hls_playlist_repo_id, f.hls_playlist_path,
+           f.has_thumbnail,
            r.full_name, r.default_branch
     FROM files f
     LEFT JOIN storage_repos r ON f.hls_playlist_repo_id = r.id
@@ -124,7 +125,11 @@ function buildHlsMeta(fileIds) {
   `).all(...unique);
 
   for (const row of rows) {
-    const entry = { has_hls: !!row.has_hls, hls_raw_url: null };
+    const entry = {
+      has_hls: !!row.has_hls,
+      has_thumbnail: !!row.has_thumbnail,
+      hls_raw_url: null,
+    };
     if (entry.has_hls && row.full_name && row.default_branch && row.hls_playlist_path) {
       entry.hls_raw_url = `https://raw.githubusercontent.com/${row.full_name}/${row.default_branch}/${row.hls_playlist_path}`;
     }

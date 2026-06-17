@@ -31,10 +31,29 @@ function rewriteSidecarContent(entry, agentUrl) {
 
   try {
     const obj = JSON.parse(entry.content);
+    let changed = false;
+
     if (obj.stream_url && streamProxy.isVaultServerUrl(obj.stream_url)) {
       obj.stream_url = streamProxy.rewriteToAgent(obj.stream_url, agentUrl);
+      changed = true;
     }
-    return { ...entry, content: `${JSON.stringify(obj, null, 2)}\n` };
+
+    if (obj.thumbnail_url && streamProxy.isVaultThumbnailUrl(obj.thumbnail_url)) {
+      obj.thumbnail_url = streamProxy.rewriteThumbnailUrl(obj.thumbnail_url, agentUrl);
+      changed = true;
+    }
+
+    if (obj.art_url && streamProxy.isVaultThumbnailUrl(obj.art_url)) {
+      obj.art_url = streamProxy.rewriteThumbnailUrl(obj.art_url, agentUrl);
+      changed = true;
+    }
+
+    if (!obj.art_url && obj.thumbnail_url) {
+      obj.art_url = obj.thumbnail_url;
+      changed = true;
+    }
+
+    return changed ? { ...entry, content: `${JSON.stringify(obj, null, 2)}\n` } : entry;
   } catch {
     return entry;
   }

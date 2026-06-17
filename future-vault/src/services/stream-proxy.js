@@ -96,6 +96,22 @@ function isVaultServerUrl(url) {
   return /\/api\/files\/(stream|hls)\//.test(url);
 }
 
+function isVaultThumbnailUrl(url) {
+  return /\/api\/files\/thumbnail\//.test(url);
+}
+
+function extractFileIdFromAny(url) {
+  const match = String(url).match(/\/(?:stream|hls|thumbnail)\/([^/?]+)/);
+  return match ? match[1] : null;
+}
+
+function rewriteThumbnailUrl(vaultUrl, agentUrl) {
+  if (!agentUrl || !isVaultThumbnailUrl(vaultUrl)) return vaultUrl;
+  const fileId = extractFileIdFromAny(vaultUrl);
+  if (!fileId) return vaultUrl;
+  return `${agentUrl}/api/thumbnail/${fileId}`;
+}
+
 function rewriteToAgent(vaultUrl, agentUrl) {
   const fileId = extractFileId(vaultUrl);
   if (!fileId) return vaultUrl;
@@ -162,13 +178,72 @@ async function fetchWithRetry(url, apiKey, timeoutMs = 30000) {
   }
 }
 
+async function serveThumbnail(fileId, vaultConfig, cacheDir) {
+  if (!cacheDir) {
+    cacheDir = require('path').join(require('os').tmpdir(), 'future-vault-thumbnails');
+  }
+
+  const fs = require('fs');
+  const path = require('path');
+  const cacheFile = path.join(cacheDir, `${fileId}.thumb.jpg`);
+
+  fs.mkdirSync(cacheDir, { recursive: true });
+
+  if (fs.existsSync(cacheFile)) {
+    const stat = fs.statSync(cacheFile);
+    return { from: 'cache', content: fs.readFileSync(cacheFile), contentLength: stat.size };
+  }
+
+  if (vaultConfig && vaultConfig.vault_url && vaultConfig.vault_api_key) {
+    const base = String(vaultConfig.vault_url).replace(/\/+$/, '');
+    const vaultUrl = `${base}/api/files/thumbnail/${fileId}`;
+    try {
+      const buf = await fetchWithRetry(vaultUrl, vaultConfig.vault_api_key, 15000);
+      if (buf && buf.length > 0) {
+        try {
+          fs.writeFileSync(cacheFile, buf);
+          manageThumbnailCache(cacheDir, 200);
+        } catch {
+          // cache write failure is non-fatal
+        }
+        return { from: 'vault', content: buf, contentLength: buf.length };
+      }
+    } catch {
+      // vault fetch failed, fall through
+    }
+  }
+
+  return null;
+}
+
+function manageThumbnailCache(cacheDir, maxFiles = 200) {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const files = fs.readdirSync(cacheDir)
+      .filter((f) => f.endsWith('.thumb.jpg'))
+      .map((f) => path.join(cacheDir, f))
+      .sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs);
+
+    while (files.length > maxFiles) {
+      fs.unlinkSync(files.shift());
+    }
+  } catch {
+    // cleanup failure is non-fatal
+  }
+}
+
 module.exports = {
   fetchUrl,
   proxyRequest,
   extractFileId,
   extractFileName,
   isVaultServerUrl,
+  isVaultThumbnailUrl,
+  extractFileIdFromAny,
   rewriteToAgent,
+  rewriteThumbnailUrl,
   serveHlsPlaylist,
+  serveThumbnail,
   fetchWithRetry,
 };

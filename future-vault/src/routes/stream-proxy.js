@@ -75,6 +75,30 @@ function createStreamProxyRouter(getConfig) {
     streamProxy.proxyRequest(req, res, targetUrl);
   });
 
+  router.get('/api/thumbnail/:fileId', async (req, res) => {
+    try {
+      const config = getConfig();
+      const fileId = req.params.fileId;
+      const vaultConfig = getVaultConfig(config);
+      const cacheDir = config.cache_dir
+        ? require('path').join(config.cache_dir, 'thumbnails')
+        : null;
+
+      const result = await streamProxy.serveThumbnail(fileId, vaultConfig, cacheDir);
+      if (!result) {
+        return res.status(404).json({ error: 'Thumbnail not available' });
+      }
+
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+      res.setHeader('X-Thumb-Source', result.from);
+      res.setHeader('Content-Length', result.contentLength);
+      res.end(result.content);
+    } catch (err) {
+      res.status(502).json({ error: 'Thumbnail unavailable', detail: err.message });
+    }
+  });
+
   return router;
 }
 
