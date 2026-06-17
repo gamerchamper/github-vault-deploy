@@ -86,7 +86,9 @@ function createStreamProxyRouter(getConfig) {
 
       const result = await streamProxy.serveThumbnail(fileId, vaultConfig, cacheDir);
       if (!result) {
-        return res.status(404).json({ error: 'Thumbnail not available' });
+        res.setHeader('Cache-Control', 'public, max-age=60');
+        res.status(404).end();
+        return;
       }
 
       res.setHeader('Content-Type', 'image/jpeg');
@@ -95,7 +97,7 @@ function createStreamProxyRouter(getConfig) {
       res.setHeader('Content-Length', result.contentLength);
       res.end(result.content);
     } catch (err) {
-      res.status(502).json({ error: 'Thumbnail unavailable', detail: err.message });
+      res.status(502).end();
     }
   });
 

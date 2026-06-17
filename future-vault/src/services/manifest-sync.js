@@ -43,6 +43,11 @@ function rewriteSidecarContent(entry, agentUrl) {
       changed = true;
     }
 
+    if (!obj.thumbnail_url && obj.file_id) {
+      obj.thumbnail_url = `${agentUrl}/api/thumbnail/${obj.file_id}`;
+      changed = true;
+    }
+
     if (obj.art_url && streamProxy.isVaultThumbnailUrl(obj.art_url)) {
       obj.art_url = streamProxy.rewriteThumbnailUrl(obj.art_url, agentUrl);
       changed = true;

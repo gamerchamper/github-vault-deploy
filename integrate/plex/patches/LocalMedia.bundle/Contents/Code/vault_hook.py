@@ -597,14 +597,55 @@ def apply_sidecar(metadata, sidecar, file_path):
     metadata.summary = summary
 
   thumb = sidecar.get('thumbnail_url')
+  valid_thumbs = []
+  valid_posters = []
+  valid_art = []
+
   if thumb:
-    metadata.thumbs[thumb] = Proxy.Media(thumb)
     try:
-      metadata.posters[thumb] = Proxy.Media(thumb)
+      thumb_data = HTTP.Request(thumb, cacheTime=3600).content
     except Exception:
-      pass
-    if not metadata.art:
-      metadata.art = thumb
+      thumb_data = None
+
+    if thumb_data:
+      metadata.thumbs[thumb] = Proxy.Preview(thumb_data, sort_order=1)
+      valid_thumbs.append(thumb)
+
+      try:
+        metadata.posters[thumb] = Proxy.Preview(thumb_data, sort_order=1)
+        valid_posters.append(thumb)
+      except Exception:
+        pass
+
+  art_url = sidecar.get('art_url') or thumb
+  if art_url:
+    try:
+      art_data = HTTP.Request(art_url, cacheTime=3600).content
+    except Exception:
+      art_data = None
+
+    if art_data:
+      try:
+        metadata.art[art_url] = Proxy.Preview(art_data, sort_order=1)
+        valid_art.append(art_url)
+      except Exception:
+        try:
+          metadata.art = art_url
+        except Exception:
+          pass
+
+  try:
+    metadata.thumbs.validate_keys(valid_thumbs)
+  except Exception:
+    pass
+  try:
+    metadata.posters.validate_keys(valid_posters)
+  except Exception:
+    pass
+  try:
+    metadata.art.validate_keys(valid_art)
+  except Exception:
+    pass
 
   duration = sidecar.get('duration_sec')
   if duration:
@@ -612,10 +653,6 @@ def apply_sidecar(metadata, sidecar, file_path):
       metadata.duration = int(float(duration) * 1000)
     except Exception:
       pass
-
-  art = sidecar.get('art_url') or thumb
-  if art:
-    metadata.art = art
 
   technical = apply_media_technical(metadata, sidecar, file_path)
   if technical:

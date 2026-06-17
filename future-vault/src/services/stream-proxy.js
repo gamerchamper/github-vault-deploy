@@ -198,7 +198,7 @@ async function serveThumbnail(fileId, vaultConfig, cacheDir) {
     const base = String(vaultConfig.vault_url).replace(/\/+$/, '');
     const vaultUrl = `${base}/api/files/thumbnail/${fileId}`;
     try {
-      const buf = await fetchWithRetry(vaultUrl, vaultConfig.vault_api_key, 15000);
+      const buf = await fetchWithRetry(vaultUrl, vaultConfig.vault_api_key, 30000);
       if (buf && buf.length > 0) {
         try {
           fs.writeFileSync(cacheFile, buf);
