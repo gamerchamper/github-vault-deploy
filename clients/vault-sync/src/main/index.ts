@@ -1,14 +1,16 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog, shell, Notification } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { openDatabase, closeDatabase } from '../db/database';
+import { openDatabase, closeDatabase, getDatabase } from '../db/database';
 import { getSettings, updateSettings } from '../db/settings-repo';
 import * as queueRepo from '../db/queue-repo';
+import * as fileTreeRepo from '../db/file-tree-repo';
 import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange } from '../core/sync-engine';
 import { startWatcher, stopWatcher } from '../core/file-watcher';
 import { startProcessing, stopProcessing, setProgressHandler } from '../core/upload-queue';
 import { VaultApiClient } from '../core/api-client';
 import { logger } from '../services/logger';
+import { computeBufferHash } from '../services/hasher';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -226,7 +228,45 @@ function setupIPC(): void {
 
   ipcMain.handle('get-queue', () => queueRepo.getAllQueueEntries());
 
+  ipcMain.handle('get-file-tree', () => {
+    const fileTreeRepo = require('../db/file-tree-repo');
+    return fileTreeRepo.getAllFiles();
+  });
+
   ipcMain.handle('open-folder', (_event, folderPath: string) => {
     if (fs.existsSync(folderPath)) shell.openPath(folderPath);
+  });
+
+  ipcMain.handle('download-file', async (_event, fileId: string, localRelPath: string) => {
+    const settings = getSettings();
+    if (!settings.serverUrl || !settings.apiKey) return { ok: false, error: 'Not authenticated' };
+
+    const api = new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
+    const absPath = path.join(settings.syncRootPath, localRelPath);
+
+    try {
+      const result = await api.downloadFile(fileId, localRelPath);
+      if (!result.ok) return { ok: false, error: result.error.message };
+
+      const dir = path.dirname(absPath);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(absPath, Buffer.from(result.value));
+
+      fileTreeRepo.upsertFile(getDatabase(), {
+        fileId, localRelPath,
+        remotePath: '/' + localRelPath.replace(/\\/g, '/'),
+        name: path.basename(localRelPath),
+        size: result.value.byteLength,
+        mimeType: null, isFolder: false,
+        localMtimeMs: fs.statSync(absPath).mtimeMs,
+        localHash: computeBufferHash(Buffer.from(result.value)),
+        remoteHash: null, remoteUpdatedAt: null,
+        syncStatus: 'synced', syncTaskId: null, syncError: null,
+      });
+
+      return { ok: true, size: result.value.byteLength };
+    } catch (e: unknown) {
+      return { ok: false, error: (e as Error).message };
+    }
   });
 }

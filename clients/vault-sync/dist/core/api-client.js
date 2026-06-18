@@ -25,7 +25,10 @@ class VaultApiClient {
         try {
             const res = await baseFetch(`${this.baseUrl}${path}`, {
                 ...init,
-                headers: { ...this.authHeaders(), ...init.headers },
+                headers: {
+                    ...this.authHeaders(),
+                    ...init.headers,
+                },
             }, timeoutMs);
             if (!res.ok) {
                 const text = await res.text().catch(() => '');
@@ -66,6 +69,70 @@ class VaultApiClient {
             body: JSON.stringify({ ids, destination }),
         });
     }
+    async uploadFile(fileBuffer, fileName, parentPath = '/', chunkSize) {
+        const fd = new FormData();
+        fd.append('file', new Blob([fileBuffer]), fileName);
+        fd.append('path', parentPath);
+        if (chunkSize)
+            fd.append('chunkSize', String(chunkSize));
+        try {
+            const res = await baseFetch(`${this.baseUrl}/api/files/upload`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${this.config.apiKey}` },
+                body: fd,
+            }, 120000);
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                return (0, result_1.err)({ message: text || `HTTP ${res.status}`, status: res.status });
+            }
+            return (0, result_1.ok)(await res.json());
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return (0, result_1.err)({ message: msg, status: 0 });
+        }
+    }
+    async getUploadProgress(jobId) {
+        return this.request(`/api/files/upload-progress/${jobId}`);
+    }
+    async uploadInit(fileName, parentPath, size, mimeType) {
+        return this.request('/api/files/upload/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileName, path: parentPath, size, mimeType }),
+        });
+    }
+    async uploadChunk(fileId, chunkIndex, chunkBuffer, taskId) {
+        const fd = new FormData();
+        fd.append('chunk', new Blob([chunkBuffer]));
+        fd.append('fileId', fileId);
+        fd.append('chunkIndex', String(chunkIndex));
+        if (taskId)
+            fd.append('taskId', taskId);
+        try {
+            const res = await baseFetch(`${this.baseUrl}/api/files/upload/chunk`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${this.config.apiKey}` },
+                body: fd,
+            }, 120000);
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                return (0, result_1.err)({ message: text || `HTTP ${res.status}`, status: res.status });
+            }
+            return (0, result_1.ok)(await res.json());
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return (0, result_1.err)({ message: msg, status: 0 });
+        }
+    }
+    async uploadComplete(fileId, taskId) {
+        return this.request('/api/files/upload/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId, taskId }),
+        });
+    }
     async getTasks(params) {
         const search = new URLSearchParams();
         if (params?.active)
@@ -82,6 +149,44 @@ class VaultApiClient {
     }
     async getFolders() {
         return this.request('/api/files/folders');
+    }
+    async downloadFile(fileId, filePath, onProgress) {
+        try {
+            const res = await baseFetch(`${this.baseUrl}/api/files/stream/${fileId}`, {
+                headers: this.authHeaders(),
+            }, 120000);
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                return (0, result_1.err)({ message: text || `HTTP ${res.status}`, status: res.status });
+            }
+            const total = parseInt(res.headers.get('content-length') || '0', 10);
+            const reader = res.body?.getReader();
+            if (!reader)
+                return (0, result_1.err)({ message: 'No response body', status: 0 });
+            const chunks = [];
+            let received = 0;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done)
+                    break;
+                chunks.push(value);
+                received += value.length;
+                if (onProgress && total > 0)
+                    onProgress(Math.round((received / total) * 100));
+            }
+            const totalSize = chunks.reduce((s, c) => s + c.length, 0);
+            const buf = new Uint8Array(totalSize);
+            let offset = 0;
+            for (const chunk of chunks) {
+                buf.set(chunk, offset);
+                offset += chunk.length;
+            }
+            return (0, result_1.ok)(buf.buffer);
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return (0, result_1.err)({ message: msg, status: 0 });
+        }
     }
 }
 exports.VaultApiClient = VaultApiClient;

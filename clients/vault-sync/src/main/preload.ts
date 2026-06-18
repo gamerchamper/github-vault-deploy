@@ -8,7 +8,10 @@ contextBridge.exposeInMainWorld('vaultSync', {
   testConnection: (serverUrl: string, apiKey: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('test-connection', serverUrl, apiKey),
   getQueue: (): Promise<unknown[]> => ipcRenderer.invoke('get-queue'),
+  getFileTree: (): Promise<unknown[]> => ipcRenderer.invoke('get-file-tree'),
   openFolder: (path: string): Promise<void> => ipcRenderer.invoke('open-folder', path),
+  downloadFile: (fileId: string, localRelPath: string): Promise<{ ok: boolean; size?: number; error?: string }> =>
+    ipcRenderer.invoke('download-file', fileId, localRelPath),
 
   onSyncState: (cb: (state: unknown) => void): (() => void) => {
     const handler = (_event: unknown, state: unknown) => cb(state);

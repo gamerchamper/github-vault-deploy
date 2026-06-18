@@ -31,7 +31,10 @@ export class VaultApiClient {
     try {
       const res = await baseFetch(`${this.baseUrl}${path}`, {
         ...init,
-        headers: { ...this.authHeaders(), ...(init.headers as Record<string, string>) },
+        headers: {
+          ...this.authHeaders(),
+          ...(init.headers as Record<string, string>),
+        },
       }, timeoutMs);
 
       if (!res.ok) {
@@ -79,6 +82,84 @@ export class VaultApiClient {
     });
   }
 
+  async uploadFile(
+    fileBuffer: Buffer,
+    fileName: string,
+    parentPath = '/',
+    chunkSize?: number,
+  ): Promise<Result<{ jobId: string; fileName: string; estimatedChunks: number }>> {
+    const fd = new FormData();
+    fd.append('file', new Blob([fileBuffer]), fileName);
+    fd.append('path', parentPath);
+    if (chunkSize) fd.append('chunkSize', String(chunkSize));
+
+    try {
+      const res = await baseFetch(`${this.baseUrl}/api/files/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.config.apiKey}` },
+        body: fd,
+      }, 120000);
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+      }
+      return ok(await res.json() as any);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err({ message: msg, status: 0 });
+    }
+  }
+
+  async getUploadProgress(jobId: string): Promise<Result<{ status?: string; phase?: string; percent?: number; error?: string }>> {
+    return this.request(`/api/files/upload-progress/${jobId}`);
+  }
+
+  async uploadInit(
+    fileName: string, parentPath: string, size: number, mimeType?: string,
+  ): Promise<Result<{ fileId: string; jobId: string; totalChunks: number; chunkSize: number; chunksDone: number }>> {
+    return this.request('/api/files/upload/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName, path: parentPath, size, mimeType }),
+    });
+  }
+
+  async uploadChunk(
+    fileId: string, chunkIndex: number, chunkBuffer: Buffer, taskId?: string,
+  ): Promise<Result<{ skipped: boolean; chunkIndex: number; chunksDone: number; totalChunks: number; percent: number }>> {
+    const fd = new FormData();
+    fd.append('chunk', new Blob([chunkBuffer]));
+    fd.append('fileId', fileId);
+    fd.append('chunkIndex', String(chunkIndex));
+    if (taskId) fd.append('taskId', taskId);
+
+    try {
+      const res = await baseFetch(`${this.baseUrl}/api/files/upload/chunk`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.config.apiKey}` },
+        body: fd,
+      }, 120000);
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+      }
+      return ok(await res.json() as any);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err({ message: msg, status: 0 });
+    }
+  }
+
+  async uploadComplete(fileId: string, taskId?: string): Promise<Result<{ id: string; name: string; size: number }>> {
+    return this.request('/api/files/upload/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileId, taskId }),
+    });
+  }
+
   async getTasks(params?: { active?: boolean; resumable?: boolean }): Promise<Result<{ tasks: unknown[] }>> {
     const search = new URLSearchParams();
     if (params?.active) search.set('active', '1');
@@ -96,5 +177,41 @@ export class VaultApiClient {
 
   async getFolders(): Promise<Result<{ folders: string[] }>> {
     return this.request('/api/files/folders');
+  }
+
+  async downloadFile(fileId: string, filePath: string, onProgress?: (pct: number) => void): Promise<Result<ArrayBuffer>> {
+    try {
+      const res = await baseFetch(`${this.baseUrl}/api/files/stream/${fileId}`, {
+        headers: this.authHeaders(),
+      }, 120000);
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+      }
+
+      const total = parseInt(res.headers.get('content-length') || '0', 10);
+      const reader = res.body?.getReader();
+      if (!reader) return err({ message: 'No response body', status: 0 });
+
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (onProgress && total > 0) onProgress(Math.round((received / total) * 100));
+      }
+
+      const totalSize = chunks.reduce((s, c) => s + c.length, 0);
+      const buf = new Uint8Array(totalSize);
+      let offset = 0;
+      for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.length; }
+      return ok(buf.buffer);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return err({ message: msg, status: 0 });
+    }
   }
 }

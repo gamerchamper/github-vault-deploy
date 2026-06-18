@@ -14,6 +14,7 @@ function switchTab(name) {
   var tab = document.getElementById('tab-' + name);
   if (tab) tab.classList.add('active');
   if (name === 'queue') refreshQueue();
+  if (name === 'status') refreshFilesTable();
 }
 
 var logs = [];
@@ -29,8 +30,58 @@ function updateStatusBar(state) {
 
 function updateStats(state) {
   setText('stat-total', String(state.totalFiles));
-  setText('stat-uploading', String(state.pendingUploads));
   setText('stat-conflicts', String(state.conflictCount));
+}
+
+function formatBytes(n) {
+  if (!n || n === 0) return '0 B';
+  var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  var i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+async function refreshFilesTable() {
+  var tbody = document.querySelector('#files-table tbody');
+  if (!tbody) return;
+  var files = [];
+  try { files = await window.vaultSync.getFileTree(); } catch (err) { files = []; }
+  if (!files.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text2)">No files found — add files to your sync folder</td></tr>';
+    return;
+  }
+  var synced = 0, other = 0;
+  tbody.innerHTML = files.map(function(f) {
+    if (f.syncStatus === 'synced') synced++;
+    else other++;
+    var badgeClass = f.syncStatus === 'synced' ? 'badge-synced'
+      : f.syncStatus === 'downloading' ? 'badge-uploading'
+      : f.syncStatus === 'uploading' || f.syncStatus === 'hashing' ? 'badge-uploading'
+      : f.syncStatus === 'error' || f.syncStatus === 'conflict' ? 'badge-error'
+      : 'badge-pending';
+    var actionCol = '';
+    if (f.syncStatus === 'remote_only' && !f.isFolder) {
+      actionCol = '<button class="btn btn-sm btn-primary" onclick="downloadFile(\'' + escapeHtml(f.fileId || '') + '\', \'' + escapeHtml(f.localRelPath) + '\')">Download</button>';
+    }
+    return '<tr><td>' + escapeHtml(f.localRelPath)
+      + '</td><td><span class="badge ' + badgeClass + '">' + f.syncStatus + '</span>'
+      + '</td><td>' + formatBytes(f.size) + '</td>'
+      + '<td>' + actionCol + '</td></tr>';
+  }).join('');
+  setText('stat-synced', String(synced));
+  setText('stat-uploading', String(other));
+}
+
+async function downloadFile(fileId, localRelPath) {
+  if (!fileId) return alert('No file ID available');
+  setText('conn-status', 'Downloading ' + localRelPath + '...');
+  var result = await window.vaultSync.downloadFile(fileId, localRelPath);
+  if (result.ok) {
+    setText('conn-status', 'Downloaded ' + formatBytes(result.size));
+  } else {
+    setText('conn-status', 'Download failed: ' + (result.error || 'Unknown error'));
+  }
+  setTimeout(refreshUI, 1000);
 }
 
 function updateSettingsUI(settings) {
@@ -60,6 +111,7 @@ async function refreshUI() {
     updateStatusBar(state);
     updateStats(state);
     updateSettingsUI(settings);
+    refreshFilesTable();
   } catch (err) { console.error('refreshUI:', err); }
 }
 

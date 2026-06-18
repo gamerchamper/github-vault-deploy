@@ -42,11 +42,13 @@ const fs_1 = __importDefault(require("fs"));
 const database_1 = require("../db/database");
 const settings_repo_1 = require("../db/settings-repo");
 const queueRepo = __importStar(require("../db/queue-repo"));
+const fileTreeRepo = __importStar(require("../db/file-tree-repo"));
 const sync_engine_1 = require("../core/sync-engine");
 const file_watcher_1 = require("../core/file-watcher");
 const upload_queue_1 = require("../core/upload-queue");
 const api_client_1 = require("../core/api-client");
 const logger_1 = require("../services/logger");
+const hasher_1 = require("../services/hasher");
 let mainWindow = null;
 let tray = null;
 let dataDir;
@@ -245,9 +247,43 @@ function setupIPC() {
         }
     });
     electron_1.ipcMain.handle('get-queue', () => queueRepo.getAllQueueEntries());
+    electron_1.ipcMain.handle('get-file-tree', () => {
+        const fileTreeRepo = require('../db/file-tree-repo');
+        return fileTreeRepo.getAllFiles();
+    });
     electron_1.ipcMain.handle('open-folder', (_event, folderPath) => {
         if (fs_1.default.existsSync(folderPath))
             electron_1.shell.openPath(folderPath);
+    });
+    electron_1.ipcMain.handle('download-file', async (_event, fileId, localRelPath) => {
+        const settings = (0, settings_repo_1.getSettings)();
+        if (!settings.serverUrl || !settings.apiKey)
+            return { ok: false, error: 'Not authenticated' };
+        const api = new api_client_1.VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
+        const absPath = path_1.default.join(settings.syncRootPath, localRelPath);
+        try {
+            const result = await api.downloadFile(fileId, localRelPath);
+            if (!result.ok)
+                return { ok: false, error: result.error.message };
+            const dir = path_1.default.dirname(absPath);
+            fs_1.default.mkdirSync(dir, { recursive: true });
+            fs_1.default.writeFileSync(absPath, Buffer.from(result.value));
+            fileTreeRepo.upsertFile((0, database_1.getDatabase)(), {
+                fileId, localRelPath,
+                remotePath: '/' + localRelPath.replace(/\\/g, '/'),
+                name: path_1.default.basename(localRelPath),
+                size: result.value.byteLength,
+                mimeType: null, isFolder: false,
+                localMtimeMs: fs_1.default.statSync(absPath).mtimeMs,
+                localHash: (0, hasher_1.computeBufferHash)(Buffer.from(result.value)),
+                remoteHash: null, remoteUpdatedAt: null,
+                syncStatus: 'synced', syncTaskId: null, syncError: null,
+            });
+            return { ok: true, size: result.value.byteLength };
+        }
+        catch (e) {
+            return { ok: false, error: e.message };
+        }
     });
 }
 //# sourceMappingURL=index.js.map

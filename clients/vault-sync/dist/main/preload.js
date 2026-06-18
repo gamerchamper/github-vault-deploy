@@ -8,7 +8,9 @@ electron_1.contextBridge.exposeInMainWorld('vaultSync', {
     pickFolder: () => electron_1.ipcRenderer.invoke('pick-folder'),
     testConnection: (serverUrl, apiKey) => electron_1.ipcRenderer.invoke('test-connection', serverUrl, apiKey),
     getQueue: () => electron_1.ipcRenderer.invoke('get-queue'),
+    getFileTree: () => electron_1.ipcRenderer.invoke('get-file-tree'),
     openFolder: (path) => electron_1.ipcRenderer.invoke('open-folder', path),
+    downloadFile: (fileId, localRelPath) => electron_1.ipcRenderer.invoke('download-file', fileId, localRelPath),
     onSyncState: (cb) => {
         const handler = (_event, state) => cb(state);
         electron_1.ipcRenderer.on('sync-state', handler);

@@ -29,6 +29,36 @@ export declare class VaultApiClient {
     moveFile(ids: string[], destination: string): Promise<Result<{
         success: boolean;
     }>>;
+    uploadFile(fileBuffer: Buffer, fileName: string, parentPath?: string, chunkSize?: number): Promise<Result<{
+        jobId: string;
+        fileName: string;
+        estimatedChunks: number;
+    }>>;
+    getUploadProgress(jobId: string): Promise<Result<{
+        status?: string;
+        phase?: string;
+        percent?: number;
+        error?: string;
+    }>>;
+    uploadInit(fileName: string, parentPath: string, size: number, mimeType?: string): Promise<Result<{
+        fileId: string;
+        jobId: string;
+        totalChunks: number;
+        chunkSize: number;
+        chunksDone: number;
+    }>>;
+    uploadChunk(fileId: string, chunkIndex: number, chunkBuffer: Buffer, taskId?: string): Promise<Result<{
+        skipped: boolean;
+        chunkIndex: number;
+        chunksDone: number;
+        totalChunks: number;
+        percent: number;
+    }>>;
+    uploadComplete(fileId: string, taskId?: string): Promise<Result<{
+        id: string;
+        name: string;
+        size: number;
+    }>>;
     getTasks(params?: {
         active?: boolean;
         resumable?: boolean;
@@ -40,5 +70,6 @@ export declare class VaultApiClient {
     getFolders(): Promise<Result<{
         folders: string[];
     }>>;
+    downloadFile(fileId: string, filePath: string, onProgress?: (pct: number) => void): Promise<Result<ArrayBuffer>>;
 }
 //# sourceMappingURL=api-client.d.ts.map
