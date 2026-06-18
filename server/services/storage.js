@@ -211,6 +211,27 @@ function normalizeParentPath(parentPath) {
   return !parentPath || parentPath === '' ? '/' : parentPath;
 }
 
+function ensureFolderHierarchy(userId, parentPath) {
+  const normalized = normalizeParentPath(parentPath);
+  if (normalized === '/' || !normalized) return;
+  const segments = normalized.replace(/^\//, '').split('/').filter(Boolean);
+  let current = '/';
+  for (const seg of segments) {
+    const folderPath = current === '/' ? `/${seg}` : `${current}/${seg}`;
+    const existing = db.prepare(
+      'SELECT id FROM files WHERE user_id = ? AND parent_path = ? AND name = ? AND is_deleted = 0'
+    ).get(userId, current, seg);
+    if (!existing) {
+      const id = uuidv4();
+      db.prepare(`
+        INSERT INTO files (id, user_id, name, path, size, is_folder, parent_path)
+        VALUES (?, ?, ?, ?, 0, 1, ?)
+      `).run(id, userId, seg, folderPath, current);
+    }
+    current = folderPath;
+  }
+}
+
 function uploadPercent(chunksDone, totalChunks, phase) {
   if (phase === 'metadata') return 96;
   if (phase === 'thumbnail') return 2;
@@ -623,6 +644,7 @@ async function initUploadSession(userId, params) {
   assertUploadCapacity(repos, size, chunkSize, convertHls, mimeType, fileName);
 
   const normalizedParent = normalizeParentPath(parentPath);
+  ensureFolderHierarchy(userId, normalizedParent);
   let totalChunks = Math.ceil(size / chunkSize) || 1;
   const filePath = normalizedParent === '/' ? `/${fileName}` : `${normalizedParent}/${fileName}`;
   let fileId = resumeFileId;
@@ -2094,9 +2116,9 @@ async function createFolder(userId, name, parentPath) {
   const folderPath = normalized === '/' ? `/${name}` : `${normalized}/${name}`;
 
   const existing = db.prepare(
-    'SELECT id FROM files WHERE user_id = ? AND parent_path = ? AND name = ?'
+    'SELECT id FROM files WHERE user_id = ? AND parent_path = ? AND name = ? AND is_deleted = 0'
   ).get(userId, normalized, name);
-  if (existing) throw new Error('Folder already exists');
+  if (existing) return { id: existing.id, name, path: folderPath, is_folder: true };
 
   const id = uuidv4();
   const folder = {

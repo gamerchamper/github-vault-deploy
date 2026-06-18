@@ -99,7 +99,14 @@ async function ensureFolderOnServer(api: VaultApiClient, parentPath: string): Pr
   for (const seg of segments) {
     const result = await api.createFolder(seg, current);
     if (!result.ok) {
-      logger.warn('upload-queue', `Folder create ${seg} in ${current}: ${result.error.message}`);
+      const msg = result.error.message || `HTTP ${result.error.status}`;
+      if (msg.includes('already exists')) {
+        logger.info('upload-queue', `Folder exists: ${current === '/' ? '/' + seg : current + '/' + seg}`);
+      } else {
+        logger.warn('upload-queue', `Folder create "${seg}" in "${current}" failed: ${msg}`);
+      }
+    } else {
+      logger.info('upload-queue', `Created folder: ${current === '/' ? '/' + seg : current + '/' + seg}`);
     }
     current = current === '/' ? '/' + seg : current + '/' + seg;
   }
