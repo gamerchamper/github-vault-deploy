@@ -253,7 +253,8 @@ function showCtxMenu(e,f){
     if(f.syncStatus==='synced') items.push('<div class="mi" onclick="openPreview(allFiles.find(function(x){return x.localRelPath===\''+q+'\'}));hideCtx()">👁 Open</div>');
   }
   items.push('<div class="sep"></div>');
-  items.push('<div class="mi" onclick="window.vaultSync.openFolder(\''+esc((window.syncRoot||''))+'\\\\'+esc(f.localRelPath.replace(/\\//g,'\\\\\\\\'))+'\');hideCtx()">📂 Show in Explorer</div>');
+  var explorerPath=(window.syncRoot||'')+'\\'+f.localRelPath.split('/').join('\\');
+  items.push('<div class="mi" onclick="window.vaultSync.openFolder(\''+esc(explorerPath)+'\');hideCtx()">📂 Show in Explorer</div>');
   items.push('<div class="sep"></div>');
   items.push('<div class="mi" onclick="refreshAll();hideCtx()">🔄 Refresh</div>');
   menu.innerHTML=items.join('');
