@@ -66,6 +66,36 @@ export declare class VaultApiClient {
         tasks: unknown[];
     }>>;
     getTask(taskId: string): Promise<Result<unknown>>;
+    resumeTask(taskId: string): Promise<Result<unknown>>;
+    seamlessInit(opts: {
+        fileName: string;
+        parentPath: string;
+        size: number;
+        mimeType: string;
+        chunkSize: number;
+        fileId?: string;
+        taskId?: string;
+        convertHls?: boolean;
+    }): Promise<Result<{
+        fileId: string;
+        jobId: string;
+        totalParts: number;
+        partSize: number;
+        totalChunks?: number;
+    }>>;
+    seamlessPart(fileId: string, partIndex: number, buffer: Buffer, taskId?: string): Promise<Result<{
+        partIndex: number;
+        partsDone: number;
+        percent?: number;
+    }>>;
+    seamlessComplete(fileId: string, taskId: string, convertHls?: boolean): Promise<Result<unknown>>;
+    seamlessStatus(fileId: string): Promise<Result<{
+        stagingComplete: boolean;
+        totalParts?: number;
+        nextPart?: number;
+        partSize?: number;
+    }>>;
+    seamlessResume(fileId: string, taskId: string, convertHls?: boolean): Promise<Result<unknown>>;
     getStats(): Promise<Result<unknown>>;
     getFolders(): Promise<Result<{
         folders: string[];

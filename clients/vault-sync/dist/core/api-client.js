@@ -144,6 +144,70 @@ class VaultApiClient {
     async getTask(taskId) {
         return this.request(`/api/tasks/${taskId}`);
     }
+    async resumeTask(taskId) {
+        return this.request(`/api/tasks/${taskId}/resume`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+    }
+    async seamlessInit(opts) {
+        return this.request('/api/files/upload/seamless/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fileName: opts.fileName,
+                parentPath: opts.parentPath,
+                size: opts.size,
+                mimeType: opts.mimeType,
+                chunkSize: opts.chunkSize || undefined,
+                fileId: opts.fileId || undefined,
+                taskId: opts.taskId || undefined,
+                convertHls: !!opts.convertHls,
+            }),
+        });
+    }
+    async seamlessPart(fileId, partIndex, buffer, taskId) {
+        const fd = new FormData();
+        fd.append('fileId', fileId);
+        fd.append('partIndex', String(partIndex));
+        if (taskId)
+            fd.append('taskId', taskId);
+        fd.append('part', new Blob([buffer]), `part-${partIndex}`);
+        try {
+            const res = await baseFetch(`${this.baseUrl}/api/files/upload/seamless/part`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${this.config.apiKey}` },
+                body: fd,
+            }, 600000);
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                return (0, result_1.err)({ message: text || `HTTP ${res.status}`, status: res.status });
+            }
+            return (0, result_1.ok)(await res.json());
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return (0, result_1.err)({ message: msg, status: 0 });
+        }
+    }
+    async seamlessComplete(fileId, taskId, convertHls = false) {
+        return this.request('/api/files/upload/seamless/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId, taskId, convertHls: convertHls ? '1' : '0' }),
+        }, 600000);
+    }
+    async seamlessStatus(fileId) {
+        return this.request(`/api/files/upload/seamless/status/${fileId}`);
+    }
+    async seamlessResume(fileId, taskId, convertHls = false) {
+        return this.request('/api/files/upload/seamless/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId, taskId, convertHls: convertHls ? '1' : '0' }),
+        }, 600000);
+    }
     async getStats() {
         return this.request('/api/files/stats');
     }

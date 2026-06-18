@@ -5,11 +5,10 @@ import * as queueRepo from '../db/queue-repo';
 import * as fileTreeRepo from '../db/file-tree-repo';
 import { getSettings } from '../db/settings-repo';
 import { VaultApiClient } from './api-client';
-import { computeFileHash } from '../services/hasher';
 import { logger } from '../services/logger';
 
-const CHUNK_SIZE = 1024 * 1024;
-const MAX_FILE_SIZE_SIMPLE = 50 * 1024 * 1024;
+const POLL_INTERVAL_MS = 1000;
+const MAX_PART_RETRIES = 12;
 
 let processing = false;
 let processingTimer: NodeJS.Timeout | null = null;
@@ -53,7 +52,7 @@ async function processNext(): Promise<void> {
   const entry = pending[0];
 
   try {
-    await uploadEntry(entry, settings);
+    await uploadEntrySeamless(entry, settings);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     logger.error('upload-queue', `Upload failed for ${entry.localRelPath}: ${msg}`);
@@ -65,8 +64,53 @@ async function processNext(): Promise<void> {
   }
 }
 
-async function uploadEntry(
-  entry: { id: number; fileId: string | null; localRelPath: string; localHash: string; size: number; mimeType: string | null; retryCount: number; maxRetries: number },
+function computeChunkSize(fileSize: number): number {
+  if (fileSize < 50 * 1024 * 1024) return 1024 * 1024;
+  if (fileSize < 500 * 1024 * 1024) return 2 * 1024 * 1024;
+  if (fileSize < 2 * 1024 * 1024 * 1024) return 5 * 1024 * 1024;
+  return 10 * 1024 * 1024;
+}
+
+function guessMimeType(fileName: string): string {
+  const ext = path.extname(fileName).toLowerCase();
+  const map: Record<string, string> = {
+    '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
+    '.mov': 'video/quicktime', '.avi': 'video/x-msvideo', '.m4v': 'video/x-m4v',
+    '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
+    '.json': 'application/json', '.txt': 'text/plain', '.zip': 'application/zip',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function parentPathFromRel(localRelPath: string): string {
+  const normalized = localRelPath.replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/');
+  if (idx < 0) return '/';
+  return '/' + normalized.slice(0, idx);
+}
+
+async function ensureFolderOnServer(api: VaultApiClient, parentPath: string): Promise<void> {
+  if (parentPath === '/' || !parentPath) return;
+  const segments = parentPath.replace(/^\//, '').split('/').filter(Boolean);
+  let current = '/';
+  for (const seg of segments) {
+    const result = await api.createFolder(seg, current);
+    if (!result.ok) {
+      logger.warn('upload-queue', `Folder create ${seg} in ${current}: ${result.error.message}`);
+    }
+    current = current === '/' ? '/' + seg : current + '/' + seg;
+  }
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function uploadEntrySeamless(
+  entry: { id: number; fileId: string | null; taskId: string | null; localRelPath: string; size: number; mimeType: string | null; retryCount: number; maxRetries: number },
   settings: ReturnType<typeof getSettings>,
 ): Promise<void> {
   const absPath = path.join(settings.syncRootPath, entry.localRelPath);
@@ -83,132 +127,134 @@ async function uploadEntry(
   }
 
   const api = new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
+  const fileName = path.basename(entry.localRelPath);
+  const parentPath = parentPathFromRel(entry.localRelPath);
+  const mimeType = entry.mimeType || guessMimeType(fileName);
+  const chunkSize = computeChunkSize(stat.size);
 
-  queueRepo.updateQueueEntry(entry.id, { status: 'hashing', startedAt: new Date().toISOString() });
-  emitProgress(entry.id, entry.localRelPath, 'hashing', 0);
-
-  const hash = await computeFileHash(absPath).catch(() => null);
-  if (!hash || hash !== entry.localHash) {
-    const retry = entry.retryCount + 1;
-    if (retry > entry.maxRetries) {
-      queueRepo.updateQueueEntry(entry.id, { status: 'error', error: 'Hash mismatch', retryCount: retry });
-      fileTreeRepo.upsertFile(getDatabase(), {
-        fileId: null, localRelPath: entry.localRelPath, remotePath: null,
-        name: path.basename(entry.localRelPath), size: entry.size, mimeType: entry.mimeType || null,
-        isFolder: false, localMtimeMs: stat.mtimeMs, localHash: hash,
-        remoteHash: null, remoteUpdatedAt: null, syncStatus: 'error', syncTaskId: null, syncError: 'Hash mismatch',
-      });
-      emitProgress(entry.id, entry.localRelPath, 'error', 0);
-      return;
-    }
-    queueRepo.updateQueueEntry(entry.id, { status: 'pending', retryCount: retry, error: 'Hash mismatch, will retry' });
-    emitProgress(entry.id, entry.localRelPath, 'pending', 0);
-    return;
+  if (parentPath && parentPath !== '/') {
+    await ensureFolderOnServer(api, parentPath);
   }
 
-  queueRepo.updateQueueEntry(entry.id, { status: 'uploading' });
+  queueRepo.updateQueueEntry(entry.id, { status: 'uploading', startedAt: new Date().toISOString() });
   emitProgress(entry.id, entry.localRelPath, 'uploading', 0);
 
-  const fileName = path.basename(entry.localRelPath);
+  const initResult = await api.seamlessInit({
+    fileName,
+    parentPath,
+    size: stat.size,
+    mimeType,
+    chunkSize,
+    fileId: entry.fileId || undefined,
+    taskId: entry.taskId || undefined,
+  });
 
-  if (stat.size <= MAX_FILE_SIZE_SIMPLE) {
-    await uploadSimple(entry, api, absPath, fileName, hash, stat);
-  } else {
-    await uploadChunked(entry, api, absPath, fileName, hash, stat);
+  if (!initResult.ok) {
+    throw new Error(`Seamless init failed: ${initResult.error.message}`);
   }
+
+  const { fileId, jobId, totalParts, partSize } = initResult.value;
+  queueRepo.updateQueueEntry(entry.id, { fileId, taskId: jobId });
+  logger.info('upload-queue', `Seamless upload started: ${entry.localRelPath} — ${totalParts} parts`);
+
+  let statusResult = await api.seamlessStatus(fileId);
+  let nextPart = 0;
+  if (statusResult.ok && statusResult.value.stagingComplete) {
+    logger.info('upload-queue', `Server cache already complete for ${entry.localRelPath}, resuming processing`);
+    await api.resumeTask(jobId).catch(() => {});
+    await api.seamlessResume(fileId, jobId);
+    return waitForServerProcessing(entry, api, jobId, fileName, stat);
+  } else if (statusResult.ok && statusResult.value.nextPart) {
+    nextPart = statusResult.value.nextPart;
+  }
+
+  let uploadedBytes = 0;
+  let partsDone = nextPart;
+  const startTime = Date.now();
+
+  for (let partIndex = nextPart; partIndex < totalParts; partIndex++) {
+    const start = partIndex * partSize;
+    const length = Math.min(partSize, stat.size - start);
+    const buffer = Buffer.alloc(length);
+    const fd = await fs.promises.open(absPath, 'r');
+    try {
+      await fd.read(buffer, 0, length, start);
+    } finally {
+      await fd.close();
+    }
+
+    let lastErr: unknown;
+    let success = false;
+    for (let attempt = 1; attempt <= MAX_PART_RETRIES; attempt++) {
+      try {
+        const partResult = await api.seamlessPart(fileId, partIndex, buffer, jobId);
+        if (!partResult.ok) {
+          if (partResult.error.status === 409) {
+            throw new Error('Upload paused on server');
+          }
+          lastErr = new Error(partResult.error.message);
+        } else {
+          uploadedBytes += buffer.length;
+          partsDone = Math.max(partsDone, partResult.value.partsDone || partIndex + 1);
+          const elapsed = (Date.now() - startTime) / 1000;
+          const speed = elapsed > 0 ? uploadedBytes / elapsed : 0;
+          const pct = Math.round((partsDone / totalParts) * 35);
+          emitProgress(entry.id, entry.localRelPath, 'uploading', pct);
+          success = true;
+          break;
+        }
+      } catch (e: unknown) {
+        lastErr = e;
+        if (e instanceof Error && e.message.includes('paused')) throw e;
+      }
+      await sleep(Math.min(2000 * attempt, 15000));
+    }
+    if (!success) {
+      throw lastErr instanceof Error ? lastErr : new Error(`Part ${partIndex} upload failed`);
+    }
+  }
+
+  const completeResult = await api.seamlessComplete(fileId, jobId);
+  if (!completeResult.ok) {
+    throw new Error(`Seamless complete failed: ${completeResult.error.message}`);
+  }
+
+  logger.info('upload-queue', `All parts cached for ${entry.localRelPath}, waiting for server processing`);
+  return waitForServerProcessing(entry, api, jobId, fileName, stat);
 }
 
-async function uploadSimple(
-  entry: { id: number; localRelPath: string; mimeType: string | null },
+async function waitForServerProcessing(
+  entry: { id: number; localRelPath: string },
   api: VaultApiClient,
-  absPath: string,
+  jobId: string,
   fileName: string,
-  hash: string,
   stat: fs.Stats,
 ): Promise<void> {
-  const buf = fs.readFileSync(absPath);
-  const result = await api.uploadFile(buf, fileName, '/', CHUNK_SIZE);
+  for (;;) {
+    await sleep(POLL_INTERVAL_MS);
+    const taskResult = await api.getTask(jobId);
+    if (!taskResult.ok) continue;
 
-  if (!result.ok) {
-    throw new Error(`Upload failed: ${result.error.message}`);
-  }
+    const task = taskResult.value as any;
+    const pct = task.percent || 0;
+    emitProgress(entry.id, entry.localRelPath, 'uploading', pct);
 
-  const jobId = result.value.jobId;
-
-  for (let i = 0; i < 60; i++) {
-    await sleep(2000);
-    const progress = await api.getUploadProgress(jobId);
-    if (!progress.ok) continue;
-    const p = progress.value;
-    emitProgress(entry.id, entry.localRelPath, 'uploading', p.percent || 0);
-
-    if (p.status === 'done') {
-      finalizeSuccess(entry, fileName, hash, stat, null);
+    if (task.status === 'done') {
+      finalizeSuccess(entry, fileName, stat, task.fileId || null);
       return;
     }
-    if (p.status === 'error') {
-      throw new Error(p.error || 'Upload failed on server');
+    if (task.status === 'error') {
+      throw new Error(task.error || 'Server processing failed');
+    }
+    if (task.status === 'cancelled') {
+      throw new Error('Upload cancelled on server');
     }
   }
-
-  throw new Error('Upload timed out waiting for server completion');
-}
-
-async function uploadChunked(
-  entry: { id: number; localRelPath: string; mimeType: string | null; fileId: string | null },
-  api: VaultApiClient,
-  absPath: string,
-  fileName: string,
-  hash: string,
-  stat: fs.Stats,
-): Promise<void> {
-  const mimeType = entry.mimeType || guessMime(fileName);
-
-  const initResult = await api.uploadInit(fileName, '/', stat.size, mimeType);
-  if (!initResult.ok) {
-    throw new Error(`Upload init failed: ${initResult.error.message}`);
-  }
-
-  const { fileId, jobId, totalChunks, chunkSize } = initResult.value;
-  queueRepo.updateQueueEntry(entry.id, { fileId, taskId: jobId });
-
-  const fileHandle = await fs.promises.open(absPath, 'r');
-  let lastPercent = 0;
-
-  try {
-    for (let i = 0; i < totalChunks; i++) {
-      const offset = i * chunkSize;
-      const size = Math.min(chunkSize, stat.size - offset);
-      const chunkBuf = Buffer.alloc(size);
-      await fileHandle.read(chunkBuf, 0, size, offset);
-
-      const chunkResult = await api.uploadChunk(fileId, i, chunkBuf, jobId);
-      if (!chunkResult.ok) {
-        throw new Error(`Chunk ${i} upload failed: ${chunkResult.error.message}`);
-      }
-
-      const pct = Math.round((chunkResult.value.chunksDone / chunkResult.value.totalChunks) * 100);
-      if (pct !== lastPercent) {
-        lastPercent = pct;
-        emitProgress(entry.id, entry.localRelPath, 'uploading', pct);
-      }
-    }
-  } finally {
-    await fileHandle.close();
-  }
-
-  const completeResult = await api.uploadComplete(fileId, jobId);
-  if (!completeResult.ok) {
-    throw new Error(`Upload complete failed: ${completeResult.error.message}`);
-  }
-
-  finalizeSuccess(entry, fileName, hash, stat, completeResult.value.id);
 }
 
 function finalizeSuccess(
   entry: { id: number; localRelPath: string },
   fileName: string,
-  hash: string,
   stat: fs.Stats,
   remoteFileId: string | null,
 ): void {
@@ -223,8 +269,8 @@ function finalizeSuccess(
     mimeType: null,
     isFolder: false,
     localMtimeMs: stat.mtimeMs,
-    localHash: hash,
-    remoteHash: hash,
+    localHash: null,
+    remoteHash: null,
     remoteUpdatedAt: new Date().toISOString(),
     syncStatus: 'synced',
     syncTaskId: null,
@@ -232,23 +278,6 @@ function finalizeSuccess(
   });
   emitProgress(entry.id, entry.localRelPath, 'done', 100);
   logger.info('upload-queue', `Upload complete: ${entry.localRelPath}`);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function guessMime(fileName: string): string {
-  const ext = path.extname(fileName).toLowerCase();
-  const map: Record<string, string> = {
-    '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.mkv': 'video/x-matroska',
-    '.webm': 'video/webm', '.avi': 'video/x-msvideo', '.mov': 'video/quicktime',
-    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-    '.gif': 'image/gif', '.pdf': 'application/pdf', '.zip': 'application/zip',
-    '.flac': 'audio/flac', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
-    '.m4a': 'audio/mp4', '.aac': 'audio/aac',
-  };
-  return map[ext] || 'application/octet-stream';
 }
 
 function emitProgress(id: number, localRelPath: string, status: string, percent: number): void {

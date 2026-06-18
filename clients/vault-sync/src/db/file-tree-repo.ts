@@ -84,19 +84,24 @@ export function getSyncStatusCounts(): { synced: number; localOnly: number; conf
 }
 
 function mapRow(row: Record<string, unknown>): SyncFileEntry {
+  const isFolderExplicit = (row.is_folder as number) === 1;
+  const name = row.name as string;
+  const size = row.size as number;
+  const syncStatus = row.sync_status as SyncFileEntry['syncStatus'];
+  const isFolder = isFolderExplicit || (size === 0 && !/\.\w{2,6}$/i.test(name || ''));
   return {
     fileId: row.file_id as string | null,
     localRelPath: row.local_rel_path as string,
     remotePath: row.remote_path as string | null,
-    name: row.name as string,
-    size: row.size as number,
+    name,
+    size,
     mimeType: row.mime_type as string | null,
-    isFolder: (row.is_folder as number) === 1,
+    isFolder,
     localMtimeMs: row.local_mtime_ms as number | null,
     localHash: row.local_hash as string | null,
     remoteHash: row.remote_hash as string | null,
     remoteUpdatedAt: row.remote_updated_at as string | null,
-    syncStatus: row.sync_status as SyncFileEntry['syncStatus'],
+    syncStatus,
     syncTaskId: row.sync_task_id as string | null,
     syncError: row.sync_error as string | null,
   };

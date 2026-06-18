@@ -120,7 +120,8 @@ async function syncRemoteMetadata(api, syncRoot) {
             return;
         }
         for (const file of result.value.files) {
-            const localRel = file.isFolder
+            const isFolder = !!(file.isFolder || file.is_folder);
+            const localRel = isFolder
                 ? file.path.slice(1) + (file.path === '/' ? '' : '/')
                 : file.path.slice(1);
             const normalizedRel = localRel.replace(/\//g, path_1.default.sep);
@@ -133,7 +134,7 @@ async function syncRemoteMetadata(api, syncRoot) {
                 name: file.name,
                 size: file.size,
                 mimeType: file.mimeType,
-                isFolder: file.isFolder,
+                isFolder,
                 localMtimeMs: existing?.localMtimeMs ?? null,
                 localHash: existing?.localHash ?? null,
                 remoteHash: file.contentHash,
@@ -143,7 +144,7 @@ async function syncRemoteMetadata(api, syncRoot) {
                 syncError: null,
             };
             fileTreeRepo.upsertFile(db, syncEntry);
-            if (!file.isFolder && !existing) {
+            if (!isFolder && !existing) {
                 if (!fs_1.default.existsSync(absPath)) {
                     logger_1.logger.info('sync', `New remote file: ${normalizedRel} (needs download)`);
                 }
@@ -153,6 +154,7 @@ async function syncRemoteMetadata(api, syncRoot) {
             const next = await api.listFiles(folderPath, 500, result.value.nextOffset);
             if (next.ok) {
                 for (const file of next.value.files) {
+                    const isFolderPg = !!(file.isFolder || file.is_folder);
                     const localRel = file.path.slice(1);
                     const normalizedRel = localRel.replace(/\//g, path_1.default.sep);
                     const existing = fileTreeRepo.getFileByRelPath(normalizedRel);
@@ -163,7 +165,7 @@ async function syncRemoteMetadata(api, syncRoot) {
                         name: file.name,
                         size: file.size,
                         mimeType: file.mimeType,
-                        isFolder: file.isFolder,
+                        isFolder: isFolderPg,
                         localMtimeMs: existing?.localMtimeMs ?? null,
                         localHash: existing?.localHash ?? null,
                         remoteHash: file.contentHash,
@@ -176,7 +178,8 @@ async function syncRemoteMetadata(api, syncRoot) {
             }
         }
         for (const file of result.value.files) {
-            if (file.isFolder) {
+            const isFolder = !!(file.isFolder || file.is_folder);
+            if (isFolder) {
                 await walkFolder(file.path);
             }
         }
@@ -306,7 +309,7 @@ async function validateAndQueueFile(dir, name, relPath) {
             size: stat.size,
             mimeType: existing?.mimeType ?? null,
             status: 'pending',
-            uploadMode: 'api',
+            uploadMode: 'seamless',
             percent: 0,
             error: null,
             retryCount: 0,

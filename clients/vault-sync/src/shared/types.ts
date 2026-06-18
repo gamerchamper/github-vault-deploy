@@ -6,6 +6,7 @@ export interface FileEntry {
   size: number;
   mimeType: string | null;
   isFolder: boolean;
+  is_folder?: number;
   contentHash: string | null;
   chunkCount: number;
   hasThumbnail: boolean;

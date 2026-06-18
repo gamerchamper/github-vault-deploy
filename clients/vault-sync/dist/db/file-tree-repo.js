@@ -88,19 +88,24 @@ function getSyncStatusCounts() {
     return result;
 }
 function mapRow(row) {
+    const isFolderExplicit = row.is_folder === 1;
+    const name = row.name;
+    const size = row.size;
+    const syncStatus = row.sync_status;
+    const isFolder = isFolderExplicit || (size === 0 && !/\.\w{2,6}$/i.test(name || ''));
     return {
         fileId: row.file_id,
         localRelPath: row.local_rel_path,
         remotePath: row.remote_path,
-        name: row.name,
-        size: row.size,
+        name,
+        size,
         mimeType: row.mime_type,
-        isFolder: row.is_folder === 1,
+        isFolder,
         localMtimeMs: row.local_mtime_ms,
         localHash: row.local_hash,
         remoteHash: row.remote_hash,
         remoteUpdatedAt: row.remote_updated_at,
-        syncStatus: row.sync_status,
+        syncStatus,
         syncTaskId: row.sync_task_id,
         syncError: row.sync_error,
     };
