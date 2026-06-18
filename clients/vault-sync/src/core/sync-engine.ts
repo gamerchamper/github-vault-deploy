@@ -92,13 +92,21 @@ async function syncRemoteMetadata(api: VaultApiClient, syncRoot: string): Promis
 
     for (const file of result.value.files) {
       const isFolder = !!(file.isFolder || file.is_folder);
-      const localRel = isFolder
-        ? file.path.slice(1) + (file.path === '/' ? '' : '/')
-        : file.path.slice(1);
+      const localRel = file.path === '/' ? '' : file.path.slice(1);
       const normalizedRel = localRel.replace(/\//g, path.sep);
       const absPath = path.join(syncRoot, normalizedRel);
 
       const existing = fileTreeRepo.getFileByRelPath(normalizedRel);
+      const existsLocally = fs.existsSync(absPath) && (isFolder ? fs.statSync(absPath).isDirectory() : fs.statSync(absPath).isFile());
+      let syncStatus: SyncFileEntry['syncStatus'];
+      if (isFolder) {
+        syncStatus = existsLocally ? 'synced' : 'remote_only';
+      } else {
+        syncStatus = existing ? existing.syncStatus : 'remote_only';
+        if (existsLocally && (syncStatus === 'remote_only' || syncStatus === 'local_only')) {
+          syncStatus = 'synced';
+        }
+      }
       const syncEntry: SyncFileEntry = {
         fileId: file.id,
         localRelPath: normalizedRel,
@@ -111,7 +119,7 @@ async function syncRemoteMetadata(api: VaultApiClient, syncRoot: string): Promis
         localHash: existing?.localHash ?? null,
         remoteHash: file.contentHash,
         remoteUpdatedAt: file.updatedAt,
-        syncStatus: existing ? existing.syncStatus : 'remote_only',
+        syncStatus,
         syncTaskId: existing?.syncTaskId ?? null,
         syncError: null,
       };
@@ -162,6 +170,25 @@ async function syncRemoteMetadata(api: VaultApiClient, syncRoot: string): Promis
   }
 
   await walkFolder('/');
+
+  const allFiles = fileTreeRepo.getAllFiles();
+  const byName = new Map<string, typeof allFiles[number]>();
+  for (const f of allFiles) {
+    const key = f.localRelPath.replace(/[\\/]+$/, '');
+    const prev = byName.get(key);
+    if (!prev) {
+      byName.set(key, f);
+    } else if (prev.syncStatus === 'local_only' && f.syncStatus !== 'local_only') {
+      byName.set(key, f);
+    }
+  }
+  for (const f of allFiles) {
+    const key = f.localRelPath.replace(/[\\/]+$/, '');
+    const canonical = byName.get(key);
+    if (canonical && canonical.localRelPath !== f.localRelPath) {
+      fileTreeRepo.deleteFileEntry(f.localRelPath);
+    }
+  }
 }
 
 async function scanLocalFiles(syncRoot: string): Promise<void> {
@@ -219,7 +246,10 @@ async function scanLocalFiles(syncRoot: string): Promise<void> {
   for (const filePath of known) {
     if (!seen.has(filePath)) {
       const existing = fileTreeRepo.getFileByRelPath(filePath);
-      if (existing && existing.syncStatus === 'synced') {
+      if (existing && existing.syncStatus === 'synced' && existing.isFolder) {
+        continue;
+      }
+      if (existing && (existing.syncStatus === 'synced' || existing.syncStatus === 'local_only') && !existing.isFolder) {
         logger.info('sync', `Local file deleted: ${filePath}`);
         fileTreeRepo.upsertFile(db, { ...existing, syncStatus: 'deleted' });
       }
@@ -237,6 +267,8 @@ async function validateAndQueueFile(dir: string, name: string, relPath: string):
   } catch {
     return;
   }
+
+  if (stat.size === 0) return;
 
   if (!existing || existing.syncStatus === 'local_only') {
     const hash = await computeFileHash(absPath).catch(() => null);

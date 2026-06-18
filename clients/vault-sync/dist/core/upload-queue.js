@@ -92,8 +92,20 @@ async function processNext() {
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         logger_1.logger.error('upload-queue', `Upload failed for ${entry.localRelPath}: ${msg}`);
-        queueRepo.updateQueueEntry(entry.id, { status: 'pending', error: msg, retryCount: entry.retryCount + 1 });
-        emitProgress(entry.id, entry.localRelPath, 'pending', 0);
+        if (msg.includes('already exists')) {
+            queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, completedAt: new Date().toISOString(), error: null });
+            markAsSynced(entry, settings.syncRootPath);
+            emitProgress(entry.id, entry.localRelPath, 'done', 100);
+            logger_1.logger.info('upload-queue', `File already exists on server, marking synced: ${entry.localRelPath}`);
+        }
+        else if (entry.retryCount + 1 >= entry.maxRetries) {
+            queueRepo.updateQueueEntry(entry.id, { status: 'error', error: msg, retryCount: entry.retryCount + 1 });
+            emitProgress(entry.id, entry.localRelPath, 'error', 0);
+        }
+        else {
+            queueRepo.updateQueueEntry(entry.id, { status: 'pending', error: msg, retryCount: entry.retryCount + 1 });
+            emitProgress(entry.id, entry.localRelPath, 'pending', 0);
+        }
     }
     finally {
         processing = false;
@@ -161,6 +173,11 @@ async function uploadEntrySeamless(entry, settings) {
         return;
     }
     const stat = fs_1.default.statSync(absPath);
+    if (stat.size === 0) {
+        queueRepo.updateQueueEntry(entry.id, { status: 'error', error: 'Empty file (0 bytes) cannot be uploaded' });
+        emitProgress(entry.id, entry.localRelPath, 'error', 0);
+        return;
+    }
     if (stat.size !== entry.size) {
         queueRepo.updateQueueEntry(entry.id, { status: 'pending', error: 'File size changed, will re-queue' });
         return;
@@ -175,6 +192,8 @@ async function uploadEntrySeamless(entry, settings) {
     }
     queueRepo.updateQueueEntry(entry.id, { status: 'uploading', startedAt: new Date().toISOString() });
     emitProgress(entry.id, entry.localRelPath, 'uploading', 0);
+    const isVideo = mimeType.startsWith('video/') || /\.(mp4|webm|mkv|avi|mov|m4v)$/i.test(fileName);
+    const convertHls = isVideo && /\.mp4$/i.test(fileName);
     const initResult = await api.seamlessInit({
         fileName,
         parentPath,
@@ -183,6 +202,7 @@ async function uploadEntrySeamless(entry, settings) {
         chunkSize,
         fileId: entry.fileId || undefined,
         taskId: entry.taskId || undefined,
+        convertHls,
     });
     if (!initResult.ok) {
         throw new Error(`Seamless init failed: ${initResult.error.message}`);
@@ -195,7 +215,7 @@ async function uploadEntrySeamless(entry, settings) {
     if (statusResult.ok && statusResult.value.stagingComplete) {
         logger_1.logger.info('upload-queue', `Server cache already complete for ${entry.localRelPath}, resuming processing`);
         await api.resumeTask(jobId).catch(() => { });
-        await api.seamlessResume(fileId, jobId);
+        await api.seamlessResume(fileId, jobId, convertHls);
         return waitForServerProcessing(entry, api, jobId, fileName, stat);
     }
     else if (statusResult.ok && statusResult.value.nextPart) {
@@ -248,7 +268,7 @@ async function uploadEntrySeamless(entry, settings) {
             throw lastErr instanceof Error ? lastErr : new Error(`Part ${partIndex} upload failed`);
         }
     }
-    const completeResult = await api.seamlessComplete(fileId, jobId);
+    const completeResult = await api.seamlessComplete(fileId, jobId, convertHls);
     if (!completeResult.ok) {
         throw new Error(`Seamless complete failed: ${completeResult.error.message}`);
     }
@@ -297,6 +317,32 @@ function finalizeSuccess(entry, fileName, stat, remoteFileId) {
     });
     emitProgress(entry.id, entry.localRelPath, 'done', 100);
     logger_1.logger.info('upload-queue', `Upload complete: ${entry.localRelPath}`);
+}
+function markAsSynced(entry, syncRoot) {
+    const absPath = path_1.default.join(syncRoot, entry.localRelPath);
+    let stat = null;
+    try {
+        stat = fs_1.default.statSync(absPath);
+    }
+    catch { }
+    const fileName = path_1.default.basename(entry.localRelPath);
+    const remotePath = '/' + entry.localRelPath.replace(/\\/g, '/');
+    fileTreeRepo.upsertFile((0, database_1.getDatabase)(), {
+        fileId: null,
+        localRelPath: entry.localRelPath,
+        remotePath,
+        name: fileName,
+        size: stat?.size ?? 0,
+        mimeType: null,
+        isFolder: false,
+        localMtimeMs: stat?.mtimeMs ?? null,
+        localHash: null,
+        remoteHash: null,
+        remoteUpdatedAt: new Date().toISOString(),
+        syncStatus: 'synced',
+        syncTaskId: null,
+        syncError: null,
+    });
 }
 function emitProgress(id, localRelPath, status, percent) {
     if (onProgress)

@@ -121,12 +121,21 @@ async function syncRemoteMetadata(api, syncRoot) {
         }
         for (const file of result.value.files) {
             const isFolder = !!(file.isFolder || file.is_folder);
-            const localRel = isFolder
-                ? file.path.slice(1) + (file.path === '/' ? '' : '/')
-                : file.path.slice(1);
+            const localRel = file.path === '/' ? '' : file.path.slice(1);
             const normalizedRel = localRel.replace(/\//g, path_1.default.sep);
             const absPath = path_1.default.join(syncRoot, normalizedRel);
             const existing = fileTreeRepo.getFileByRelPath(normalizedRel);
+            const existsLocally = fs_1.default.existsSync(absPath) && (isFolder ? fs_1.default.statSync(absPath).isDirectory() : fs_1.default.statSync(absPath).isFile());
+            let syncStatus;
+            if (isFolder) {
+                syncStatus = existsLocally ? 'synced' : 'remote_only';
+            }
+            else {
+                syncStatus = existing ? existing.syncStatus : 'remote_only';
+                if (existsLocally && (syncStatus === 'remote_only' || syncStatus === 'local_only')) {
+                    syncStatus = 'synced';
+                }
+            }
             const syncEntry = {
                 fileId: file.id,
                 localRelPath: normalizedRel,
@@ -139,7 +148,7 @@ async function syncRemoteMetadata(api, syncRoot) {
                 localHash: existing?.localHash ?? null,
                 remoteHash: file.contentHash,
                 remoteUpdatedAt: file.updatedAt,
-                syncStatus: existing ? existing.syncStatus : 'remote_only',
+                syncStatus,
                 syncTaskId: existing?.syncTaskId ?? null,
                 syncError: null,
             };
@@ -185,6 +194,25 @@ async function syncRemoteMetadata(api, syncRoot) {
         }
     }
     await walkFolder('/');
+    const allFiles = fileTreeRepo.getAllFiles();
+    const byName = new Map();
+    for (const f of allFiles) {
+        const key = f.localRelPath.replace(/[\\/]+$/, '');
+        const prev = byName.get(key);
+        if (!prev) {
+            byName.set(key, f);
+        }
+        else if (prev.syncStatus === 'local_only' && f.syncStatus !== 'local_only') {
+            byName.set(key, f);
+        }
+    }
+    for (const f of allFiles) {
+        const key = f.localRelPath.replace(/[\\/]+$/, '');
+        const canonical = byName.get(key);
+        if (canonical && canonical.localRelPath !== f.localRelPath) {
+            fileTreeRepo.deleteFileEntry(f.localRelPath);
+        }
+    }
 }
 async function scanLocalFiles(syncRoot) {
     const db = (0, database_1.getDatabase)();
@@ -241,7 +269,10 @@ async function scanLocalFiles(syncRoot) {
     for (const filePath of known) {
         if (!seen.has(filePath)) {
             const existing = fileTreeRepo.getFileByRelPath(filePath);
-            if (existing && existing.syncStatus === 'synced') {
+            if (existing && existing.syncStatus === 'synced' && existing.isFolder) {
+                continue;
+            }
+            if (existing && (existing.syncStatus === 'synced' || existing.syncStatus === 'local_only') && !existing.isFolder) {
                 logger_1.logger.info('sync', `Local file deleted: ${filePath}`);
                 fileTreeRepo.upsertFile(db, { ...existing, syncStatus: 'deleted' });
             }
@@ -258,6 +289,8 @@ async function validateAndQueueFile(dir, name, relPath) {
     catch {
         return;
     }
+    if (stat.size === 0)
+        return;
     if (!existing || existing.syncStatus === 'local_only') {
         const hash = await (0, hasher_1.computeFileHash)(absPath).catch(() => null);
         if (!hash)
