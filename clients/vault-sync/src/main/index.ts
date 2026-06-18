@@ -1,0 +1,232 @@
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog, shell, Notification } from 'electron';
+import path from 'path';
+import fs from 'fs';
+import { openDatabase, closeDatabase } from '../db/database';
+import { getSettings, updateSettings } from '../db/settings-repo';
+import * as queueRepo from '../db/queue-repo';
+import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange } from '../core/sync-engine';
+import { startWatcher, stopWatcher } from '../core/file-watcher';
+import { startProcessing, stopProcessing, setProgressHandler } from '../core/upload-queue';
+import { VaultApiClient } from '../core/api-client';
+import { logger } from '../services/logger';
+
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let dataDir: string;
+
+function getDefaultDataDir(): string {
+  const userData = app.getPath('userData');
+  const dir = path.join(userData, 'vault-sync-data');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function getDefaultSyncRoot(): string {
+  return path.join(app.getPath('home'), 'GitHub Vault');
+}
+
+app.setAppUserModelId('com.github-vault.sync');
+
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+app.whenReady().then(() => {
+  dataDir = getDefaultDataDir();
+  openDatabase(dataDir);
+
+  const settings = getSettings();
+  if (!settings.syncRootPath) {
+    updateSettings({ syncRootPath: getDefaultSyncRoot() });
+  }
+
+  setupIPC();
+  createTray();
+
+  logger.setHandler((level, category, message, details) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('log', { level, category, message, details, time: new Date().toISOString() });
+    }
+  });
+
+  onSyncStateChange((state) => {
+    updateTrayMenu(state);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sync-state', state);
+    }
+  });
+
+  setProgressHandler((p) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('upload-progress', p);
+    }
+  });
+
+  startWatcher(settings.syncRootPath, (event, filePath) => {
+    logger.info('watcher', `${event}: ${filePath}`);
+    if (event === 'add' || event === 'change') {
+      const absPath = path.join(settings.syncRootPath, filePath);
+      try {
+        if (fs.existsSync(absPath) && !fs.statSync(absPath).isDirectory()) {
+          logger.info('watcher', `Queueing new file: ${filePath}`);
+        }
+      } catch { /* ignore */ }
+    }
+  });
+
+  startProcessing(5000);
+  startSyncLoop().catch((err) => logger.error('main', `Sync start error: ${err.message}`));
+
+  logger.info('main', 'App started');
+});
+
+app.on('window-all-closed', () => {
+  // Don't quit on window close — keep running in tray
+});
+
+app.on('before-quit', () => {
+  stopSyncLoop();
+  stopWatcher();
+  stopProcessing();
+  closeDatabase();
+});
+
+function createTray(): void {
+  const icon = nativeImage.createEmpty();
+  tray = new Tray(icon);
+
+  const state = getSyncState();
+  updateTrayMenu(state);
+
+  tray.setToolTip('GitHub Vault Sync');
+  tray.on('double-click', () => openMainWindow());
+}
+
+function updateTrayMenu(state: ReturnType<typeof getSyncState>): void {
+  if (!tray) return;
+
+  let statusLine = 'GitHub Vault Sync';
+  if (state.status === 'syncing') statusLine = '↻ Syncing...';
+  else if (state.status === 'error') statusLine = '⚠ Error';
+  else if (state.status === 'offline') statusLine = '⚡ Offline';
+  else if (state.status === 'idle') statusLine = '✓ Synced';
+
+  const menu = Menu.buildFromTemplate([
+    { label: statusLine, enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Open GitHub Vault Folder',
+      click: () => {
+        const settings = getSettings();
+        if (settings.syncRootPath) shell.openPath(settings.syncRootPath);
+      },
+    },
+    { type: 'separator' },
+    {
+      label: `Upload queue: ${state.pendingUploads} pending | ${state.conflictCount} conflicts`,
+      enabled: false,
+    },
+    { type: 'separator' },
+    {
+      label: 'Open Dashboard',
+      click: () => openMainWindow(),
+    },
+    {
+      label: 'Settings...',
+      click: () => openMainWindow('#settings'),
+    },
+    { type: 'separator' },
+    {
+      label: 'Pause Sync',
+      type: 'checkbox',
+      checked: false,
+      click: (mi: Electron.MenuItem) => {
+        if (mi.checked) stopSyncLoop();
+        else startSyncLoop().catch(() => {});
+      },
+    },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ]);
+
+  tray.setContextMenu(menu);
+}
+
+function openMainWindow(hash = ''): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (hash) mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'), { hash });
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+
+  mainWindow = new BrowserWindow({
+    width: 960,
+    height: 680,
+    minWidth: 680,
+    minHeight: 480,
+    title: 'GitHub Vault Sync',
+    backgroundColor: '#1a1a2e',
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'), { hash });
+  mainWindow.once('ready-to-show', () => mainWindow!.show());
+  mainWindow.on('close', (e) => {
+    e.preventDefault();
+    mainWindow?.hide();
+  });
+  mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+function setupIPC(): void {
+  ipcMain.handle('get-settings', () => getSettings());
+
+  ipcMain.handle('update-settings', (_event, patch: Record<string, unknown>) => {
+    updateSettings(patch as any);
+    return getSettings();
+  });
+
+  ipcMain.handle('get-sync-state', () => getSyncState());
+
+  ipcMain.handle('pick-folder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Select GitHub Vault Sync Folder',
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('test-connection', async (_event, serverUrl: string, apiKey: string) => {
+    try {
+      const api = new VaultApiClient({ serverUrl, apiKey });
+      const result = await api.validateAuth();
+      if (result.ok && result.value.authenticated) {
+        return { ok: true };
+      }
+      return { ok: false, error: 'Authentication failed' };
+    } catch (e: unknown) {
+      return { ok: false, error: (e as Error).message };
+    }
+  });
+
+  ipcMain.handle('get-queue', () => queueRepo.getAllQueueEntries());
+
+  ipcMain.handle('open-folder', (_event, folderPath: string) => {
+    if (fs.existsSync(folderPath)) shell.openPath(folderPath);
+  });
+}

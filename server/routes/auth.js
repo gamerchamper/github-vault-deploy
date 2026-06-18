@@ -106,6 +106,21 @@ router.get('/github/callback', (req, res, next) => {
 
 router.get('/me', (req, res) => {
   res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
+
+  const apiKeyUser = apiKeys.authenticateKey(apiKeys.extractKey(req));
+  if (apiKeyUser) {
+    return res.json({
+      authenticated: true,
+      app_url: appUrl.getAppUrl(req),
+      auth_method: 'api-key',
+      user: {
+        id: apiKeyUser.id,
+        username: apiKeyUser.username,
+        avatar: apiKeyUser.avatar_url,
+      },
+    });
+  }
+
   if (!req.isAuthenticated || !req.isAuthenticated()) {
     return res.json({
       authenticated: false,

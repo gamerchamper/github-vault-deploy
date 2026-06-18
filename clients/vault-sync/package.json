@@ -1,0 +1,68 @@
+{
+  "name": "vault-sync",
+  "version": "1.0.0",
+  "description": "GitHub Vault desktop sync client — Google Drive-like folder sync",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "tsc -p tsconfig.json && node scripts/copy-renderer.js && electron dist/main/index.js",
+    "dev:fast": "tsc -p tsconfig.json && node scripts/copy-renderer.js && electron dist/main/index.js --no-sandbox",
+    "build": "tsc -p tsconfig.json && node scripts/copy-renderer.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "echo 'Lint not configured' && exit 0",
+    "dist:win": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "dist:win:dir": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --dir",
+    "dist:win:signed": "npm run build && electron-builder --win",
+    "package:win": "npm run dist:win",
+    "package:win:dir": "npm run dist:win:dir",
+    "cache:clean": "node scripts/clean-cache.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "chokidar": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "cross-env": "^10.1.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "build": {
+    "appId": "com.github-vault.sync",
+    "productName": "GitHub Vault Sync",
+    "files": [
+      "dist/**/*",
+      "resources/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.png",
+      "sign": null,
+      "signAndEditExecutable": false,
+      "signDlls": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "extraResources": []
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

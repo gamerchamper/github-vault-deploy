@@ -36,9 +36,9 @@ def is_vault_media(media):
 class GitHubVaultMovieAgent(Agent.Movies):
   name = 'GitHub Vault'
   languages = [Locale.Language.NoLanguage]
-  primary_provider = True
+  primary_provider = False
   persist_stored_files = False
-  contributes_to = None
+  contributes_to = ['com.plexapp.agents.imdb', 'com.plexapp.agents.themoviedb']
 
   def search(self, results, media, lang):
     if not is_vault_media(media):
@@ -60,9 +60,9 @@ class GitHubVaultMovieAgent(Agent.Movies):
 class GitHubVaultTVAgent(Agent.TV_Shows):
   name = 'GitHub Vault Shows'
   languages = [Locale.Language.NoLanguage]
-  primary_provider = True
+  primary_provider = False
   persist_stored_files = False
-  contributes_to = None
+  contributes_to = ['com.plexapp.agents.thetvdb', 'com.plexapp.agents.themoviedb']
 
   def search(self, results, media, lang):
     if not is_vault_media(media):
