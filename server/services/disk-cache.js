@@ -58,11 +58,8 @@ function setConfig({ maxGb, idleRetentionDays } = {}) {
 
   const index = loadIndex();
   while (totalSize(index.entries) > maxBytes && index.entries.length) {
-    const candidates = [...index.entries];
-    const chunkEntries = candidates.filter((e) => e.type === 'encrypted_chunk');
-    const pool = chunkEntries.length ? chunkEntries : candidates;
-    pool.sort((a, b) => a.last_accessed - b.last_accessed);
-    const oldest = pool[0];
+    const oldest = pickEvictionCandidate(index.entries);
+    if (!oldest) break;
     evictEntry(oldest);
     index.entries = index.entries.filter((e) => e.id !== oldest.id);
   }
@@ -74,6 +71,26 @@ function setMaxGb(gb) {
   return setConfig({ maxGb: gb });
 }
 const TOUCH_SAVE_DEBOUNCE_MS = 3000;
+
+/** Cache types kept when clearing disk or evicting stale entries. */
+const PROTECTED_CACHE_TYPES = new Set(['thumbnail']);
+
+function isProtectedCacheType(type) {
+  return PROTECTED_CACHE_TYPES.has(type);
+}
+
+function isProtectedCacheFile(fileName) {
+  return fileName.endsWith('.thumb.jpg');
+}
+
+function pickEvictionCandidate(entries, excludeId = null) {
+  const eligible = entries.filter((e) => e.id !== excludeId && !isProtectedCacheType(e.type));
+  if (!eligible.length) return null;
+  const chunkEntries = eligible.filter((e) => e.type === 'encrypted_chunk');
+  const pool = chunkEntries.length ? chunkEntries : eligible;
+  pool.sort((a, b) => a.last_accessed - b.last_accessed);
+  return pool[0];
+}
 
 if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
 
@@ -158,12 +175,8 @@ function evictEntry(entry) {
 
 function ensureSpace(index, needed, excludeId) {
   while (totalSize(index.entries) + needed > maxBytes) {
-    const candidates = index.entries.filter((e) => e.id !== excludeId);
-    if (!candidates.length) break;
-    const chunkEntries = candidates.filter((e) => e.type === 'encrypted_chunk');
-    const pool = chunkEntries.length ? chunkEntries : candidates;
-    pool.sort((a, b) => a.last_accessed - b.last_accessed);
-    const oldest = pool[0];
+    const oldest = pickEvictionCandidate(index.entries, excludeId);
+    if (!oldest) break;
     evictEntry(oldest);
     index.entries = index.entries.filter((e) => e.id !== oldest.id);
   }
@@ -386,9 +399,10 @@ function scan() {
   }
 
   while (totalSize(index.entries) > maxBytes && index.entries.length) {
-    index.entries.sort((a, b) => a.last_accessed - b.last_accessed);
-    evictEntry(index.entries[0]);
-    index.entries.shift();
+    const oldest = pickEvictionCandidate(index.entries);
+    if (!oldest) break;
+    evictEntry(oldest);
+    index.entries = index.entries.filter((e) => e.id !== oldest.id);
   }
 
   saveIndex(index);
@@ -411,28 +425,40 @@ function prepareSpace(needed, excludeId = null) {
 
 function clearAll(userId) {
   const index = loadIndex();
-  const toRemove = index.entries.filter((e) => String(e.user_id) === String(userId));
+  const toRemove = index.entries.filter(
+    (e) => String(e.user_id) === String(userId) && !isProtectedCacheType(e.type),
+  );
   let freed = 0;
+  let kept = 0;
 
   for (const entry of toRemove) {
     freed += entry.size;
     evictEntry(entry);
   }
 
-  index.entries = index.entries.filter((e) => String(e.user_id) !== String(userId));
+  for (const entry of index.entries) {
+    if (String(entry.user_id) === String(userId) && isProtectedCacheType(entry.type)) {
+      kept += 1;
+    }
+  }
+
+  index.entries = index.entries.filter(
+    (e) => !(String(e.user_id) === String(userId) && !isProtectedCacheType(e.type)),
+  );
   saveIndex(index);
 
   const prefix = `${userId}_`;
   if (fs.existsSync(cacheDir)) {
     for (const file of fs.readdirSync(cacheDir)) {
       if (!file.startsWith(prefix)) continue;
+      if (isProtectedCacheFile(file)) continue;
       const filePath = path.join(cacheDir, file);
       freed += pathSize(filePath);
       removePath(filePath);
     }
   }
 
-  return { freed, entries: toRemove.length };
+  return { freed, entries: toRemove.length, thumbnailsKept: kept };
 }
 
 function mapEntrySummary(entry) {
@@ -478,6 +504,7 @@ function evictStaleEntries(options = {}) {
 
   const index = loadIndex();
   const stale = index.entries.filter((entry) => {
+    if (isProtectedCacheType(entry.type)) return false;
     if (entry.last_accessed >= cutoff) return false;
     if (userId != null && String(entry.user_id) !== String(userId)) return false;
     return true;

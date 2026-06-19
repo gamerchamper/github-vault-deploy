@@ -5,7 +5,7 @@ import { openDatabase, closeDatabase, getDatabase } from '../db/database';
 import { getSettings, updateSettings } from '../db/settings-repo';
 import * as queueRepo from '../db/queue-repo';
 import * as fileTreeRepo from '../db/file-tree-repo';
-import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange, scanLocalFile, runSyncCycleNow } from '../core/sync-engine';
+import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange, scanLocalFile, runSyncCycleNow, handleWatcherEvent } from '../core/sync-engine';
 import { startWatcher, stopWatcher } from '../core/file-watcher';
 import { startProcessing, stopProcessing, setProgressHandler, resetFolderCache, kickQueue } from '../core/upload-queue';
 import { VaultApiClient } from '../core/api-client';
@@ -78,11 +78,9 @@ app.whenReady().then(() => {
   });
 
   startWatcher(settings.syncRootPath, (event, filePath) => {
-    if (event === 'add' || event === 'change') {
-      scanLocalFile(filePath).catch((err) => {
-        logger.warn('watcher', `Scan failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
+    handleWatcherEvent(event, filePath).catch((err) => {
+      logger.warn('watcher', `Event failed (${event} ${filePath}): ${err instanceof Error ? err.message : String(err)}`);
+    });
   });
 
   startProcessing(2000);

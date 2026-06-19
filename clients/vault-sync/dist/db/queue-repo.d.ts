@@ -15,6 +15,8 @@ export declare function requeueFailedEntries(): void;
 export declare function requeuePathIfFailed(localRelPath: string): void;
 export declare function dedupePendingEntries(): number;
 export declare function cancelInvalidPendingEntries(): number;
+export declare function relocateQueuePath(oldRelPath: string, newRelPath: string): void;
+export declare function relocateQueuePathPrefix(oldPrefix: string, newPrefix: string): void;
 export declare function prepareQueueAfterRestart(): {
     deduped: number;
     cancelled: number;

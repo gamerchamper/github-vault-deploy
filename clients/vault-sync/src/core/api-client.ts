@@ -62,7 +62,7 @@ export class VaultApiClient {
     return this.request(`/api/files/details/${fileId}`);
   }
 
-  async createFolder(name: string, parentPath = '/'): Promise<Result<{ success: boolean; folder: unknown }>> {
+  async createFolder(name: string, parentPath = '/'): Promise<Result<{ success: boolean; folder: { id: string; name: string; path: string; is_folder?: boolean } }>> {
     return this.request('/api/files/folder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -72,6 +72,14 @@ export class VaultApiClient {
 
   async deleteFile(fileId: string): Promise<Result<{ success: boolean }>> {
     return this.request(`/api/files/${fileId}`, { method: 'DELETE' });
+  }
+
+  async renameFile(fileId: string, newName: string): Promise<Result<{ success: boolean; id: string; name: string; path: string }>> {
+    return this.request('/api/files/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: fileId, name: newName }),
+    });
   }
 
   async moveFile(ids: string[], destination: string): Promise<Result<{ success: boolean }>> {

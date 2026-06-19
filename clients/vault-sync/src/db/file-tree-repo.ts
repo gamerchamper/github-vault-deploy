@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import path from 'path';
 import { getDatabase } from './database';
 import type { SyncFileEntry, UploadQueueEntry } from '../shared/types';
 
@@ -50,8 +51,9 @@ export function getFileByFileId(fileId: string): SyncFileEntry | null {
 
 export function getFileByHash(localHash: string, excludeRelPath?: string): SyncFileEntry | null {
   const db = getDatabase();
-  const row = excludeRelPath
-    ? db.prepare('SELECT * FROM file_tree WHERE local_hash = ? AND local_rel_path != ? LIMIT 1').get(localHash, excludeRelPath)
+  const exclude = excludeRelPath ? normalizeRelPath(excludeRelPath) : undefined;
+  const row = exclude
+    ? db.prepare('SELECT * FROM file_tree WHERE local_hash = ? AND local_rel_path != ? LIMIT 1').get(localHash, exclude)
     : db.prepare('SELECT * FROM file_tree WHERE local_hash = ? LIMIT 1').get(localHash);
   return row ? mapRow(row as Record<string, unknown>) : null;
 }
@@ -66,6 +68,40 @@ export function getFilesByStatus(status: string): SyncFileEntry[] {
   const db = getDatabase();
   const rows = db.prepare('SELECT * FROM file_tree WHERE sync_status = ? ORDER BY local_rel_path').all(status) as Record<string, unknown>[];
   return rows.map(mapRow);
+}
+
+export function getFilesUnderPrefix(prefix: string): SyncFileEntry[] {
+  const db = getDatabase();
+  const normalized = normalizeRelPath(prefix).replace(/\/$/, '');
+  const pattern = `${normalized}/%`;
+  const rows = db.prepare(
+    'SELECT * FROM file_tree WHERE local_rel_path = ? OR local_rel_path LIKE ? ORDER BY local_rel_path',
+  ).all(normalized, pattern) as Record<string, unknown>[];
+  return rows.map(mapRow);
+}
+
+export function relocatePathPrefix(oldPrefix: string, newPrefix: string): void {
+  const db = getDatabase();
+  const oldP = normalizeRelPath(oldPrefix).replace(/\/$/, '');
+  const newP = normalizeRelPath(newPrefix).replace(/\/$/, '');
+  const allRows = db.prepare(
+    'SELECT * FROM file_tree WHERE local_rel_path = ? OR local_rel_path LIKE ?',
+  ).all(oldP, `${oldP}/%`) as Record<string, unknown>[];
+
+  for (const row of allRows) {
+    const entry = mapRow(row);
+    const suffix = entry.localRelPath === oldP ? '' : entry.localRelPath.slice(oldP.length);
+    const newRel = newP + suffix;
+    const newName = suffix === '' ? path.basename(newP) : path.basename(newRel);
+    db.prepare('DELETE FROM file_tree WHERE local_rel_path = ?').run(entry.localRelPath);
+    upsertFile(db, {
+      ...entry,
+      localRelPath: newRel,
+      remotePath: `/${newRel}`,
+      name: newName,
+      isFolder: entry.isFolder || suffix === '',
+    });
+  }
 }
 
 export function deleteFileEntry(localRelPath: string): void {

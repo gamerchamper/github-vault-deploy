@@ -144,6 +144,29 @@ export function cancelInvalidPendingEntries(): number {
   return result.changes;
 }
 
+export function relocateQueuePath(oldRelPath: string, newRelPath: string): void {
+  const db = getDatabase();
+  db.prepare(`
+    UPDATE upload_queue SET local_rel_path = ?
+    WHERE local_rel_path = ? AND status IN ('pending', 'hashing', 'uploading', 'error')
+  `).run(normalizeRelPath(newRelPath), normalizeRelPath(oldRelPath));
+}
+
+export function relocateQueuePathPrefix(oldPrefix: string, newPrefix: string): void {
+  const db = getDatabase();
+  const oldP = normalizeRelPath(oldPrefix).replace(/\/$/, '');
+  const newP = normalizeRelPath(newPrefix).replace(/\/$/, '');
+  const rows = db.prepare(
+    "SELECT id, local_rel_path FROM upload_queue WHERE local_rel_path = ? OR local_rel_path LIKE ?",
+  ).all(oldP, `${oldP}/%`) as { id: number; local_rel_path: string }[];
+
+  for (const row of rows) {
+    const suffix = row.local_rel_path === oldP ? '' : row.local_rel_path.slice(oldP.length);
+    const newRel = newP + suffix;
+    db.prepare('UPDATE upload_queue SET local_rel_path = ? WHERE id = ?').run(newRel, row.id);
+  }
+}
+
 export function prepareQueueAfterRestart(): { deduped: number; cancelled: number; sessionsCleared: number } {
   resetStuckEntries();
   requeueFailedEntries();

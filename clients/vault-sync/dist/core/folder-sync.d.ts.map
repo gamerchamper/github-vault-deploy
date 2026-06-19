@@ -1,0 +1,1 @@
+{"version":3,"file":"folder-sync.d.ts","sourceRoot":"","sources":["../../src/core/folder-sync.ts"],"names":[],"mappings":"AAKA,OAAO,EAAE,kBAAkB,EAAE,MAAM,wBAAwB,CAAC;AAiG5D,mFAAmF;AACnF,wBAAsB,eAAe,CACnC,OAAO,EAAE,MAAM,EACf,WAAW,CAAC,EAAE,kBAAkB,GAC/B,OAAO,CAAC,OAAO,CAAC,CA6ClB;AAED,6DAA6D;AAC7D,wBAAsB,oBAAoB,CAAC,WAAW,CAAC,EAAE,kBAAkB,GAAG,OAAO,CAAC,MAAM,CAAC,CAuB5F"}

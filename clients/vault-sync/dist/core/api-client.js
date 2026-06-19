@@ -62,6 +62,13 @@ class VaultApiClient {
     async deleteFile(fileId) {
         return this.request(`/api/files/${fileId}`, { method: 'DELETE' });
     }
+    async renameFile(fileId, newName) {
+        return this.request('/api/files/rename', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: fileId, name: newName }),
+        });
+    }
     async moveFile(ids, destination) {
         return this.request('/api/files/move', {
             method: 'POST',

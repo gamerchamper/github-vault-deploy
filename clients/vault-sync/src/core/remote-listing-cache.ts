@@ -35,6 +35,19 @@ export class RemoteListingCache {
     }) ?? null;
   }
 
+  async findFolderByName(parentPath: string, name: string): Promise<FileEntry | null> {
+    const files = await this.listFolder(parentPath);
+    if (!files) return null;
+    return files.find((file) => {
+      const isFolder = !!(file.isFolder || file.is_folder);
+      return isFolder && file.name === name;
+    }) ?? null;
+  }
+
+  invalidate(parentPath: string): void {
+    this.cache.delete(parentPath);
+  }
+
   async hasFileId(parentPath: string, fileId: string): Promise<boolean | null> {
     const files = await this.listFolder(parentPath);
     if (files === null) return null;

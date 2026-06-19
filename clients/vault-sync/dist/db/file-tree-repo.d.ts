@@ -6,6 +6,8 @@ export declare function getFileByFileId(fileId: string): SyncFileEntry | null;
 export declare function getFileByHash(localHash: string, excludeRelPath?: string): SyncFileEntry | null;
 export declare function getAllFiles(): SyncFileEntry[];
 export declare function getFilesByStatus(status: string): SyncFileEntry[];
+export declare function getFilesUnderPrefix(prefix: string): SyncFileEntry[];
+export declare function relocatePathPrefix(oldPrefix: string, newPrefix: string): void;
 export declare function deleteFileEntry(localRelPath: string): void;
 export declare function getSyncStatusCounts(): {
     synced: number;

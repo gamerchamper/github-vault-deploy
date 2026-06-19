@@ -9,6 +9,14 @@ import { RemoteListingCache } from './remote-listing-cache';
 import { computeFileHash } from '../services/hasher';
 import { logger } from '../services/logger';
 import { normalizeRelPath, toAbsPath, parentPathFromRel } from '../services/paths';
+import {
+  applyPathChange,
+  buildHashIndexKey,
+  detectRenamesFromScan,
+  trackPendingRemoval,
+  tryResolvePendingRename,
+} from './rename-sync';
+import { syncLocalFolder, syncLocalOnlyFolders } from './folder-sync';
 import type { SyncFileEntry, SyncState, FileEntry } from '../shared/types';
 
 const YIELD_EVERY_FILES = 20;
@@ -50,6 +58,33 @@ export function getSyncState(): SyncState {
 
 export function onSyncStateChange(cb: (state: SyncState) => void): void {
   onStateChange = cb;
+}
+
+/** Handle watcher events (rename detection, scan). */
+export async function handleWatcherEvent(event: string, relPath: string): Promise<void> {
+  const normalized = normalizeRelPath(relPath);
+
+  if (event === 'unlink' || event === 'unlinkDir') {
+    trackPendingRemoval(normalized, event === 'unlinkDir');
+    return;
+  }
+
+  if (event === 'add' || event === 'addDir') {
+    const resolved = await tryResolvePendingRename(normalized, event === 'addDir');
+    if (!resolved) {
+      if (event === 'add') {
+        await scanLocalFile(normalized);
+      } else {
+        await syncLocalFolder(normalized);
+      }
+    }
+    updateCounts();
+    return;
+  }
+
+  if (event === 'change') {
+    await scanLocalFile(normalized);
+  }
 }
 
 /** Scan one file (watcher / manual refresh) and queue if needed. */
@@ -123,6 +158,7 @@ async function runSyncCycle(): Promise<void> {
     await syncRemoteMetadata(api, settings.syncRootPath);
     await reconcileOutstandingUploads(settings.syncRootPath, remoteCache);
     await scanLocalFiles(settings.syncRootPath, remoteCache);
+    await syncLocalOnlyFolders(remoteCache);
     await enqueueAllLocalOnly(settings.syncRootPath, remoteCache);
     updateCounts();
     updateSettings({ lastSyncCursor: new Date().toISOString() });
@@ -299,8 +335,9 @@ async function reconcileOutstandingUploads(
 
 async function scanLocalFiles(syncRoot: string, remoteCache: RemoteListingCache): Promise<void> {
   const db = getDatabase();
-  const known = new Set(fileTreeRepo.getAllFiles().map((f) => f.localRelPath));
+  const known = new Set(fileTreeRepo.getAllFiles().map((f) => normalizeRelPath(f.localRelPath)));
   const seen = new Set<string>();
+  const hashIndex = new Map<string, string>();
   let scanned = 0;
 
   async function walk(dir: string, relDir: string): Promise<void> {
@@ -345,12 +382,14 @@ async function scanLocalFiles(syncRoot: string, remoteCache: RemoteListingCache)
         if (scanned % YIELD_EVERY_FILES === 0) {
           await yieldToEventLoop();
         }
-        await validateAndQueueFile(dir, entry.name, relPath, remoteCache);
+        await validateAndQueueFile(dir, entry.name, relPath, remoteCache, hashIndex);
       }
     }
   }
 
   await walk(syncRoot, '');
+
+  await detectRenamesFromScan(syncRoot, hashIndex, known, seen);
 
   for (const filePath of known) {
     if (!seen.has(filePath)) {
@@ -525,6 +564,7 @@ async function validateAndQueueFile(
   name: string,
   relPath: string,
   remoteCache: RemoteListingCache,
+  hashIndex?: Map<string, string>,
 ): Promise<void> {
   const absPath = path.join(dir, name);
   const existing = fileTreeRepo.getFileByRelPath(relPath);
@@ -582,26 +622,18 @@ async function validateAndQueueFile(
   const hash = await computeFileHash(absPath).catch(() => null);
   if (!hash) return;
 
+  if (hashIndex) {
+    hashIndex.set(buildHashIndexKey(hash, stat.size), normalizeRelPath(relPath));
+  }
+
   const dupEntry = fileTreeRepo.getFileByHash(hash, relPath);
-  if (dupEntry && dupEntry.fileId && dupEntry.syncStatus === 'synced' && dupEntry.localRelPath !== relPath) {
-    logger.info('sync', `Duplicate by hash: ${relPath} matches ${dupEntry.localRelPath}`);
-    fileTreeRepo.upsertFile(getDatabase(), {
-      fileId: dupEntry.fileId,
-      localRelPath: relPath,
-      remotePath: dupEntry.remotePath,
-      name,
-      size: stat.size,
-      mimeType: existing?.mimeType ?? null,
-      isFolder: false,
-      localMtimeMs: stat.mtimeMs,
-      localHash: hash,
-      remoteHash: dupEntry.remoteHash,
-      remoteUpdatedAt: dupEntry.remoteUpdatedAt,
-      syncStatus: 'synced',
-      syncTaskId: null,
-      syncError: null,
-    });
-    return;
+  if (dupEntry && dupEntry.fileId && dupEntry.syncStatus === 'synced' && normalizeRelPath(dupEntry.localRelPath) !== normalizeRelPath(relPath)) {
+    const oldAbs = toAbsPath(getSettings().syncRootPath, dupEntry.localRelPath);
+    if (!fs.existsSync(oldAbs)) {
+      logger.info('sync', `Rename detected: ${dupEntry.localRelPath} → ${relPath}`);
+      await applyPathChange(dupEntry, relPath);
+      return;
+    }
   }
 
   if (existing?.syncStatus === 'synced' && existing.localHash === hash && existing.fileId) {

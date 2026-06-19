@@ -16,6 +16,8 @@ exports.requeueFailedEntries = requeueFailedEntries;
 exports.requeuePathIfFailed = requeuePathIfFailed;
 exports.dedupePendingEntries = dedupePendingEntries;
 exports.cancelInvalidPendingEntries = cancelInvalidPendingEntries;
+exports.relocateQueuePath = relocateQueuePath;
+exports.relocateQueuePathPrefix = relocateQueuePathPrefix;
 exports.prepareQueueAfterRestart = prepareQueueAfterRestart;
 const database_1 = require("./database");
 const paths_1 = require("../services/paths");
@@ -141,6 +143,24 @@ function cancelInvalidPendingEntries() {
     WHERE status = 'pending' AND size <= 0
   `).run();
     return result.changes;
+}
+function relocateQueuePath(oldRelPath, newRelPath) {
+    const db = (0, database_1.getDatabase)();
+    db.prepare(`
+    UPDATE upload_queue SET local_rel_path = ?
+    WHERE local_rel_path = ? AND status IN ('pending', 'hashing', 'uploading', 'error')
+  `).run((0, paths_1.normalizeRelPath)(newRelPath), (0, paths_1.normalizeRelPath)(oldRelPath));
+}
+function relocateQueuePathPrefix(oldPrefix, newPrefix) {
+    const db = (0, database_1.getDatabase)();
+    const oldP = (0, paths_1.normalizeRelPath)(oldPrefix).replace(/\/$/, '');
+    const newP = (0, paths_1.normalizeRelPath)(newPrefix).replace(/\/$/, '');
+    const rows = db.prepare("SELECT id, local_rel_path FROM upload_queue WHERE local_rel_path = ? OR local_rel_path LIKE ?").all(oldP, `${oldP}/%`);
+    for (const row of rows) {
+        const suffix = row.local_rel_path === oldP ? '' : row.local_rel_path.slice(oldP.length);
+        const newRel = newP + suffix;
+        db.prepare('UPDATE upload_queue SET local_rel_path = ? WHERE id = ?').run(newRel, row.id);
+    }
 }
 function prepareQueueAfterRestart() {
     resetStuckEntries();

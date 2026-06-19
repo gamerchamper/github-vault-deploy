@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.upsertFile = upsertFile;
 exports.getFileByRelPath = getFileByRelPath;
@@ -6,8 +9,11 @@ exports.getFileByFileId = getFileByFileId;
 exports.getFileByHash = getFileByHash;
 exports.getAllFiles = getAllFiles;
 exports.getFilesByStatus = getFilesByStatus;
+exports.getFilesUnderPrefix = getFilesUnderPrefix;
+exports.relocatePathPrefix = relocatePathPrefix;
 exports.deleteFileEntry = deleteFileEntry;
 exports.getSyncStatusCounts = getSyncStatusCounts;
+const path_1 = __importDefault(require("path"));
 const database_1 = require("./database");
 const paths_1 = require("../services/paths");
 function upsertFile(db, entry) {
@@ -53,8 +59,9 @@ function getFileByFileId(fileId) {
 }
 function getFileByHash(localHash, excludeRelPath) {
     const db = (0, database_1.getDatabase)();
-    const row = excludeRelPath
-        ? db.prepare('SELECT * FROM file_tree WHERE local_hash = ? AND local_rel_path != ? LIMIT 1').get(localHash, excludeRelPath)
+    const exclude = excludeRelPath ? (0, paths_1.normalizeRelPath)(excludeRelPath) : undefined;
+    const row = exclude
+        ? db.prepare('SELECT * FROM file_tree WHERE local_hash = ? AND local_rel_path != ? LIMIT 1').get(localHash, exclude)
         : db.prepare('SELECT * FROM file_tree WHERE local_hash = ? LIMIT 1').get(localHash);
     return row ? mapRow(row) : null;
 }
@@ -67,6 +74,33 @@ function getFilesByStatus(status) {
     const db = (0, database_1.getDatabase)();
     const rows = db.prepare('SELECT * FROM file_tree WHERE sync_status = ? ORDER BY local_rel_path').all(status);
     return rows.map(mapRow);
+}
+function getFilesUnderPrefix(prefix) {
+    const db = (0, database_1.getDatabase)();
+    const normalized = (0, paths_1.normalizeRelPath)(prefix).replace(/\/$/, '');
+    const pattern = `${normalized}/%`;
+    const rows = db.prepare('SELECT * FROM file_tree WHERE local_rel_path = ? OR local_rel_path LIKE ? ORDER BY local_rel_path').all(normalized, pattern);
+    return rows.map(mapRow);
+}
+function relocatePathPrefix(oldPrefix, newPrefix) {
+    const db = (0, database_1.getDatabase)();
+    const oldP = (0, paths_1.normalizeRelPath)(oldPrefix).replace(/\/$/, '');
+    const newP = (0, paths_1.normalizeRelPath)(newPrefix).replace(/\/$/, '');
+    const allRows = db.prepare('SELECT * FROM file_tree WHERE local_rel_path = ? OR local_rel_path LIKE ?').all(oldP, `${oldP}/%`);
+    for (const row of allRows) {
+        const entry = mapRow(row);
+        const suffix = entry.localRelPath === oldP ? '' : entry.localRelPath.slice(oldP.length);
+        const newRel = newP + suffix;
+        const newName = suffix === '' ? path_1.default.basename(newP) : path_1.default.basename(newRel);
+        db.prepare('DELETE FROM file_tree WHERE local_rel_path = ?').run(entry.localRelPath);
+        upsertFile(db, {
+            ...entry,
+            localRelPath: newRel,
+            remotePath: `/${newRel}`,
+            name: newName,
+            isFolder: entry.isFolder || suffix === '',
+        });
+    }
 }
 function deleteFileEntry(localRelPath) {
     const db = (0, database_1.getDatabase)();

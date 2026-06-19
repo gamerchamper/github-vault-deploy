@@ -2031,6 +2031,53 @@ function updateDescendantPaths(userId, oldPrefix, newPrefix) {
   }
 }
 
+async function renameItem(userId, fileId, newName) {
+  const trimmed = String(newName || '').trim();
+  if (!trimmed) throw new Error('Name is required');
+  if (/[\\/]/.test(trimmed)) throw new Error('Invalid name');
+
+  const item = db.prepare(
+    'SELECT * FROM files WHERE id = ? AND user_id = ? AND is_deleted = 0'
+  ).get(fileId, userId);
+  if (!item) throw new Error('Item not found');
+
+  if (item.name === trimmed) {
+    return { id: fileId, name: trimmed, path: item.path, is_folder: !!item.is_folder };
+  }
+
+  const parent = normalizeParentPath(item.parent_path);
+  const conflict = db.prepare(
+    'SELECT id FROM files WHERE user_id = ? AND parent_path = ? AND name = ? AND id != ? AND is_deleted = 0'
+  ).get(userId, parent, trimmed, fileId);
+  if (conflict) throw new Error(`"${trimmed}" already exists in this folder`);
+
+  const oldPath = item.path;
+  const newPath = joinFilePath(parent, trimmed);
+
+  db.prepare("UPDATE files SET name = ?, path = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(trimmed, newPath, fileId);
+
+  if (item.is_folder) {
+    updateDescendantPaths(userId, oldPath, newPath);
+  }
+
+  const affectedIds = [fileId];
+  if (item.is_folder) {
+    const descendants = db.prepare(
+      'SELECT id FROM files WHERE user_id = ? AND path LIKE ?'
+    ).all(userId, `${newPath}/%`);
+    for (const d of descendants) affectedIds.push(d.id);
+  }
+
+  for (const id of affectedIds) {
+    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(id);
+    if (file) await metadata.updatePathMetadata(userId, file);
+  }
+
+  notifyPlaylistFolderSync(userId, affectedIds);
+  return { id: fileId, name: trimmed, path: newPath, is_folder: !!item.is_folder };
+}
+
 async function moveItems(userId, ids, destinationParentPath) {
   const dest = normalizeParentPath(destinationParentPath);
   const uniqueIds = [...new Set((ids || []).filter(Boolean))];
@@ -2510,6 +2557,7 @@ module.exports = {
   softTrashItems,
   restoreItems,
   createFolder,
+  renameItem,
   moveItems,
   refreshThumbnail,
   setCustomThumbnail,

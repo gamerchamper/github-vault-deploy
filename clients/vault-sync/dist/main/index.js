@@ -107,11 +107,9 @@ electron_1.app.whenReady().then(() => {
         }
     });
     (0, file_watcher_1.startWatcher)(settings.syncRootPath, (event, filePath) => {
-        if (event === 'add' || event === 'change') {
-            (0, sync_engine_1.scanLocalFile)(filePath).catch((err) => {
-                logger_1.logger.warn('watcher', `Scan failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
-            });
-        }
+        (0, sync_engine_1.handleWatcherEvent)(event, filePath).catch((err) => {
+            logger_1.logger.warn('watcher', `Event failed (${event} ${filePath}): ${err instanceof Error ? err.message : String(err)}`);
+        });
     });
     (0, upload_queue_1.startProcessing)(2000);
     (0, upload_queue_1.kickQueue)();

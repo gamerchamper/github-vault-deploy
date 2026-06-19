@@ -1643,6 +1643,19 @@ router.post('/move', async (req, res) => {
   }
 });
 
+router.post('/rename', async (req, res) => {
+  try {
+    const fileId = req.body.id || req.body.fileId;
+    const name = req.body.name || req.body.newName;
+    if (!fileId) return res.status(400).json({ error: 'File id is required' });
+    if (!name) return res.status(400).json({ error: 'Name is required' });
+    const result = await storage.renameItem(req.user.id, fileId, name);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.get('/stats', async (req, res) => {
   try {
     const localNetwork = require('../services/local-network');

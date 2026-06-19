@@ -755,7 +755,7 @@ const App = {
   },
 
   async clearCacheDisk() {
-    if (!confirm('Clear the cache disk? Cached downloads will need to be fetched again.')) return;
+    if (!confirm('Clear the cache disk? Cached downloads will be removed; thumbnails are kept.')) return;
     try {
       const result = await API.cache.clear();
       this.toast(`Cache cleared — freed ${formatSize(result.freed)}`, 'success');

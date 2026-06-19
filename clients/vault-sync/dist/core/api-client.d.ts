@@ -21,10 +21,21 @@ export declare class VaultApiClient {
     getFileDetails(fileId: string): Promise<Result<FileEntry>>;
     createFolder(name: string, parentPath?: string): Promise<Result<{
         success: boolean;
-        folder: unknown;
+        folder: {
+            id: string;
+            name: string;
+            path: string;
+            is_folder?: boolean;
+        };
     }>>;
     deleteFile(fileId: string): Promise<Result<{
         success: boolean;
+    }>>;
+    renameFile(fileId: string, newName: string): Promise<Result<{
+        success: boolean;
+        id: string;
+        name: string;
+        path: string;
     }>>;
     moveFile(ids: string[], destination: string): Promise<Result<{
         success: boolean;
