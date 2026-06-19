@@ -9,7 +9,9 @@ exports.getFilesByStatus = getFilesByStatus;
 exports.deleteFileEntry = deleteFileEntry;
 exports.getSyncStatusCounts = getSyncStatusCounts;
 const database_1 = require("./database");
+const paths_1 = require("../services/paths");
 function upsertFile(db, entry) {
+    const localRelPath = (0, paths_1.normalizeRelPath)(entry.localRelPath);
     db.prepare(`
     INSERT INTO file_tree (file_id, local_rel_path, remote_path, name, size, mime_type, is_folder,
       local_mtime_ms, local_hash, remote_hash, remote_updated_at, sync_status, sync_task_id, sync_error)
@@ -24,7 +26,7 @@ function upsertFile(db, entry) {
       sync_error=excluded.sync_error, updated_at=datetime('now')
   `).run({
         fileId: entry.fileId,
-        localRelPath: entry.localRelPath,
+        localRelPath,
         remotePath: entry.remotePath,
         name: entry.name,
         size: entry.size,
@@ -41,7 +43,7 @@ function upsertFile(db, entry) {
 }
 function getFileByRelPath(localRelPath) {
     const db = (0, database_1.getDatabase)();
-    const row = db.prepare('SELECT * FROM file_tree WHERE local_rel_path = ?').get(localRelPath);
+    const row = db.prepare('SELECT * FROM file_tree WHERE local_rel_path = ?').get((0, paths_1.normalizeRelPath)(localRelPath));
     return row ? mapRow(row) : null;
 }
 function getFileByFileId(fileId) {
@@ -49,9 +51,11 @@ function getFileByFileId(fileId) {
     const row = db.prepare('SELECT * FROM file_tree WHERE file_id = ?').get(fileId);
     return row ? mapRow(row) : null;
 }
-function getFileByHash(localHash) {
+function getFileByHash(localHash, excludeRelPath) {
     const db = (0, database_1.getDatabase)();
-    const row = db.prepare('SELECT * FROM file_tree WHERE local_hash = ? LIMIT 1').get(localHash);
+    const row = excludeRelPath
+        ? db.prepare('SELECT * FROM file_tree WHERE local_hash = ? AND local_rel_path != ? LIMIT 1').get(localHash, excludeRelPath)
+        : db.prepare('SELECT * FROM file_tree WHERE local_hash = ? LIMIT 1').get(localHash);
     return row ? mapRow(row) : null;
 }
 function getAllFiles() {

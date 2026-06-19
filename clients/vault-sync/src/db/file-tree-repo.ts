@@ -2,7 +2,10 @@ import Database from 'better-sqlite3';
 import { getDatabase } from './database';
 import type { SyncFileEntry, UploadQueueEntry } from '../shared/types';
 
+import { normalizeRelPath } from '../services/paths';
+
 export function upsertFile(db: Database.Database, entry: SyncFileEntry): void {
+  const localRelPath = normalizeRelPath(entry.localRelPath);
   db.prepare(`
     INSERT INTO file_tree (file_id, local_rel_path, remote_path, name, size, mime_type, is_folder,
       local_mtime_ms, local_hash, remote_hash, remote_updated_at, sync_status, sync_task_id, sync_error)
@@ -17,7 +20,7 @@ export function upsertFile(db: Database.Database, entry: SyncFileEntry): void {
       sync_error=excluded.sync_error, updated_at=datetime('now')
   `).run({
     fileId: entry.fileId,
-    localRelPath: entry.localRelPath,
+    localRelPath,
     remotePath: entry.remotePath,
     name: entry.name,
     size: entry.size,
@@ -35,7 +38,7 @@ export function upsertFile(db: Database.Database, entry: SyncFileEntry): void {
 
 export function getFileByRelPath(localRelPath: string): SyncFileEntry | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM file_tree WHERE local_rel_path = ?').get(localRelPath) as Record<string, unknown> | undefined;
+  const row = db.prepare('SELECT * FROM file_tree WHERE local_rel_path = ?').get(normalizeRelPath(localRelPath)) as Record<string, unknown> | undefined;
   return row ? mapRow(row) : null;
 }
 
@@ -45,10 +48,12 @@ export function getFileByFileId(fileId: string): SyncFileEntry | null {
   return row ? mapRow(row) : null;
 }
 
-export function getFileByHash(localHash: string): SyncFileEntry | null {
+export function getFileByHash(localHash: string, excludeRelPath?: string): SyncFileEntry | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM file_tree WHERE local_hash = ? LIMIT 1').get(localHash) as Record<string, unknown> | undefined;
-  return row ? mapRow(row) : null;
+  const row = excludeRelPath
+    ? db.prepare('SELECT * FROM file_tree WHERE local_hash = ? AND local_rel_path != ? LIMIT 1').get(localHash, excludeRelPath)
+    : db.prepare('SELECT * FROM file_tree WHERE local_hash = ? LIMIT 1').get(localHash);
+  return row ? mapRow(row as Record<string, unknown>) : null;
 }
 
 export function getAllFiles(): SyncFileEntry[] {

@@ -39,10 +39,18 @@ function closeDatabase() {
 }
 function runMigrations(database) {
     database.exec(schema_1.SQL.createTables);
-    const version = database.prepare('SELECT version FROM schema_version').get();
-    if (!version) {
+    const versionRow = database.prepare('SELECT version FROM schema_version').get();
+    const version = versionRow?.version ?? 0;
+    if (version === 0) {
         database.prepare('INSERT INTO schema_version (version) VALUES (?)').run(schema_1.SCHEMA_VERSION);
         logger_1.logger.info('db', `Applied schema v${schema_1.SCHEMA_VERSION}`);
+        return;
+    }
+    if (version < 2) {
+        database.prepare("UPDATE file_tree SET local_rel_path = REPLACE(local_rel_path, '\\', '/')").run();
+        database.prepare("UPDATE upload_queue SET local_rel_path = REPLACE(local_rel_path, '\\', '/')").run();
+        database.prepare('UPDATE schema_version SET version = 2').run();
+        logger_1.logger.info('db', 'Migrated paths to forward slashes (v2)');
     }
 }
 //# sourceMappingURL=database.js.map

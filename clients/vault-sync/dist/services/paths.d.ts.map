@@ -1,0 +1,1 @@
+{"version":3,"file":"paths.d.ts","sourceRoot":"","sources":["../../src/services/paths.ts"],"names":[],"mappings":"AAEA,kEAAkE;AAClE,wBAAgB,gBAAgB,CAAC,OAAO,EAAE,MAAM,GAAG,MAAM,CAExD;AAED,wBAAgB,SAAS,CAAC,QAAQ,EAAE,MAAM,EAAE,OAAO,EAAE,MAAM,GAAG,MAAM,CAGnE;AAED,wBAAgB,iBAAiB,CAAC,YAAY,EAAE,MAAM,GAAG,MAAM,CAK9D;AAED,wBAAgB,YAAY,CAAC,YAAY,EAAE,MAAM,GAAG,MAAM,CAEzD"}

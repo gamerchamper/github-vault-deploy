@@ -66,8 +66,25 @@ async function initApp(){
   var s=await window.vaultSync.getSettings();
   if(s.syncRootPath)await window.vaultSync.updateSettings({syncRootPath:s.syncRootPath});
   loadFiles();renderBreadcrumb();
-  window.vaultSync.onSyncState(function(st){updateStatusUI(st)});
-  window.vaultSync.onUploadProgress(function(p){if($('qPbar'))$('qPbar').style.width=p.percent+'%';if($('qText'))$('qText').textContent=p.status+': '+p.localRelPath});
+  window.vaultSync.onSyncState(function(st){
+    updateStatusUI(st);
+    if(st.status==='idle'&&!syncRefreshTimer){
+      syncRefreshTimer=setTimeout(function(){syncRefreshTimer=null;refreshAll()},800);
+    }
+  });
+  var syncRefreshTimer=null;
+  var uploadUiTimer=null;
+  var lastUploadUi=null;
+  window.vaultSync.onUploadProgress(function(p){
+    lastUploadUi=p;
+    if(uploadUiTimer)return;
+    uploadUiTimer=requestAnimationFrame(function(){
+      uploadUiTimer=null;
+      if(!lastUploadUi)return;
+      if($('qPbar'))$('qPbar').style.width=lastUploadUi.percent+'%';
+      if($('qText'))$('qText').textContent=lastUploadUi.status+': '+lastUploadUi.localRelPath;
+    });
+  });
   window.vaultSync.onLog(function(l){/* quiet */});
 }
 

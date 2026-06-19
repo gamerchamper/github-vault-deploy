@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SQL = exports.SCHEMA_VERSION = void 0;
-exports.SCHEMA_VERSION = 1;
+exports.SCHEMA_VERSION = 2;
 exports.SQL = {
     createTables: `
     CREATE TABLE IF NOT EXISTS schema_version (

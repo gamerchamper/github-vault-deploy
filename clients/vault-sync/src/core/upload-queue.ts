@@ -6,16 +6,39 @@ import * as fileTreeRepo from '../db/file-tree-repo';
 import { getSettings } from '../db/settings-repo';
 import { VaultApiClient } from './api-client';
 import { logger } from '../services/logger';
+import { normalizeRelPath, toAbsPath, parentPathFromRel } from '../services/paths';
 
 const POLL_INTERVAL_MS = 1000;
 const MAX_PART_RETRIES = 12;
+const ensuredFolderPaths = new Set<string>();
 
 let processing = false;
 let processingTimer: NodeJS.Timeout | null = null;
+let retryTimer: NodeJS.Timeout | null = null;
 let onProgress: ((entry: { id: number; localRelPath: string; status: string; percent: number }) => void) | null = null;
+
+function isStaleSessionError(msg: string): boolean {
+  return /upload session not found|already completed/i.test(msg);
+}
+
+function clearUploadSession(entryId: number): void {
+  queueRepo.updateQueueEntry(entryId, { fileId: null, taskId: null, sessionJson: null });
+}
+
+function scheduleRetry(delayMs: number): void {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    kickQueue();
+  }, delayMs);
+}
 
 export function setProgressHandler(handler: typeof onProgress): void {
   onProgress = handler;
+}
+
+export function kickQueue(): void {
+  if (!processing) processNext();
 }
 
 export function startProcessing(intervalMs = 5000): void {
@@ -32,8 +55,16 @@ export function stopProcessing(): void {
     clearInterval(processingTimer);
     processingTimer = null;
   }
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
   processing = false;
   logger.info('upload-queue', 'Queue processor stopped');
+}
+
+export function resetFolderCache(): void {
+  ensuredFolderPaths.clear();
 }
 
 async function processNext(): Promise<void> {
@@ -50,27 +81,40 @@ async function processNext(): Promise<void> {
 
   processing = true;
   const entry = pending[0];
+  logger.info('upload-queue', `Processing upload: ${entry.localRelPath} (${entry.size} bytes)`);
 
+  let succeeded = false;
   try {
     await uploadEntrySeamless(entry, settings);
+    succeeded = true;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    logger.error('upload-queue', `Upload failed for ${entry.localRelPath}: ${msg}`);
     if (msg.includes('already exists')) {
       queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, completedAt: new Date().toISOString(), error: null });
       markAsSynced(entry, settings.syncRootPath);
       emitProgress(entry.id, entry.localRelPath, 'done', 100);
-      logger.info('upload-queue', `File already exists on server, marking synced: ${entry.localRelPath}`);
-    } else if (entry.retryCount + 1 >= entry.maxRetries) {
-      queueRepo.updateQueueEntry(entry.id, { status: 'error', error: msg, retryCount: entry.retryCount + 1 });
-      emitProgress(entry.id, entry.localRelPath, 'error', 0);
+      logger.info('upload-queue', `Already on server, marked synced: ${entry.localRelPath}`);
+      succeeded = true;
     } else {
-      queueRepo.updateQueueEntry(entry.id, { status: 'pending', error: msg, retryCount: entry.retryCount + 1 });
-      emitProgress(entry.id, entry.localRelPath, 'pending', 0);
+      if (isStaleSessionError(msg)) {
+        clearUploadSession(entry.id);
+      }
+      logger.error('upload-queue', `Upload failed for ${entry.localRelPath}: ${msg}`);
+      if (entry.retryCount + 1 >= entry.maxRetries) {
+        queueRepo.updateQueueEntry(entry.id, { status: 'error', error: msg, retryCount: entry.retryCount + 1 });
+        emitProgress(entry.id, entry.localRelPath, 'error', 0);
+      } else {
+        queueRepo.updateQueueEntry(entry.id, { status: 'pending', error: msg, retryCount: entry.retryCount + 1 });
+        emitProgress(entry.id, entry.localRelPath, 'pending', 0);
+      }
+      const backoffMs = isStaleSessionError(msg)
+        ? 2000
+        : Math.min(30000, 2000 * Math.pow(2, Math.min(entry.retryCount, 4)));
+      scheduleRetry(backoffMs);
     }
   } finally {
     processing = false;
-    setTimeout(() => processNext(), 1000);
+    if (succeeded) kickQueue();
   }
 }
 
@@ -95,31 +139,42 @@ function guessMimeType(fileName: string): string {
   return map[ext] || 'application/octet-stream';
 }
 
-function parentPathFromRel(localRelPath: string): string {
-  const normalized = localRelPath.replace(/\\/g, '/');
-  const idx = normalized.lastIndexOf('/');
-  if (idx < 0) return '/';
-  return '/' + normalized.slice(0, idx);
-}
-
 async function ensureFolderOnServer(api: VaultApiClient, parentPath: string): Promise<void> {
   if (parentPath === '/' || !parentPath) return;
+  if (ensuredFolderPaths.has(parentPath)) return;
+
   const segments = parentPath.replace(/^\//, '').split('/').filter(Boolean);
   let current = '/';
   for (const seg of segments) {
-    const result = await api.createFolder(seg, current);
-    if (!result.ok) {
-      const msg = result.error.message || `HTTP ${result.error.status}`;
-      if (msg.includes('already exists')) {
-        logger.info('upload-queue', `Folder exists: ${current === '/' ? '/' + seg : current + '/' + seg}`);
-      } else {
-        logger.warn('upload-queue', `Folder create "${seg}" in "${current}" failed: ${msg}`);
+    const folderPath = current === '/' ? `/${seg}` : `${current}/${seg}`;
+    if (!ensuredFolderPaths.has(folderPath)) {
+      const result = await api.createFolder(seg, current);
+      if (!result.ok) {
+        const msg = result.error.message || `HTTP ${result.error.status}`;
+        if (!msg.includes('already exists')) {
+          logger.warn('upload-queue', `Folder create "${seg}" in "${current}" failed: ${msg}`);
+        }
       }
-    } else {
-      logger.info('upload-queue', `Created folder: ${current === '/' ? '/' + seg : current + '/' + seg}`);
+      ensuredFolderPaths.add(folderPath);
     }
-    current = current === '/' ? '/' + seg : current + '/' + seg;
+    current = folderPath;
   }
+  ensuredFolderPaths.add(parentPath);
+}
+
+async function resolveRemoteFileId(
+  api: VaultApiClient,
+  fileName: string,
+  parentPath: string,
+  size: number,
+): Promise<string | null> {
+  const list = await api.listFiles(parentPath, 500, 0);
+  if (!list.ok) return null;
+  const match = list.value.files.find((file) => {
+    const isFolder = !!(file.isFolder || (file as { is_folder?: boolean }).is_folder);
+    return !isFolder && file.name === fileName && file.size === size;
+  });
+  return match?.id ?? null;
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -127,10 +182,12 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function uploadEntrySeamless(
-  entry: { id: number; fileId: string | null; taskId: string | null; localRelPath: string; size: number; mimeType: string | null; retryCount: number; maxRetries: number },
+  entryIn: { id: number; fileId: string | null; taskId: string | null; localRelPath: string; localHash: string; size: number; mimeType: string | null; retryCount: number; maxRetries: number },
   settings: ReturnType<typeof getSettings>,
 ): Promise<void> {
-  const absPath = path.join(settings.syncRootPath, entry.localRelPath);
+  let entry = entryIn;
+  const normalizedRel = normalizeRelPath(entry.localRelPath);
+  const absPath = toAbsPath(settings.syncRootPath, normalizedRel);
 
   if (!fs.existsSync(absPath)) {
     queueRepo.updateQueueEntry(entry.id, { status: 'error', error: 'File no longer exists' });
@@ -144,8 +201,8 @@ async function uploadEntrySeamless(
     return;
   }
   if (stat.size !== entry.size) {
-    queueRepo.updateQueueEntry(entry.id, { status: 'pending', error: 'File size changed, will re-queue' });
-    return;
+    queueRepo.updateQueueEntry(entry.id, { size: stat.size, error: null });
+    entry = { ...entry, size: stat.size };
   }
 
   const api = new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
@@ -158,22 +215,41 @@ async function uploadEntrySeamless(
     await ensureFolderOnServer(api, parentPath);
   }
 
+  const remoteId = await resolveRemoteFileId(api, fileName, parentPath, stat.size);
+  if (remoteId) {
+    queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, fileId: remoteId, completedAt: new Date().toISOString() });
+    markAsSynced(entry, settings.syncRootPath, remoteId);
+    emitProgress(entry.id, entry.localRelPath, 'done', 100);
+    logger.info('upload-queue', `Matched existing remote file: ${entry.localRelPath}`);
+    return;
+  }
+
   queueRepo.updateQueueEntry(entry.id, { status: 'uploading', startedAt: new Date().toISOString() });
   emitProgress(entry.id, entry.localRelPath, 'uploading', 0);
 
   const isVideo = mimeType.startsWith('video/') || /\.(mp4|webm|mkv|avi|mov|m4v)$/i.test(fileName);
   const convertHls = isVideo && /\.mp4$/i.test(fileName);
 
-  const initResult = await api.seamlessInit({
+  let initResult = await api.seamlessInit({
     fileName,
     parentPath,
     size: stat.size,
     mimeType,
     chunkSize,
-    fileId: entry.fileId || undefined,
-    taskId: entry.taskId || undefined,
     convertHls,
   });
+
+  if (!initResult.ok && isStaleSessionError(initResult.error.message)) {
+    clearUploadSession(entry.id);
+    initResult = await api.seamlessInit({
+      fileName,
+      parentPath,
+      size: stat.size,
+      mimeType,
+      chunkSize,
+      convertHls,
+    });
+  }
 
   if (!initResult.ok) {
     throw new Error(`Seamless init failed: ${initResult.error.message}`);
@@ -279,23 +355,23 @@ async function waitForServerProcessing(
 }
 
 function finalizeSuccess(
-  entry: { id: number; localRelPath: string },
+  entry: { id: number; localRelPath: string; localHash?: string },
   fileName: string,
   stat: fs.Stats,
   remoteFileId: string | null,
 ): void {
-  const remotePath = '/' + entry.localRelPath.replace(/\\/g, '/');
+  const remotePath = `/${normalizeRelPath(entry.localRelPath)}`;
   queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, completedAt: new Date().toISOString() });
   fileTreeRepo.upsertFile(getDatabase(), {
     fileId: remoteFileId,
-    localRelPath: entry.localRelPath,
+    localRelPath: normalizeRelPath(entry.localRelPath),
     remotePath,
     name: fileName,
     size: stat.size,
     mimeType: null,
     isFolder: false,
     localMtimeMs: stat.mtimeMs,
-    localHash: null,
+    localHash: entry.localHash ?? null,
     remoteHash: null,
     remoteUpdatedAt: new Date().toISOString(),
     syncStatus: 'synced',
@@ -306,22 +382,27 @@ function finalizeSuccess(
   logger.info('upload-queue', `Upload complete: ${entry.localRelPath}`);
 }
 
-function markAsSynced(entry: { id: number; localRelPath: string }, syncRoot: string): void {
-  const absPath = path.join(syncRoot, entry.localRelPath);
+function markAsSynced(
+  entry: { id: number; localRelPath: string; localHash?: string },
+  syncRoot: string,
+  remoteFileId: string | null = null,
+): void {
+  const normalizedRel = normalizeRelPath(entry.localRelPath);
+  const absPath = toAbsPath(syncRoot, normalizedRel);
   let stat: fs.Stats | null = null;
   try { stat = fs.statSync(absPath); } catch {}
-  const fileName = path.basename(entry.localRelPath);
-  const remotePath = '/' + entry.localRelPath.replace(/\\/g, '/');
+  const fileName = path.basename(normalizedRel);
+  const remotePath = `/${normalizedRel}`;
   fileTreeRepo.upsertFile(getDatabase(), {
-    fileId: null,
-    localRelPath: entry.localRelPath,
+    fileId: remoteFileId,
+    localRelPath: normalizedRel,
     remotePath,
     name: fileName,
     size: stat?.size ?? 0,
     mimeType: null,
     isFolder: false,
     localMtimeMs: stat?.mtimeMs ?? null,
-    localHash: null,
+    localHash: entry.localHash ?? null,
     remoteHash: null,
     remoteUpdatedAt: new Date().toISOString(),
     syncStatus: 'synced',

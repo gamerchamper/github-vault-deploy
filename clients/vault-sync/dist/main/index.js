@@ -78,6 +78,10 @@ else {
 electron_1.app.whenReady().then(() => {
     dataDir = getDefaultDataDir();
     (0, database_1.openDatabase)(dataDir);
+    const queueReset = queueRepo.prepareQueueAfterRestart();
+    if (queueReset.deduped > 0 || queueReset.cancelled > 0 || queueReset.sessionsCleared > 0) {
+        logger_1.logger.info('main', `Queue cleanup: ${queueReset.deduped} duplicate(s), ${queueReset.cancelled} invalid, ${queueReset.sessionsCleared} stale session(s) cleared`);
+    }
     const settings = (0, settings_repo_1.getSettings)();
     if (!settings.syncRootPath) {
         (0, settings_repo_1.updateSettings)({ syncRootPath: getDefaultSyncRoot() });
@@ -85,7 +89,9 @@ electron_1.app.whenReady().then(() => {
     setupIPC();
     createTray();
     logger_1.logger.setHandler((level, category, message, details) => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
+        if (!mainWindow || mainWindow.isDestroyed())
+            return;
+        if (level === 'error' || category !== 'sync') {
             mainWindow.webContents.send('log', { level, category, message, details, time: new Date().toISOString() });
         }
     });
@@ -101,18 +107,14 @@ electron_1.app.whenReady().then(() => {
         }
     });
     (0, file_watcher_1.startWatcher)(settings.syncRootPath, (event, filePath) => {
-        logger_1.logger.info('watcher', `${event}: ${filePath}`);
         if (event === 'add' || event === 'change') {
-            const absPath = path_1.default.join(settings.syncRootPath, filePath);
-            try {
-                if (fs_1.default.existsSync(absPath) && !fs_1.default.statSync(absPath).isDirectory()) {
-                    logger_1.logger.info('watcher', `Queueing new file: ${filePath}`);
-                }
-            }
-            catch { /* ignore */ }
+            (0, sync_engine_1.scanLocalFile)(filePath).catch((err) => {
+                logger_1.logger.warn('watcher', `Scan failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+            });
         }
     });
-    (0, upload_queue_1.startProcessing)(5000);
+    (0, upload_queue_1.startProcessing)(2000);
+    (0, upload_queue_1.kickQueue)();
     (0, sync_engine_1.startSyncLoop)().catch((err) => logger_1.logger.error('main', `Sync start error: ${err.message}`));
     logger_1.logger.info('main', 'App started');
 });
@@ -221,9 +223,14 @@ function setupIPC() {
     electron_1.ipcMain.handle('get-settings', () => (0, settings_repo_1.getSettings)());
     electron_1.ipcMain.handle('update-settings', (_event, patch) => {
         (0, settings_repo_1.updateSettings)(patch);
+        (0, upload_queue_1.resetFolderCache)();
         return (0, settings_repo_1.getSettings)();
     });
     electron_1.ipcMain.handle('get-sync-state', () => (0, sync_engine_1.getSyncState)());
+    electron_1.ipcMain.handle('rescan-sync', async () => {
+        await (0, sync_engine_1.runSyncCycleNow)();
+        return (0, sync_engine_1.getSyncState)();
+    });
     electron_1.ipcMain.handle('pick-folder', async () => {
         const result = await electron_1.dialog.showOpenDialog({
             properties: ['openDirectory', 'createDirectory'],
@@ -247,8 +254,8 @@ function setupIPC() {
         }
     });
     electron_1.ipcMain.handle('get-queue', () => queueRepo.getAllQueueEntries());
-    electron_1.ipcMain.handle('get-file-tree', () => {
-        const fileTreeRepo = require('../db/file-tree-repo');
+    electron_1.ipcMain.handle('get-file-tree', async () => {
+        await new Promise((resolve) => setImmediate(resolve));
         return fileTreeRepo.getAllFiles();
     });
     electron_1.ipcMain.handle('open-folder', (_event, folderPath) => {

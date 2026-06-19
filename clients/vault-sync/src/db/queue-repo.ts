@@ -1,14 +1,19 @@
 import { getDatabase } from './database';
+import { normalizeRelPath } from '../services/paths';
 import type { UploadQueueEntry, QueueStatus } from '../shared/types';
 
 export function addToQueue(entry: Omit<UploadQueueEntry, 'id' | 'createdAt' | 'startedAt' | 'completedAt'>): number {
+  const localRelPath = normalizeRelPath(entry.localRelPath);
+  if (hasActiveQueueEntry(localRelPath)) {
+    return -1;
+  }
   const db = getDatabase();
   const result = db.prepare(`
     INSERT INTO upload_queue (file_id, local_rel_path, local_hash, size, mime_type, status, upload_mode, retry_count, max_retries, task_id, session_json, priority)
     VALUES (@fileId, @localRelPath, @localHash, @size, @mimeType, @status, @uploadMode, @retryCount, @maxRetries, @taskId, @sessionJson, @priority)
   `).run({
     fileId: entry.fileId,
-    localRelPath: entry.localRelPath,
+    localRelPath,
     localHash: entry.localHash,
     size: entry.size,
     mimeType: entry.mimeType,
@@ -32,14 +37,22 @@ export function getQueueEntry(id: number): UploadQueueEntry | null {
 export function getQueueEntryByPath(localRelPath: string): UploadQueueEntry | null {
   const db = getDatabase();
   const row = db.prepare('SELECT * FROM upload_queue WHERE local_rel_path = ? AND status != ? ORDER BY id DESC LIMIT 1')
-    .get(localRelPath, 'done') as Record<string, unknown> | undefined;
+    .get(normalizeRelPath(localRelPath), 'done') as Record<string, unknown> | undefined;
   return row ? mapQueueRow(row) : null;
+}
+
+export function hasActiveQueueEntry(localRelPath: string): boolean {
+  const db = getDatabase();
+  const row = db.prepare(
+    "SELECT 1 FROM upload_queue WHERE local_rel_path = ? AND status IN ('pending', 'hashing', 'uploading') LIMIT 1",
+  ).get(normalizeRelPath(localRelPath));
+  return !!row;
 }
 
 export function getPendingEntries(limit = 10): UploadQueueEntry[] {
   const db = getDatabase();
-  const rows = db.prepare('SELECT * FROM upload_queue WHERE status IN (?, ?, ?) ORDER BY priority DESC, id ASC LIMIT ?')
-    .all('pending', 'hashing', 'uploading', limit) as Record<string, unknown>[];
+  const rows = db.prepare('SELECT * FROM upload_queue WHERE status IN (?, ?) ORDER BY priority DESC, id ASC LIMIT ?')
+    .all('pending', 'hashing', limit) as Record<string, unknown>[];
   return rows.map(mapQueueRow);
 }
 
@@ -80,7 +93,67 @@ export function clearCompleted(): void {
 
 export function resetStuckEntries(): void {
   const db = getDatabase();
-  db.prepare("UPDATE upload_queue SET status = 'pending', error = 'Reset after restart' WHERE status IN ('hashing', 'uploading')").run();
+  db.prepare(`
+    UPDATE upload_queue
+    SET status = 'pending', error = 'Reset after restart', file_id = NULL, task_id = NULL, session_json = NULL
+    WHERE status IN ('hashing', 'uploading')
+  `).run();
+}
+
+export function clearStaleUploadSessions(): number {
+  const db = getDatabase();
+  const result = db.prepare(`
+    UPDATE upload_queue
+    SET file_id = NULL, task_id = NULL, session_json = NULL
+    WHERE status IN ('pending', 'error') AND (file_id IS NOT NULL OR task_id IS NOT NULL)
+  `).run();
+  return result.changes;
+}
+
+export function requeueFailedEntries(): void {
+  const db = getDatabase();
+  db.prepare("UPDATE upload_queue SET status = 'pending', retry_count = 0, error = NULL WHERE status = 'error'").run();
+}
+
+export function requeuePathIfFailed(localRelPath: string): void {
+  const db = getDatabase();
+  db.prepare(
+    "UPDATE upload_queue SET status = 'pending', retry_count = 0, error = NULL, priority = 10 WHERE local_rel_path = ? AND status = 'error'",
+  ).run(normalizeRelPath(localRelPath));
+}
+
+export function dedupePendingEntries(): number {
+  const db = getDatabase();
+  const result = db.prepare(`
+    DELETE FROM upload_queue
+    WHERE status = 'pending'
+      AND id NOT IN (
+        SELECT MAX(id) FROM upload_queue WHERE status = 'pending' GROUP BY local_rel_path
+      )
+  `).run();
+  return result.changes;
+}
+
+export function cancelInvalidPendingEntries(): number {
+  const db = getDatabase();
+  const result = db.prepare(`
+    UPDATE upload_queue
+    SET status = 'error', error = 'Invalid queue entry (zero size)'
+    WHERE status = 'pending' AND size <= 0
+  `).run();
+  return result.changes;
+}
+
+export function prepareQueueAfterRestart(): { deduped: number; cancelled: number; sessionsCleared: number } {
+  resetStuckEntries();
+  requeueFailedEntries();
+  const cancelled = cancelInvalidPendingEntries();
+  const deduped = dedupePendingEntries();
+  const sessionsCleared = clearStaleUploadSessions();
+  getDatabase().prepare(
+    "UPDATE upload_queue SET priority = 10 WHERE status = 'pending' AND priority < 10",
+  ).run();
+  return { deduped, cancelled, sessionsCleared };
 }
 
 function camelToSnake(str: string): string {

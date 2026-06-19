@@ -5,9 +5,9 @@ import { openDatabase, closeDatabase, getDatabase } from '../db/database';
 import { getSettings, updateSettings } from '../db/settings-repo';
 import * as queueRepo from '../db/queue-repo';
 import * as fileTreeRepo from '../db/file-tree-repo';
-import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange } from '../core/sync-engine';
+import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange, scanLocalFile, runSyncCycleNow } from '../core/sync-engine';
 import { startWatcher, stopWatcher } from '../core/file-watcher';
-import { startProcessing, stopProcessing, setProgressHandler } from '../core/upload-queue';
+import { startProcessing, stopProcessing, setProgressHandler, resetFolderCache, kickQueue } from '../core/upload-queue';
 import { VaultApiClient } from '../core/api-client';
 import { logger } from '../services/logger';
 import { computeBufferHash } from '../services/hasher';
@@ -44,6 +44,10 @@ if (!gotTheLock) {
 app.whenReady().then(() => {
   dataDir = getDefaultDataDir();
   openDatabase(dataDir);
+  const queueReset = queueRepo.prepareQueueAfterRestart();
+  if (queueReset.deduped > 0 || queueReset.cancelled > 0 || queueReset.sessionsCleared > 0) {
+    logger.info('main', `Queue cleanup: ${queueReset.deduped} duplicate(s), ${queueReset.cancelled} invalid, ${queueReset.sessionsCleared} stale session(s) cleared`);
+  }
 
   const settings = getSettings();
   if (!settings.syncRootPath) {
@@ -54,7 +58,8 @@ app.whenReady().then(() => {
   createTray();
 
   logger.setHandler((level, category, message, details) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (level === 'error' || category !== 'sync') {
       mainWindow.webContents.send('log', { level, category, message, details, time: new Date().toISOString() });
     }
   });
@@ -73,18 +78,15 @@ app.whenReady().then(() => {
   });
 
   startWatcher(settings.syncRootPath, (event, filePath) => {
-    logger.info('watcher', `${event}: ${filePath}`);
     if (event === 'add' || event === 'change') {
-      const absPath = path.join(settings.syncRootPath, filePath);
-      try {
-        if (fs.existsSync(absPath) && !fs.statSync(absPath).isDirectory()) {
-          logger.info('watcher', `Queueing new file: ${filePath}`);
-        }
-      } catch { /* ignore */ }
+      scanLocalFile(filePath).catch((err) => {
+        logger.warn('watcher', `Scan failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
   });
 
-  startProcessing(5000);
+  startProcessing(2000);
+  kickQueue();
   startSyncLoop().catch((err) => logger.error('main', `Sync start error: ${err.message}`));
 
   logger.info('main', 'App started');
@@ -199,10 +201,16 @@ function setupIPC(): void {
 
   ipcMain.handle('update-settings', (_event, patch: Record<string, unknown>) => {
     updateSettings(patch as any);
+    resetFolderCache();
     return getSettings();
   });
 
   ipcMain.handle('get-sync-state', () => getSyncState());
+
+  ipcMain.handle('rescan-sync', async () => {
+    await runSyncCycleNow();
+    return getSyncState();
+  });
 
   ipcMain.handle('pick-folder', async () => {
     const result = await dialog.showOpenDialog({
@@ -228,8 +236,8 @@ function setupIPC(): void {
 
   ipcMain.handle('get-queue', () => queueRepo.getAllQueueEntries());
 
-  ipcMain.handle('get-file-tree', () => {
-    const fileTreeRepo = require('../db/file-tree-repo');
+  ipcMain.handle('get-file-tree', async () => {
+    await new Promise<void>((resolve) => setImmediate(resolve));
     return fileTreeRepo.getAllFiles();
   });
 

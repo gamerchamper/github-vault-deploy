@@ -1,4 +1,4 @@
-export declare const SCHEMA_VERSION = 1;
+export declare const SCHEMA_VERSION = 2;
 export declare const SQL: {
     createTables: string;
 };
