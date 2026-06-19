@@ -1606,6 +1606,8 @@ const App = {
       });
     });
 
+    FileHistory?.init?.();
+
     document.getElementById('cache-drive')?.addEventListener('contextmenu', (e) => {
       this.showCacheContextMenu(e);
     });
@@ -1697,7 +1699,8 @@ const App = {
 
     document.getElementById('context-menu').addEventListener('click', (e) => {
       e.stopPropagation();
-      const action = e.target.dataset.action;
+      const item = e.target.closest('[data-action]');
+      const action = item?.dataset?.action;
       if (!action) return;
       const mode = explorer.contextMode;
       explorer.hideContextMenu();
@@ -1726,7 +1729,7 @@ const App = {
       }
       if (action === 'rename') explorer.startRename(file);
       if (action === 'details') App.showDetails(file);
-      if (action === 'view-history' && !file.is_folder) FileHistory.open(file);
+      if (action === 'view-history' && !file.is_folder) App.showFileHistory(file);
       if (action === 'share') App.shareFile(file);
       if (action === 'download' && !file.is_folder) explorer.downloadFile(file);
       if (action === 'move') explorer.showMoveDialog([...explorer.selected]);
@@ -2404,6 +2407,20 @@ const App = {
     } catch (err) {
       body.innerHTML = `<p class="plan-error">${err.message}</p>`;
     }
+  },
+
+  showFileHistory(file) {
+    if (!file || file.is_folder) return;
+    if (typeof FileHistory !== 'undefined' && FileHistory.open) {
+      FileHistory.open(file);
+      return;
+    }
+    const modal = document.getElementById('file-history-modal');
+    if (!modal) {
+      this.toast('File history UI is missing. Hard-refresh the page (Ctrl+F5).', 'error');
+      return;
+    }
+    this.toast('File history script failed to load. Hard-refresh the page (Ctrl+F5).', 'error');
   },
 
   async shareFile(file) {

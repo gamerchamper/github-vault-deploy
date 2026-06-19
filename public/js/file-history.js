@@ -134,5 +134,3 @@ const FileHistory = {
     return el.innerHTML;
   },
 };
-
-document.addEventListener('DOMContentLoaded', () => FileHistory.init());
