@@ -1726,6 +1726,7 @@ const App = {
       }
       if (action === 'rename') explorer.startRename(file);
       if (action === 'details') App.showDetails(file);
+      if (action === 'view-history' && !file.is_folder) FileHistory.open(file);
       if (action === 'share') App.shareFile(file);
       if (action === 'download' && !file.is_folder) explorer.downloadFile(file);
       if (action === 'move') explorer.showMoveDialog([...explorer.selected]);

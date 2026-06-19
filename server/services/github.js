@@ -215,6 +215,15 @@ async function downloadChunk(octokit, owner, repo, path, branch, opts = {}) {
   return chunkLookup.downloadBlob(octokit, owner, repo, path, branch, opts);
 }
 
+async function downloadBlobBySha(octokit, owner, repo, sha, opts = {}) {
+  const subsystem = opts.subsystem || 'download';
+  return rateLimit.runWithSubsystem(subsystem, async () => {
+    const { data } = await octokit.git.getBlob({ owner, repo, file_sha: sha });
+    if (data.encoding !== 'base64') throw new Error('Unexpected blob encoding');
+    return Buffer.from(data.content, 'base64');
+  });
+}
+
 async function deleteChunk(octokit, owner, repo, path, sha, branch) {
   await octokit.repos.deleteFile({
     owner,
@@ -414,6 +423,7 @@ module.exports = {
   uploadChunk,
   getFileSha,
   downloadChunk,
+  downloadBlobBySha,
   deleteChunk,
   getRepoInfo,
   setRepoPublic,

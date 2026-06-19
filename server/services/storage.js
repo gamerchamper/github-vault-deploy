@@ -456,8 +456,9 @@ async function uploadFile(userId, filePath, parentPath, buffer, mimeType, option
     await metadata.saveThumbnail(userId, fileId, thumbBuffer, fileName);
   }
 
-  await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, !!thumbBuffer);
+  const manifestSha = await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, !!thumbBuffer);
   await purgeDuplicateFiles(userId, fileId, fileRecord.path, normalizedParent);
+  await maybeRecordFileHistory(userId, fileId, { source: 'upload', manifestSha });
 
   reportProgress(onProgress, { phase: 'done', percent: 100, chunksDone: totalChunks, chunksTotal: totalChunks });
 
@@ -980,10 +981,11 @@ async function finalizeUpload(userId, fileId, previewBuffer, onProgress, uploadM
     await metadata.saveThumbnail(userId, fileId, thumbBuffer, file.name);
   }
 
-  await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, !!thumbBuffer);
+  const manifestSha = await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, !!thumbBuffer);
   await purgeDuplicateFiles(userId, fileId, file.path, file.parent_path);
 
   db.prepare('UPDATE files SET upload_status = ? WHERE id = ?').run('ready', fileId);
+  await maybeRecordFileHistory(userId, fileId, { source: 'upload', manifestSha });
 
   reportProgress(onProgress, { phase: 'done', percent: 100, chunksDone, chunksTotal: file.chunk_count });
 
@@ -1132,6 +1134,59 @@ async function getFileKeyFromMeta(userId, file) {
   const encryptionMeta = await resolveEncryptionMeta(userId, file);
   const masterKey = crypto.getMasterKey(getUser(userId));
   return crypto.deserializeEncryption(encryptionMeta, masterKey);
+}
+
+async function maybeRecordFileHistory(userId, fileId, opts = {}) {
+  try {
+    const fileHistory = require('./file-history');
+    if (!fileHistory.isEnabled()) return;
+    await fileHistory.recordVersion(userId, fileId, opts);
+  } catch (err) {
+    const logger = require('../lib/logger');
+    logger.warn('file_history_record_failed', { userId, fileId, error: err.message });
+  }
+}
+
+async function downloadFileVersion(userId, fileId, versionId, onProgress = null) {
+  const fileHistory = require('./file-history');
+  const row = fileHistory.getVersion(userId, fileId, versionId);
+  const snapshot = JSON.parse(row.manifest_json);
+  if (!snapshot.chunks?.length) throw new Error('Version has no chunks');
+
+  const fauxFile = {
+    id: fileId,
+    encryption_meta: JSON.stringify(snapshot.encryption),
+    size: snapshot.size,
+    mime_type: snapshot.mime_type,
+    name: snapshot.name,
+  };
+  const fileKey = await getFileKeyFromMeta(userId, fauxFile);
+  const sorted = snapshot.chunks.slice().sort((a, b) => a.chunk_index - b.chunk_index);
+  const parts = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const chunk = sorted[i];
+    const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(chunk.repo_id);
+    if (!repo) throw new Error(`Storage repo missing for chunk ${chunk.chunk_index}`);
+    const fullName = chunk.full_name || repo.full_name;
+    const [owner, name] = fullName.split('/');
+    const octokit = accounts.createClientForUpload(userId, repo);
+    const enc = await github.downloadBlobBySha(octokit, owner, name, chunk.sha, { subsystem: 'download' });
+    const dec = crypto.decryptChunk(enc, fileKey, chunk.chunk_iv, chunk.chunk_tag);
+    parts.push(dec);
+    if (onProgress) onProgress(i + 1, sorted.length);
+  }
+
+  return {
+    buffer: Buffer.concat(parts),
+    file: {
+      id: fileId,
+      name: snapshot.name,
+      mime_type: snapshot.mime_type || 'application/octet-stream',
+      size: snapshot.size,
+    },
+    versionNum: row.version_num,
+  };
 }
 
 function previewByteLimit(file) {
@@ -2515,7 +2570,8 @@ async function finalizeFileRepair(userId, fileId) {
   }));
 
   if (metadata.getMetadataRepo(userId)) {
-    await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, !!file.has_thumbnail);
+    const manifestSha = await metadata.saveFileManifest(userId, fileRecord, chunkRecords, encryptionMeta, !!file.has_thumbnail);
+    await maybeRecordFileHistory(userId, file.id, { source: 'repair', manifestSha });
   }
 
   const backupSync = require('./backup-sync');
@@ -2549,6 +2605,7 @@ module.exports = {
   markUploadFailed,
   uploadPercent,
   downloadFile,
+  downloadFileVersion,
   downloadFileToPath,
   downloadFileWithProgress,
   deleteFile,

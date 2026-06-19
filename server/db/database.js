@@ -355,4 +355,27 @@ try {
   `);
 } catch { /* exists */ }
 
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS file_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      version_num INTEGER NOT NULL,
+      size INTEGER NOT NULL,
+      chunk_count INTEGER NOT NULL,
+      content_fingerprint TEXT NOT NULL,
+      manifest_sha TEXT,
+      source TEXT DEFAULT 'upload',
+      note TEXT,
+      manifest_json TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE,
+      UNIQUE(file_id, version_num)
+    );
+    CREATE INDEX IF NOT EXISTS idx_file_versions_file ON file_versions(file_id, version_num DESC);
+    CREATE INDEX IF NOT EXISTS idx_file_versions_user ON file_versions(user_id, file_id);
+  `);
+} catch { /* exists */ }
+
 module.exports = db;

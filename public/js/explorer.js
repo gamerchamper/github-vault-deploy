@@ -1421,6 +1421,7 @@ class Explorer {
 
     const dlItem = menu.querySelector('[data-action="download"]');
     const detailsItem = menu.querySelector('[data-action="details"]');
+    const historyItem = menu.querySelector('[data-action="view-history"]');
     const shareItem = menu.querySelector('[data-action="share"]');
     const thumbItem = menu.querySelector('[data-action="refresh-thumb"]');
     const uploadThumbItem = menu.querySelector('[data-action="upload-thumb"]');
@@ -1434,6 +1435,7 @@ class Explorer {
 
     dlItem.style.display = file.is_folder ? 'none' : '';
     detailsItem.style.display = file.is_folder ? 'none' : '';
+    if (historyItem) historyItem.style.display = file.is_folder ? 'none' : '';
     shareItem.style.display = file.is_folder ? 'none' : '';
     const actionTargets = this.getActionTargets(file);
     const fileTargets = actionTargets.filter((f) => !f.is_folder);
@@ -1484,6 +1486,7 @@ class Explorer {
       if (favoriteItem) favoriteItem.style.display = 'none';
       dlItem.style.display = 'none';
       detailsItem.style.display = 'none';
+      if (historyItem) historyItem.style.display = 'none';
       shareItem.style.display = 'none';
       if (thumbItem) thumbItem.style.display = 'none';
       if (uploadThumbItem) uploadThumbItem.style.display = 'none';

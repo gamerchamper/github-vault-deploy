@@ -192,6 +192,9 @@ const API = {
     plan: (size, chunkSize, { convertHls = false, mimeType = null, fileName = null } = {}) =>
       API.post('/api/files/plan', { size, chunkSize, convertHls, mimeType, fileName }),
     details: (id) => API.get(`/api/files/details/${id}`),
+    history: (id) => API.get(`/api/files/history/${id}`),
+    historyDownload: (id, versionId) => `/api/files/history/${id}/${versionId}/download`,
+    historyView: (id, versionId) => `/api/files/history/${id}/${versionId}/view`,
     share: (id) => API.post(`/api/files/share/${id}`),
     unshare: (id) => API.delete(`/api/files/share/${id}`),
     shareSettings: () => API.get('/api/files/share/settings'),

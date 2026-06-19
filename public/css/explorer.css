@@ -4243,3 +4243,23 @@ h3 {
 .global-search-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .global-search-meta { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 .global-search-empty { padding: var(--space-xl); text-align: center; color: var(--text-muted); }
+
+.file-history-table-wrap { overflow-x: auto; margin: var(--space-md) 0; }
+.file-history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.file-history-table th,
+.file-history-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.file-history-table th { font-size: 11px; text-transform: uppercase; color: var(--text-muted); }
+.history-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+.history-badge {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; background: var(--accent-dim, rgba(99, 102, 241, 0.15)); color: var(--accent);
+}
+.history-source { font-size: 11px; color: var(--text-muted); text-transform: capitalize; }
+.file-history-git { margin-top: var(--space-lg); }
+.file-history-git h3 { font-size: 13px; margin-bottom: var(--space-sm); }
+.file-history-git-list { list-style: none; padding: 0; margin: 0; font-size: 12px; }
+.file-history-git-list li { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.file-history-git-list time { color: var(--text-muted); white-space: nowrap; }
+.history-sha { font-size: 10px; color: var(--text-muted); }
+.file-history-preview { margin-bottom: var(--space-md); text-align: center; }
+.file-history-preview-img { max-width: 100%; max-height: 280px; border-radius: var(--radius); }

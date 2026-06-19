@@ -947,6 +947,45 @@ router.get('/details/:id', (req, res) => {
   }
 });
 
+router.get('/history/:id', async (req, res) => {
+  try {
+    const fileHistory = require('../services/file-history');
+    res.json(await fileHistory.listVersions(req.user.id, req.params.id));
+  } catch (err) {
+    const code = err.message === 'File not found' ? 404 : 500;
+    res.status(code).json({ error: err.message });
+  }
+});
+
+router.get('/history/:id/:versionId/download', async (req, res) => {
+  try {
+    const versionId = parseInt(req.params.versionId, 10);
+    if (!Number.isFinite(versionId)) return res.status(400).json({ error: 'Invalid version id' });
+    const { buffer, file } = await storage.downloadFileVersion(req.user.id, req.params.id, versionId);
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.name)}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+    recordBytes(req.user.id, file.id, buffer.length, 'download');
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+router.get('/history/:id/:versionId/view', async (req, res) => {
+  try {
+    const versionId = parseInt(req.params.versionId, 10);
+    if (!Number.isFinite(versionId)) return res.status(400).json({ error: 'Invalid version id' });
+    const { buffer, file } = await storage.downloadFileVersion(req.user.id, req.params.id, versionId);
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.name)}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
 router.post('/share/:id', (req, res) => {
   try {
     res.json(storage.createShareToken(req.user.id, req.params.id, req));

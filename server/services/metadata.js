@@ -135,6 +135,7 @@ async function saveFileManifest(userId, file, chunks, encryption, hasThumbnail) 
     name: file.name,
     fileUpdatedAt: file.updated_at || null,
   });
+  return sha;
 }
 
 async function saveThumbnail(userId, fileId, buffer, fileName = null) {

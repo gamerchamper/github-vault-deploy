@@ -904,6 +904,20 @@
     </div>
   </div>
 
+  <!-- File history (experimental) -->
+  <div id="file-history-modal" class="modal hidden">
+    <div class="modal-content modal-large">
+      <div class="modal-header">
+        <h2 id="file-history-title">File history</h2>
+        <button class="modal-close" data-close="file-history-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="file-history-preview" class="file-history-preview hidden"></div>
+        <div id="file-history-body"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Share Modal -->
   <div id="share-modal" class="modal hidden">
     <div class="modal-content">
@@ -1120,6 +1134,7 @@
       <div class="context-item" data-action="preview">Preview</div>
       <div class="context-item" data-action="rename">Rename</div>
       <div class="context-item" data-action="details">Details</div>
+      <div class="context-item" data-action="view-history">View history</div>
       <div class="context-item" data-action="share">Share</div>
       <div class="context-item" data-action="download">Download</div>
       <div class="context-item" data-action="move">Move to...</div>
@@ -1211,6 +1226,7 @@
   <script src="/js/adaptive-concurrency.js?v=1.0.0"></script>
   <script src="/js/verify-repair.js?v=1.0.0"></script>
   <script src="/js/verify-hls.js?v=1.0.1"></script>
+  <script src="/js/file-history.js?v=1.0.0"></script>
   <script src="/js/thumb-upload.js?v=1.0.1"></script>
   <script src="/js/upload-manager.js?v=1.0.0"></script>
   <script src="/js/seamless-upload.js?v=1.0.1"></script>
