@@ -67,6 +67,23 @@ async function readJson(octokit, repo, path) {
   }
 }
 
+async function readJsonAtRef(octokit, repo, path, ref) {
+  const [owner, name] = repo.full_name.split('/');
+  try {
+    const rateLimit = require('./github-rate-limit');
+    const { data } = await rateLimit.runWithSubsystem('metadata', () =>
+      octokit.repos.getContent({ owner, repo: name, path, ref }),
+    );
+    if (Array.isArray(data)) return null;
+    const content = JSON.parse(Buffer.from(data.content, data.encoding).toString('utf8'));
+    content._sha = data.sha;
+    return content;
+  } catch (err) {
+    if (err.status === 404) return null;
+    return null;
+  }
+}
+
 async function writeJson(octokit, repo, path, obj, existingSha) {
   const [owner, name] = repo.full_name.split('/');
   const payload = { ...obj };
@@ -109,6 +126,9 @@ function buildManifest(file, chunks, encryption, hasThumbnail) {
       repo_path: c.repo_path,
       sha: c.sha,
       size: c.size,
+      plain_size: c.plain_size ?? null,
+      chunk_iv: c.chunk_iv ?? null,
+      chunk_tag: c.chunk_tag ?? null,
     })),
     encryption,
     thumbnail: hasThumbnail ? thumbnailPath(file.id) : null,
@@ -408,6 +428,8 @@ function warmThumbnailsBackground(userId, files) {
 module.exports = {
   METADATA_REPO_NAME,
   getMetadataRepo,
+  manifestPath,
+  readJsonAtRef,
   saveFileManifest,
   saveThumbnail,
   deleteFileMetadata,

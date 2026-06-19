@@ -103,6 +103,7 @@ async function initSeamlessUpload(userId, params) {
     mimeType,
     chunkSize,
     fileId: resumeFileId,
+    replaceFileId = null,
     convertHls = false,
     taskId: existingTaskId,
   } = params;
@@ -114,6 +115,8 @@ async function initSeamlessUpload(userId, params) {
     mimeType,
     chunkSize: parseInt(chunkSize, 10) || storage.CHUNK_SIZE,
     fileId: resumeFileId,
+    replaceFileId,
+    contentSource: replaceFileId ? 'sync' : 'upload',
     convertHls,
   });
 

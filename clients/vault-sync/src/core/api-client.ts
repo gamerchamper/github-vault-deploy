@@ -194,6 +194,7 @@ export class VaultApiClient {
     mimeType: string;
     chunkSize: number;
     fileId?: string;
+    replaceFileId?: string;
     taskId?: string;
     convertHls?: boolean;
   }): Promise<Result<{ fileId: string; jobId: string; totalParts: number; partSize: number; totalChunks?: number }>> {
@@ -207,6 +208,7 @@ export class VaultApiClient {
         mimeType: opts.mimeType,
         chunkSize: opts.chunkSize || undefined,
         fileId: opts.fileId || undefined,
+        replaceFileId: opts.replaceFileId || undefined,
         taskId: opts.taskId || undefined,
         convertHls: !!opts.convertHls,
       }),

@@ -169,6 +169,7 @@ class VaultApiClient {
                 mimeType: opts.mimeType,
                 chunkSize: opts.chunkSize || undefined,
                 fileId: opts.fileId || undefined,
+                replaceFileId: opts.replaceFileId || undefined,
                 taskId: opts.taskId || undefined,
                 convertHls: !!opts.convertHls,
             }),

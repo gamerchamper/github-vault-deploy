@@ -4465,6 +4465,8 @@ h3 {
 .history-source-upload { color: #6ea8fe; background: rgba(110, 168, 254, 0.12); }
 .history-source-sync { color: #63e6be; background: rgba(99, 230, 190, 0.12); }
 .history-source-repair { color: #ffd43b; background: rgba(255, 212, 59, 0.12); }
+.history-source-git { color: #b197fc; background: rgba(177, 151, 252, 0.12); }
+.history-unavailable { font-size: 11px; color: var(--text-muted); font-style: italic; }
 
 .file-history-git-intro {
   margin: 0 0 12px;

@@ -85,6 +85,7 @@ export declare class VaultApiClient {
         mimeType: string;
         chunkSize: number;
         fileId?: string;
+        replaceFileId?: string;
         taskId?: string;
         convertHls?: boolean;
     }): Promise<Result<{

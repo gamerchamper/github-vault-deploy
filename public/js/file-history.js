@@ -64,7 +64,7 @@ const FileHistory = {
 
     const intro = `
       <div class="file-history-intro">
-        <p>Each time this file’s <strong>content</strong> changes (upload, edit + sync, or repair), a snapshot is saved. Open or download any past version.</p>
+        <p>Each time Vault Sync or an upload changes <strong>file content</strong>, a snapshot is saved. Older encrypted chunks stay on GitHub (by blob SHA) even after the live file is updated.</p>
       </div>`;
 
     if (!data.versions?.length) {
@@ -102,9 +102,13 @@ const FileHistory = {
       ? new Date(v.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
       : '';
     const source = this.formatSource(v.source);
-    const previewBtn = previewType
+    const canOpen = v.downloadable !== false;
+    const previewBtn = previewType && canOpen
       ? `<button type="button" class="btn-secondary btn-sm" data-history-preview="${v.id}">Preview</button>`
       : '';
+    const downloadBtn = canOpen
+      ? `<button type="button" class="btn-primary btn-sm" data-history-download="${v.id}">Download</button>`
+      : '<span class="history-unavailable">Cannot restore — missing encryption data</span>';
 
     return `
       <article class="file-history-card${v.isCurrent ? ' is-current' : ''}${isFirst ? ' is-latest' : ''}">
@@ -125,7 +129,7 @@ const FileHistory = {
           <p class="file-history-card-desc">${this.escape(source.desc)}</p>
           <div class="file-history-card-actions">
             ${previewBtn}
-            <button type="button" class="btn-primary btn-sm" data-history-download="${v.id}">Download</button>
+            ${downloadBtn}
           </div>
         </div>
       </article>
@@ -160,7 +164,7 @@ const FileHistory = {
           <h3>Git audit trail</h3>
           <span class="file-history-section-hint">Metadata repo</span>
         </div>
-        <p class="file-history-git-intro">When file metadata is saved, GitHub records a commit. This is separate from content snapshots but helps confirm when the vault index changed.</p>
+        <p class="file-history-git-intro">GitHub records a commit each time file metadata is saved. Versions with matching snapshots appear above; extra commits are listed here.</p>
         <ul class="file-history-git-list">${items}</ul>
       </section>
     `;
@@ -187,8 +191,9 @@ const FileHistory = {
   formatSource(source) {
     const map = {
       upload: { label: 'Upload', desc: 'Saved when the file was uploaded or re-synced with new content.' },
-      sync: { label: 'Vault Sync', desc: 'Updated when Vault Sync detected a local edit and pushed changes.' },
+      sync: { label: 'Vault Sync', desc: 'Snapshot from a Vault Sync edit — previous chunks are kept on GitHub.' },
       repair: { label: 'Repair', desc: 'Saved after a verify/repair run fixed or replaced file chunks.' },
+      git: { label: 'Git history', desc: 'Recovered from a past metadata commit on GitHub.' },
     };
     return map[source] || { label: source || 'Saved', desc: 'Content snapshot recorded on the server.' };
   },

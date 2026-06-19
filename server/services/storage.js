@@ -28,6 +28,9 @@ const GB = 1024 * 1024 * 1024;
 const MB = 1024 * 1024;
 const GITHUB_MAX_BLOB_BYTES = 100 * MB;
 const MAX_CHUNK_BYTES = parseInt(process.env.MAX_CHUNK_MB || '95', 10) * MB;
+
+/** Tracks content-replace uploads so history uses source=sync after finalize. */
+const contentReplaceSources = new Map();
 const MIN_CHUNK_BYTES = 64 * 1024;
 const GCM_OVERHEAD_BYTES = 16;
 
@@ -438,6 +441,8 @@ async function uploadFile(userId, filePath, parentPath, buffer, mimeType, option
       sha,
       size: part.data.length,
       plain_size: part.plainSize,
+      chunk_iv: part.iv.toString('base64'),
+      chunk_tag: part.authTag.toString('base64'),
     });
 
     const pct = 10 + Math.round(((i + 1) / totalChunks) * 85);
@@ -616,6 +621,31 @@ async function cleanupEmptyUploadDuplicates(userId, fileName, parentPath, size, 
   }
 }
 
+async function clearFileChunksForReplace(userId, fileId) {
+  const chunks = db.prepare('SELECT * FROM chunks WHERE file_id = ?').all(fileId);
+  const updateRepo = db.prepare(
+    'UPDATE storage_repos SET chunk_count = ?, total_bytes = ? WHERE id = ?',
+  );
+  for (const chunk of chunks) {
+    const repo = db.prepare('SELECT chunk_count, total_bytes FROM storage_repos WHERE id = ?').get(chunk.repo_id);
+    if (repo) {
+      updateRepo.run(
+        Math.max(0, (repo.chunk_count || 0) - 1),
+        Math.max(0, (repo.total_bytes || 0) - chunk.size),
+        chunk.repo_id,
+      );
+    }
+  }
+  db.prepare(`
+    DELETE FROM chunk_sync_failures
+    WHERE chunk_id IN (SELECT id FROM chunks WHERE file_id = ?)
+  `).run(fileId);
+  db.prepare('DELETE FROM chunk_backups WHERE chunk_id IN (SELECT id FROM chunks WHERE file_id = ?)').run(fileId);
+  db.prepare('DELETE FROM chunks WHERE file_id = ?').run(fileId);
+  db.prepare('DELETE FROM hls_segments WHERE file_id = ?').run(fileId);
+  require('./cache').remove(userId, fileId);
+}
+
 async function initUploadSession(userId, params) {
   const {
     fileName,
@@ -624,6 +654,8 @@ async function initUploadSession(userId, params) {
     mimeType,
     chunkSize: rawChunkSize = CHUNK_SIZE,
     fileId: resumeFileId,
+    replaceFileId = null,
+    contentSource = 'upload',
     convertHls = false,
   } = params;
 
@@ -651,7 +683,37 @@ async function initUploadSession(userId, params) {
   let fileId = resumeFileId;
   let existing = null;
 
-  if (fileId) {
+  if (replaceFileId) {
+    const ready = db.prepare(`
+      SELECT * FROM files WHERE id = ? AND user_id = ? AND is_folder = 0 AND is_deleted = 0
+        AND (upload_status IS NULL OR upload_status = 'ready')
+    `).get(replaceFileId, userId);
+    if (!ready) throw new Error('File not found for content update');
+    if (ready.name !== fileName) {
+      throw new Error('File name does not match the existing file');
+    }
+
+    const fileHistory = require('./file-history');
+    await fileHistory.recordVersionBeforeReplace(userId, replaceFileId, {
+      source: contentSource === 'sync' ? 'sync' : 'upload',
+    });
+
+    await clearFileChunksForReplace(userId, replaceFileId);
+    totalChunks = Math.ceil(size / chunkSize) || 1;
+    fileId = replaceFileId;
+    contentReplaceSources.set(fileId, contentSource === 'sync' ? 'sync' : 'upload');
+
+    db.prepare(`
+      UPDATE files SET size = ?, mime_type = ?, chunk_count = ?, upload_status = 'uploading',
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      size,
+      mimeType || ready.mime_type || 'application/octet-stream',
+      totalChunks,
+      fileId,
+    );
+  } else if (fileId) {
     existing = db.prepare(
       `SELECT * FROM files WHERE id = ? AND user_id = ? AND upload_status IN ('uploading', 'failed')`
     ).get(fileId, userId);
@@ -975,6 +1037,8 @@ async function finalizeUpload(userId, fileId, previewBuffer, onProgress, uploadM
     sha: chunk.sha,
     size: chunk.size,
     plain_size: chunk.plain_size,
+    chunk_iv: chunk.chunk_iv,
+    chunk_tag: chunk.chunk_tag,
   }));
 
   if (thumbBuffer) {
@@ -985,7 +1049,9 @@ async function finalizeUpload(userId, fileId, previewBuffer, onProgress, uploadM
   await purgeDuplicateFiles(userId, fileId, file.path, file.parent_path);
 
   db.prepare('UPDATE files SET upload_status = ? WHERE id = ?').run('ready', fileId);
-  await maybeRecordFileHistory(userId, fileId, { source: 'upload', manifestSha });
+  const historySource = contentReplaceSources.get(fileId) || 'upload';
+  contentReplaceSources.delete(fileId);
+  await maybeRecordFileHistory(userId, fileId, { source: historySource, manifestSha });
 
   reportProgress(onProgress, { phase: 'done', percent: 100, chunksDone, chunksTotal: file.chunk_count });
 
@@ -1151,6 +1217,9 @@ async function downloadFileVersion(userId, fileId, versionId, onProgress = null)
   const fileHistory = require('./file-history');
   const row = fileHistory.getVersion(userId, fileId, versionId);
   const snapshot = JSON.parse(row.manifest_json);
+  if (!fileHistory.snapshotIsDownloadable(snapshot)) {
+    throw new Error('This version cannot be downloaded — encryption metadata was not stored for this snapshot');
+  }
   if (!snapshot.chunks?.length) throw new Error('Version has no chunks');
 
   const fauxFile = {

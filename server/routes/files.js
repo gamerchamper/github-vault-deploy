@@ -714,7 +714,7 @@ router.get('/upload/session/:fileId/chunks', (req, res) => {
 router.post('/upload/seamless/init', async (req, res) => {
   try {
     const {
-      fileName, path, parentPath: parentPathField, size, mimeType, chunkSize, fileId, taskId,
+      fileName, path, parentPath: parentPathField, size, mimeType, chunkSize, fileId, replaceFileId, taskId,
     } = req.body;
     const parentPath = parentPathField || path || '/';
     if (!fileName || !size) return res.status(400).json({ error: 'fileName and size required' });
@@ -737,6 +737,7 @@ router.post('/upload/seamless/init', async (req, res) => {
       mimeType,
       chunkSize: parseInt(chunkSize, 10) || storage.CHUNK_SIZE,
       fileId,
+      replaceFileId: replaceFileId || null,
       convertHls,
       taskId,
     });

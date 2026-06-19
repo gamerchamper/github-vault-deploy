@@ -124,6 +124,18 @@ async function processNext() {
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('already exists') && entry.fileId) {
+            clearUploadSession(entry.id);
+            try {
+                await uploadEntrySeamless({ ...entry, fileId: entry.fileId }, settings);
+                succeeded = true;
+                return;
+            }
+            catch (retryErr) {
+                const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+                logger_1.logger.error('upload-queue', `Replace retry failed for ${entry.localRelPath}: ${retryMsg}`);
+            }
+        }
         if (msg.includes('already exists')) {
             queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, completedAt: new Date().toISOString(), error: null });
             markAsSynced(entry, settings.syncRootPath);
@@ -240,7 +252,7 @@ async function uploadEntrySeamless(entryIn, settings) {
     if (parentPath && parentPath !== '/') {
         await ensureFolderOnServer(api, parentPath);
     }
-    const remoteId = await resolveRemoteFileId(api, fileName, parentPath, stat.size);
+    const remoteId = entry.fileId ? null : await resolveRemoteFileId(api, fileName, parentPath, stat.size);
     if (remoteId) {
         queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, fileId: remoteId, completedAt: new Date().toISOString() });
         markAsSynced(entry, settings.syncRootPath, remoteId);
@@ -259,6 +271,7 @@ async function uploadEntrySeamless(entryIn, settings) {
         mimeType,
         chunkSize,
         convertHls,
+        replaceFileId: entry.fileId || undefined,
     });
     if (!initResult.ok && isStaleSessionError(initResult.error.message)) {
         clearUploadSession(entry.id);
@@ -269,6 +282,7 @@ async function uploadEntrySeamless(entryIn, settings) {
             mimeType,
             chunkSize,
             convertHls,
+            replaceFileId: entry.fileId || undefined,
         });
     }
     if (!initResult.ok) {
