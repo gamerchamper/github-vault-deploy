@@ -1258,6 +1258,141 @@ async function downloadFileVersion(userId, fileId, versionId, onProgress = null)
   };
 }
 
+async function restoreFileVersion(userId, fileId, versionId) {
+  const fileHistory = require('./file-history');
+  const row = fileHistory.getVersion(userId, fileId, versionId);
+  const snapshot = JSON.parse(row.manifest_json);
+  if (!fileHistory.snapshotIsDownloadable(snapshot)) {
+    throw new Error('Cannot restore this version — missing encryption metadata');
+  }
+
+  const file = db.prepare(
+    "SELECT * FROM files WHERE id = ? AND user_id = ? AND is_folder = 0 AND is_deleted = 0",
+  ).get(fileId, userId);
+  if (!file) throw new Error('File not found');
+  if (file.upload_status && file.upload_status !== 'ready') {
+    throw new Error('Cannot restore while an upload is in progress');
+  }
+
+  const sorted = snapshot.chunks.slice().sort((a, b) => a.chunk_index - b.chunk_index);
+  if (!sorted.length) throw new Error('Version has no chunks');
+
+  const currentChunks = db.prepare('SELECT * FROM chunks WHERE file_id = ? ORDER BY chunk_index').all(fileId);
+  const currentFp = currentChunks.length
+    ? fileHistory.contentFingerprint(currentChunks, file.size)
+    : null;
+  if (currentFp && currentFp === row.content_fingerprint) {
+    return { fileId, restoredFromVersion: row.version_num, size: snapshot.size, unchanged: true };
+  }
+
+  await fileHistory.recordVersionBeforeReplace(userId, fileId, {
+    source: 'restore',
+    note: `Before restoring version ${row.version_num}`,
+  });
+
+  await clearFileChunksForReplace(userId, fileId);
+
+  const insertChunk = db.prepare(`
+    INSERT INTO chunks (file_id, chunk_index, repo_id, repo_path, sha, size, chunk_iv, chunk_tag, plain_size)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateRepo = db.prepare(
+    'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?',
+  );
+
+  for (const chunk of sorted) {
+    let repoId = chunk.repo_id;
+    let repo = repoId ? db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(repoId) : null;
+    if (!repo && chunk.full_name) {
+      repo = db.prepare(
+        'SELECT * FROM storage_repos WHERE user_id = ? AND full_name = ? LIMIT 1',
+      ).get(userId, chunk.full_name);
+      repoId = repo?.id;
+    }
+    if (!repo || !repoId) {
+      throw new Error(`Storage repo "${chunk.full_name || 'unknown'}" is no longer available`);
+    }
+
+    insertChunk.run(
+      fileId,
+      chunk.chunk_index,
+      repoId,
+      chunk.repo_path,
+      chunk.sha,
+      chunk.size,
+      chunk.chunk_iv,
+      chunk.chunk_tag,
+      chunk.plain_size ?? chunk.size,
+    );
+    updateRepo.run(chunk.size, repoId);
+  }
+
+  db.prepare(`
+    UPDATE files SET size = ?, mime_type = ?, chunk_count = ?, encryption_meta = ?,
+      upload_status = 'ready', has_hls = 0, hls_playlist_path = NULL,
+      updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    snapshot.size,
+    snapshot.mime_type || file.mime_type,
+    sorted.length,
+    JSON.stringify(snapshot.encryption),
+    fileId,
+  );
+
+  db.prepare('DELETE FROM hls_segments WHERE file_id = ?').run(fileId);
+
+  const updated = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId);
+  const chunkRecords = sorted.map((c) => ({
+    chunk_index: c.chunk_index,
+    full_name: c.full_name,
+    repo_path: c.repo_path,
+    sha: c.sha,
+    size: c.size,
+    plain_size: c.plain_size,
+    chunk_iv: c.chunk_iv,
+    chunk_tag: c.chunk_tag,
+  }));
+
+  let manifestSha = null;
+  if (metadata.getMetadataRepo(userId)) {
+    manifestSha = await metadata.saveFileManifest(
+      userId,
+      {
+        id: updated.id,
+        name: updated.name,
+        path: updated.path,
+        parent_path: updated.parent_path,
+        size: updated.size,
+        mime_type: updated.mime_type,
+        chunk_count: updated.chunk_count,
+        is_folder: 0,
+        created_at: updated.created_at,
+      },
+      chunkRecords,
+      snapshot.encryption,
+      !!updated.has_thumbnail,
+    );
+  }
+
+  await maybeRecordFileHistory(userId, fileId, {
+    source: 'restore',
+    manifestSha,
+    note: `Restored from version ${row.version_num}`,
+  });
+
+  require('./cache').remove(userId, fileId);
+  touchFile(fileId);
+  notifyPlaylistFolderSync(userId, [fileId]);
+
+  return {
+    fileId,
+    restoredFromVersion: row.version_num,
+    size: snapshot.size,
+    name: updated.name,
+  };
+}
+
 function previewByteLimit(file) {
   return thumbnails.previewByteLimit(file.mime_type, file.name, file.size);
 }
@@ -2675,6 +2810,7 @@ module.exports = {
   uploadPercent,
   downloadFile,
   downloadFileVersion,
+  restoreFileVersion,
   downloadFileToPath,
   downloadFileWithProgress,
   deleteFile,

@@ -24,6 +24,24 @@ const Viewer = {
   activePlaylist: null,
   streamCleanups: new Map(),
 
+  isHistoryFile(file) {
+    return file != null && file._historyVersionId != null;
+  },
+
+  fileViewUrl(file) {
+    if (this.isHistoryFile(file)) {
+      return API.files.historyView(file.id, file._historyVersionId);
+    }
+    return API.files.view(file.id, explorer?.accountView);
+  },
+
+  fileStreamUrl(file) {
+    if (this.isHistoryFile(file)) {
+      return API.files.historyStream(file.id, file._historyVersionId);
+    }
+    return API.files.stream(file.id, explorer?.accountView);
+  },
+
   resetMediaElement(el) {
     if (!el) return;
     PlaybackMemory.detach(el);
@@ -65,11 +83,15 @@ const Viewer = {
       onPlaying: () => this.setStat('stat-stage', 'Playing'),
       onError: () => this.handleVideoError(file, video, loading),
     }));
-    video.src = API.files.stream(file.id, explorer.accountView);
+    video.src = this.fileStreamUrl(file);
     video.load();
   },
 
   async playVideo(file, video, videoWrap, loading) {
+    if (this.isHistoryFile(file)) {
+      this.playDirectStream(file, video, videoWrap, loading);
+      return;
+    }
     let status = null;
     try {
       status = await API.files.status(file.id);
@@ -309,7 +331,8 @@ const Viewer = {
     const title = typeof DisplayNames !== 'undefined'
       ? DisplayNames.get(file.id, file.name)
       : file.name;
-    document.getElementById('viewer-title').textContent = title;
+    const histSuffix = file._historyLabel ? ` · ${file._historyLabel}` : '';
+    document.getElementById('viewer-title').textContent = title + histSuffix;
     modal.classList.remove('hidden');
     if (typeof ViewerPanelLayout !== 'undefined') ViewerPanelLayout.onViewerOpen();
     loading.classList.remove('hidden');
@@ -348,11 +371,15 @@ const Viewer = {
         App.toast('Failed to load image', 'error');
         this.close();
       };
-      img.src = API.files.view(file.id, explorer.accountView);
-    } else if (type === 'video') {
+      img.src = this.fileViewUrl(file);
+    } else     if (type === 'video') {
       stats.classList.remove('hidden');
-      this.mountChunkBlocks(file);
-      this.startStatusPoll(file);
+      if (!this.isHistoryFile(file)) {
+        this.mountChunkBlocks(file);
+        this.startStatusPoll(file);
+      } else {
+        document.getElementById('stat-chunks').textContent = file.chunk_count ? String(file.chunk_count) : '—';
+      }
       this.playVideo(file, video, videoWrap, loading);
       const isMp4 = file.mime_type === 'video/mp4' || file.name.split('.').pop().toLowerCase() === 'mp4';
       const hlsToggleEl = document.getElementById('viewer-hls-toggle');
@@ -374,13 +401,15 @@ const Viewer = {
       }
       if (this.hlsUrl) hlsBtn.classList.remove('hidden');
     } else if (type === 'audio') {
-      if (!PlaylistQueue?.playlistId && typeof AudioQueue !== 'undefined') {
+      if (!this.isHistoryFile(file) && !PlaylistQueue?.playlistId && typeof AudioQueue !== 'undefined') {
         AudioQueue.setFromFolder(explorer.files, file);
       }
       stats.classList.remove('hidden');
-      this.mountChunkBlocks(file);
-      this.setupAudioArt(file);
-      this.startStatusPoll(file);
+      if (!this.isHistoryFile(file)) {
+        this.mountChunkBlocks(file);
+        this.setupAudioArt(file);
+        this.startStatusPoll(file);
+      }
       this.setStreamCleanup(audio, MediaPlayer.attachStreamPlayback(audio, {
         onReady: () => this.onMediaReady(audio, audioWrap),
         onError: () => {
@@ -389,7 +418,7 @@ const Viewer = {
           this.close();
         },
       }));
-      audio.src = API.files.stream(file.id, explorer.accountView);
+      audio.src = this.fileStreamUrl(file);
       audio.load();
     } else if (type === 'pdf') {
       loading.classList.add('hidden');
@@ -397,7 +426,7 @@ const Viewer = {
       mount.id = 'viewer-pdf-mount';
       mount.className = 'pdf-viewer-wrap';
       document.querySelector('.viewer-media-area')?.appendChild(mount);
-      PdfViewer.mount(mount, API.files.view(file.id, explorer.accountView));
+      PdfViewer.mount(mount, this.fileViewUrl(file));
       return true;
     } else if (type === 'html') {
       frame.onload = () => this.showMedia(frame);
@@ -407,7 +436,7 @@ const Viewer = {
         this.close();
       };
       frame.sandbox = 'allow-same-origin';
-      frame.src = API.files.view(file.id, explorer.accountView);
+      frame.src = this.fileViewUrl(file);
     } else if (type === 'text') {
       this.loadTextPreview(file, textEl, loading);
     }
@@ -418,7 +447,7 @@ const Viewer = {
   async loadTextPreview(file, textEl, loading) {
     const maxPreview = 2 * 1024 * 1024;
     try {
-      const res = await fetch(API.files.view(file.id, explorer.accountView), { credentials: 'same-origin' });
+      const res = await fetch(this.fileViewUrl(file), { credentials: 'same-origin' });
       if (!res.ok) throw new Error('Failed to load file');
       const blob = await res.blob();
       const slice = blob.size > maxPreview ? blob.slice(0, maxPreview) : blob;
@@ -584,7 +613,7 @@ const Viewer = {
         try {
           const s = await API.files.status(file.id);
           if (s.ready || s.buffered || (s.segments >= s.total_segments && s.total_segments > 0)) {
-            const base = API.files.stream(file.id, explorer.accountView);
+            const base = this.fileStreamUrl(file);
             const sep = base.includes('?') ? '&' : '?';
             video.src = `${base}${sep}retry=${Date.now()}`;
             video.load();

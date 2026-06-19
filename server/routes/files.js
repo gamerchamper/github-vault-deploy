@@ -987,6 +987,43 @@ router.get('/history/:id/:versionId/view', async (req, res) => {
   }
 });
 
+router.get('/history/:id/:versionId/stream', async (req, res) => {
+  try {
+    const versionId = parseInt(req.params.versionId, 10);
+    if (!Number.isFinite(versionId)) return res.status(400).json({ error: 'Invalid version id' });
+    const { buffer, file } = await storage.downloadFileVersion(req.user.id, req.params.id, versionId);
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (err) {
+    if (!res.headersSent) res.status(404).json({ error: err.message });
+  }
+});
+
+router.get('/history/:id/:versionId/details', async (req, res) => {
+  try {
+    const versionId = parseInt(req.params.versionId, 10);
+    if (!Number.isFinite(versionId)) return res.status(400).json({ error: 'Invalid version id' });
+    const fileHistory = require('../services/file-history');
+    res.json(fileHistory.getVersionDetails(req.user.id, req.params.id, versionId));
+  } catch (err) {
+    const code = err.message === 'File not found' || err.message === 'Version not found' ? 404 : 500;
+    res.status(code).json({ error: err.message });
+  }
+});
+
+router.post('/history/:id/:versionId/restore', async (req, res) => {
+  try {
+    const versionId = parseInt(req.params.versionId, 10);
+    if (!Number.isFinite(versionId)) return res.status(400).json({ error: 'Invalid version id' });
+    const result = await storage.restoreFileVersion(req.user.id, req.params.id, versionId);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/share/:id', (req, res) => {
   try {
     res.json(storage.createShareToken(req.user.id, req.params.id, req));

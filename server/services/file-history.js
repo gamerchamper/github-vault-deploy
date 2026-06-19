@@ -405,6 +405,50 @@ function getVersion(userId, fileId, versionId) {
   return row;
 }
 
+function getVersionDetails(userId, fileId, versionId) {
+  const row = getVersion(userId, fileId, versionId);
+  const snapshot = JSON.parse(row.manifest_json);
+  const file = db.prepare('SELECT id, name, path FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
+  if (!file) throw new Error('File not found');
+
+  const chunks = normalizeManifestChunks(snapshot)
+    .slice()
+    .sort((a, b) => a.chunk_index - b.chunk_index);
+
+  const reposUsed = {};
+  for (const c of chunks) {
+    const repo = c.full_name || 'unknown';
+    reposUsed[repo] = (reposUsed[repo] || 0) + 1;
+  }
+
+  return {
+    version: mapVersionRow(row, { isCurrent: false }),
+    file: {
+      id: file.id,
+      name: snapshot.name || file.name,
+      path: snapshot.path || file.path,
+      size: snapshot.size,
+      mime_type: snapshot.mime_type,
+      chunk_count: snapshot.chunk_count || chunks.length,
+    },
+    chunks: chunks.map((c) => ({
+      index: c.chunk_index,
+      repo: c.full_name,
+      path: c.repo_path,
+      sha: c.sha,
+      encrypted_size: c.size,
+      plain_size: c.plain_size || c.size,
+      has_chunk_key: !!(c.chunk_iv && c.chunk_tag),
+      chunk_iv: c.chunk_iv ? `${String(c.chunk_iv).slice(0, 12)}…` : null,
+    })),
+    repos_used: reposUsed,
+    manifest_sha: row.manifest_sha,
+    content_fingerprint: row.content_fingerprint,
+    downloadable: snapshotIsDownloadable(snapshot),
+    recorded_at: snapshot.recorded_at || row.created_at,
+  };
+}
+
 module.exports = {
   isEnabled,
   recordVersion,
@@ -412,6 +456,7 @@ module.exports = {
   backfillVersionsFromGit,
   listVersions,
   getVersion,
+  getVersionDetails,
   contentFingerprint,
   listManifestCommits,
   snapshotIsDownloadable,
