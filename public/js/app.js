@@ -15,6 +15,8 @@ const App = {
   apiKeysLoaded: false,
   lastLocalUpload: null,
   pendingUploadMode: null,
+  activeUtilityView: null,
+  _sidebarNavBound: false,
 
   toast(message, type = '') {
     if (type === 'error') {
@@ -1970,61 +1972,7 @@ const App = {
       }
     });
 
-    document.querySelectorAll('.sidebar-item[data-view]').forEach((item) => {
-      item.addEventListener('click', () => {
-        if (item.dataset.view === 'viewers') {
-          this.showViewersPanel();
-          return;
-        }
-        if (item.dataset.view === 'bandwidth') {
-          this.showBandwidthPanel();
-          return;
-        }
-        if (item.dataset.view === 'api-keys') {
-          this.showApiKeysPanel();
-          return;
-        }
-        if (item.dataset.view === 'agents') {
-          this.showAgentsPanel();
-          return;
-        }
-        if (item.dataset.view === 'site-access') {
-          this.showSiteAccessPanel();
-          return;
-        }
-        if (item.dataset.view === 'favorites') {
-          this.showFavoritesPanel();
-          return;
-        }
-        if (item.dataset.view === 'recent') {
-          this.showRecentPanel();
-          return;
-        }
-        if (item.dataset.view === 'discover') {
-          explorer.navigate('/', { viewMode: 'discover', type: null, search: '', playlistId: null, collectionId: null });
-          return;
-        }
-        if (item.dataset.view === 'playlists') {
-          explorer.navigate('/', { viewMode: 'playlists', type: null, search: '', playlistId: null, collectionId: null });
-          return;
-        }
-        if (item.dataset.view === 'collections') {
-          explorer.navigate('/', { viewMode: 'collections', type: null, search: '', playlistId: null, collectionId: null });
-          return;
-        }
-        if (item.dataset.view === 'trash') {
-          this.showTrashPanel();
-          return;
-        }
-        this.showFilesPanel('files');
-        if (item.dataset.path) {
-          explorer.pushHistory(item.dataset.path);
-          explorer.navigate(item.dataset.path, { viewMode: 'files', type: null, search: '' });
-        } else {
-          explorer.navigate('/', { viewMode: 'files', type: null, search: '' });
-        }
-      });
-    });
+    this.bindSidebarNav();
 
     document.getElementById('share-copy').addEventListener('click', () => {
       const input = document.getElementById('share-url');
@@ -2067,16 +2015,91 @@ const App = {
     this.viewersBadgeTimer = setInterval(update, 30000);
   },
 
+  bindSidebarNav() {
+    if (this._sidebarNavBound) return;
+    const sidebar = document.querySelector('.main-content .sidebar');
+    if (!sidebar) return;
+    this._sidebarNavBound = true;
+    sidebar.addEventListener('click', (e) => {
+      const item = e.target.closest('.sidebar-item[data-view]');
+      if (!item) return;
+      this.onSidebarViewClick(item);
+    });
+  },
+
+  onSidebarViewClick(item) {
+    const view = item.dataset.view;
+    if (view === 'viewers') {
+      this.showViewersPanel();
+      return;
+    }
+    if (view === 'bandwidth') {
+      this.showBandwidthPanel();
+      return;
+    }
+    if (view === 'api-keys') {
+      this.showApiKeysPanel();
+      return;
+    }
+    if (view === 'agents') {
+      this.showAgentsPanel();
+      return;
+    }
+    if (view === 'site-access') {
+      this.showSiteAccessPanel();
+      return;
+    }
+    this.activeUtilityView = null;
+    if (view === 'favorites') {
+      this.showFavoritesPanel();
+      return;
+    }
+    if (view === 'recent') {
+      this.showRecentPanel();
+      return;
+    }
+    if (view === 'discover') {
+      explorer.navigate('/', { viewMode: 'discover', type: null, search: '', playlistId: null, collectionId: null });
+      return;
+    }
+    if (view === 'playlists') {
+      explorer.navigate('/', { viewMode: 'playlists', type: null, search: '', playlistId: null, collectionId: null });
+      return;
+    }
+    if (view === 'collections') {
+      explorer.navigate('/', { viewMode: 'collections', type: null, search: '', playlistId: null, collectionId: null });
+      return;
+    }
+    if (view === 'trash') {
+      this.showTrashPanel();
+      return;
+    }
+    this.showFilesPanel('files');
+    if (item.dataset.path) {
+      explorer.pushHistory(item.dataset.path);
+      explorer.navigate(item.dataset.path, { viewMode: 'files', type: null, search: '' });
+    } else {
+      explorer.navigate('/', { viewMode: 'files', type: null, search: '' });
+    }
+  },
+
+  hideUtilityPanels() {
+    document.getElementById('viewers-panel')?.classList.add('hidden');
+    document.getElementById('bandwidth-tab')?.classList.add('hidden');
+    document.getElementById('api-keys-tab')?.classList.add('hidden');
+    document.getElementById('agents-tab')?.classList.add('hidden');
+    document.getElementById('site-access-tab')?.classList.add('hidden');
+  },
+
   showViewersPanel() {
     LiveViewers.show();
   },
 
   showBandwidthPanel() {
-    document.getElementById('file-view').classList.add('hidden');
-    document.getElementById('viewers-panel')?.classList.add('hidden');
-    document.getElementById('api-keys-tab')?.classList.add('hidden');
-    document.getElementById('agents-tab')?.classList.add('hidden');
-    document.getElementById('site-access-tab')?.classList.add('hidden');
+    this.activeUtilityView = 'bandwidth';
+    LiveViewers.hide();
+    document.getElementById('file-view')?.classList.add('hidden');
+    this.hideUtilityPanels();
     document.getElementById('bandwidth-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'bandwidth');
@@ -2085,11 +2108,11 @@ const App = {
   },
 
   showApiKeysPanel: function () {
-    document.getElementById('file-view').classList.add('hidden');
-    document.getElementById('viewers-panel')?.classList.add('hidden');
-    document.getElementById('bandwidth-tab')?.classList.add('hidden');
-    document.getElementById('agents-tab')?.classList.add('hidden');
-    document.getElementById('site-access-tab')?.classList.add('hidden');
+    this.activeUtilityView = 'api-keys';
+    LiveViewers.hide();
+    BandwidthPanel.hide();
+    document.getElementById('file-view')?.classList.add('hidden');
+    this.hideUtilityPanels();
     document.getElementById('api-keys-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'api-keys');
@@ -2098,11 +2121,11 @@ const App = {
   },
 
   showAgentsPanel() {
-    document.getElementById('file-view').classList.add('hidden');
-    document.getElementById('viewers-panel')?.classList.add('hidden');
-    document.getElementById('bandwidth-tab')?.classList.add('hidden');
-    document.getElementById('api-keys-tab')?.classList.add('hidden');
-    document.getElementById('site-access-tab')?.classList.add('hidden');
+    this.activeUtilityView = 'agents';
+    LiveViewers.hide();
+    BandwidthPanel.hide();
+    document.getElementById('file-view')?.classList.add('hidden');
+    this.hideUtilityPanels();
     document.getElementById('agents-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'agents');
@@ -2111,11 +2134,11 @@ const App = {
   },
 
   showSiteAccessPanel() {
-    document.getElementById('file-view').classList.add('hidden');
-    document.getElementById('viewers-panel')?.classList.add('hidden');
-    document.getElementById('bandwidth-tab')?.classList.add('hidden');
-    document.getElementById('api-keys-tab')?.classList.add('hidden');
-    document.getElementById('agents-tab')?.classList.add('hidden');
+    this.activeUtilityView = 'site-access';
+    LiveViewers.hide();
+    BandwidthPanel.hide();
+    document.getElementById('file-view')?.classList.add('hidden');
+    this.hideUtilityPanels();
     document.getElementById('site-access-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'site-access');
@@ -2136,14 +2159,11 @@ const App = {
   },
 
   showFilesPanel(activeView = 'files') {
+    this.activeUtilityView = null;
     LiveViewers.hide();
     BandwidthPanel.hide();
     document.getElementById('file-view')?.classList.remove('hidden');
-    document.getElementById('viewers-panel')?.classList.add('hidden');
-    document.getElementById('bandwidth-tab')?.classList.add('hidden');
-    document.getElementById('api-keys-tab')?.classList.add('hidden');
-    document.getElementById('agents-tab')?.classList.add('hidden');
-    document.getElementById('site-access-tab')?.classList.add('hidden');
+    this.hideUtilityPanels();
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === activeView);
     });

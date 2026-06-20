@@ -290,12 +290,10 @@ const LiveViewers = {
 
   show() {
     this.active = true;
-    document.getElementById('file-view').classList.add('hidden');
-    document.getElementById('viewers-panel').classList.remove('hidden');
-    document.getElementById('bandwidth-tab')?.classList.add('hidden');
-    document.getElementById('api-keys-tab')?.classList.add('hidden');
-    document.getElementById('agents-tab')?.classList.add('hidden');
-    document.getElementById('site-access-tab')?.classList.add('hidden');
+    App.activeUtilityView = 'viewers';
+    document.getElementById('file-view')?.classList.add('hidden');
+    App.hideUtilityPanels?.();
+    document.getElementById('viewers-panel')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'viewers');
     });
@@ -305,9 +303,11 @@ const LiveViewers = {
 
   hide() {
     this.active = false;
-    document.getElementById('viewers-panel').classList.add('hidden');
-    document.getElementById('file-view').classList.remove('hidden');
+    document.getElementById('viewers-panel')?.classList.add('hidden');
     document.getElementById('btn-viewers')?.classList.remove('active');
+    if (!App.activeUtilityView) {
+      document.getElementById('file-view')?.classList.remove('hidden');
+    }
     this.stopStream();
   },
 };

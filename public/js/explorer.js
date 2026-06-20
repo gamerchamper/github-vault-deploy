@@ -188,7 +188,10 @@ class Explorer {
 
     const gen = ++this._navGen;
 
-    if (typeof App !== 'undefined' && App.showFilesPanel) {
+    if (!silent && typeof App !== 'undefined') {
+      App.activeUtilityView = null;
+    }
+    if (typeof App !== 'undefined' && App.showFilesPanel && !App.activeUtilityView) {
       App.showFilesPanel(this.resolveActiveView(nextViewMode));
     }
 
