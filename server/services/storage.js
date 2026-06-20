@@ -1326,6 +1326,22 @@ async function finalizeUpload(userId, fileId, previewBuffer, onProgress, uploadM
     "SELECT * FROM files WHERE id = ? AND user_id = ? AND upload_status IN ('uploading', 'failed')"
   ).get(fileId, userId);
   if (!file) {
+    const ready = db.prepare(
+      "SELECT * FROM files WHERE id = ? AND user_id = ? AND upload_status = 'ready'"
+    ).get(fileId, userId);
+    if (ready) {
+      const chunksDone = getUploadedChunkCount(fileId);
+      if (chunksDone >= ready.chunk_count) {
+        return {
+          id: fileId,
+          name: ready.name,
+          size: ready.size,
+          chunks: ready.chunk_count,
+          encrypted: true,
+          alreadyFinalized: true,
+        };
+      }
+    }
     const logger = require('../lib/logger');
     logger.warn('upload_session_not_found', { userId, fileId, phase: 'finalizeUpload' });
     throw new Error('Upload session not found');

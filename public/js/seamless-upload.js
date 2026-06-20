@@ -24,7 +24,7 @@ const SeamlessUpload = {
 
     if (session.fileId) {
       const status = await API.files.seamlessStatus(session.fileId).catch(() => null);
-      if (status?.stagingComplete) {
+      if (status?.stagingComplete || status?.uploadComplete) {
         UploadManager.active.delete(taskId);
         await API.tasks.resume(taskId).catch(() => {});
         await API.files.seamlessResume(session.fileId, taskId, !!session.convertHls);

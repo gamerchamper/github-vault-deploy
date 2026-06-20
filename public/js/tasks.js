@@ -307,11 +307,12 @@ const TaskPanel = {
 
       if (mode === 'seamless' && session.fileId) {
         const status = await API.files.seamlessStatus(session.fileId).catch(() => null);
-        if (status?.stagingComplete) {
+        if (status?.stagingComplete || status?.uploadComplete) {
           await API.tasks.resume(taskId).catch(() => {});
           await API.files.seamlessResume(session.fileId, taskId, !!session.convertHls);
           App.toast(`Resuming server processing for ${task?.title || session.fileName}`, 'success');
           TaskPanel.track(taskId);
+          if (status.hlsTaskId) TaskPanel.track(status.hlsTaskId);
           return;
         }
       }

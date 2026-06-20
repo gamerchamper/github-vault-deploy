@@ -181,7 +181,7 @@ async function assembleFile(userId, fileId, file, workDir, onProgress, options =
 
 function posix(p) { return p.split(path.sep).join('/'); }
 
-async function convertToHls(inputPath, outputDir, segmentDuration, job = null) {
+async function convertToHls(inputPath, outputDir, segmentDuration, job = null, onProgress = null) {
   const playlistPath = path.join(outputDir, 'playlist.m3u8');
   const segPattern = posix(path.join(outputDir, 'segment_%05d.ts'));
   const args = [
@@ -199,10 +199,39 @@ async function convertToHls(inputPath, outputDir, segmentDuration, job = null) {
     posix(playlistPath),
   ];
 
+  let inputDurationSec = null;
+  try {
+    const ffprobe = ffmpeg().replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1');
+    const probe = await execFileAsync(ffprobe, [
+      '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
+      inputPath,
+    ], { timeout: 30000 });
+    const parsed = parseFloat(String(probe.stdout || '').trim());
+    if (Number.isFinite(parsed) && parsed > 0) inputDurationSec = parsed;
+  } catch {}
+
   await new Promise((resolve, reject) => {
     const child = spawn(ffmpeg(), args, { windowsHide: true });
     if (job) job.ffmpegChild = child;
     let stderr = '';
+    let stdoutBuf = '';
+    child.stdout.on('data', (chunk) => {
+      stdoutBuf += chunk.toString();
+      if (!onProgress || !inputDurationSec) return;
+      const lines = stdoutBuf.split('\n');
+      stdoutBuf = lines.pop() || '';
+      for (const line of lines) {
+        const match = line.match(/^out_time_ms=(\d+)/);
+        if (!match) continue;
+        const outSec = parseInt(match[1], 10) / 1_000_000;
+        const ratio = Math.min(1, outSec / inputDurationSec);
+        onProgress({
+          phase: 'converting',
+          percent: 30 + Math.round(ratio * 18),
+          lastLog: `Running FFmpeg HLS conversion... (${Math.round(ratio * 100)}%)`,
+        });
+      }
+    });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', reject);
     child.on('close', (code, signal) => {
@@ -520,7 +549,7 @@ async function convertFile(userId, fileId, onProgress, taskId = null, options = 
       hlsLog('Running FFmpeg HLS conversion...');
       assertNotCancelled(job);
 
-      const result = await convertToHls(inputPath, workDir, SEGMENT_DURATION, job);
+      const result = await convertToHls(inputPath, workDir, SEGMENT_DURATION, job, onProgress);
       segments = result.segments;
       hlsLog(`FFmpeg produced ${segments.length} segments`);
     }

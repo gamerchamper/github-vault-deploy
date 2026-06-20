@@ -379,78 +379,122 @@ async function uploadChunksFromStaging(userId, fileId, file, staging, encryptChu
   };
 }
 
+function getPipelineFile(userId, fileId) {
+  return db.prepare(`
+    SELECT * FROM files WHERE id = ? AND user_id = ?
+      AND upload_status IN ('uploading', 'failed', 'ready')
+  `).get(fileId, userId);
+}
+
+async function runHlsFromStaging(userId, fileId, file, staging, taskId, convertHls) {
+  if (!convertHls) return;
+
+  const tasks = require('./tasks');
+  const hlsConvert = require('./hls-convert');
+  const ffmpegOk = await hlsConvert.isFfmpegAvailable();
+  if (!ffmpegOk) {
+    tasks.appendLog(taskId, userId, 'HLS skipped — FFmpeg not available on server');
+    return;
+  }
+
+  const refreshed = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId);
+  if (refreshed?.has_hls) {
+    tasks.appendLog(taskId, userId, 'HLS already present — skipping conversion');
+    return;
+  }
+
+  const task = tasks.get(taskId, userId);
+  let hlsTaskId = task?.hlsTaskId;
+  const existingHls = hlsTaskId ? tasks.get(hlsTaskId, userId) : null;
+  if (existingHls?.status === 'processing') {
+    tasks.appendLog(taskId, userId, 'Resuming HLS conversion...');
+  } else {
+    hlsTaskId = uuidv4();
+    tasks.create(userId, {
+      id: hlsTaskId,
+      type: 'hls-convert',
+      title: `Converting ${file.name} to HLS...`,
+      payload: { fileId, fileName: file.name, resumable: false, seamlessSource: true },
+    });
+    tasks.update(taskId, userId, { hlsTaskId, phase: 'hls-convert' });
+    tasks.appendLog(taskId, userId, 'Starting HLS conversion from server cache...');
+  }
+
+  const localSource = fs.existsSync(staging) ? staging : null;
+  await hlsConvert.convertFile(userId, fileId, (p) => {
+    tasks.update(hlsTaskId, userId, { ...p, status: 'processing' });
+    if (p.lastLog) tasks.appendLog(hlsTaskId, userId, p.lastLog);
+    if (p.percent != null) {
+      tasks.update(taskId, userId, {
+        phase: p.phase === 'uploading' ? 'hls-upload' : 'hls-convert',
+        percent: Math.max(MAX_PROCESS_PERCENT, Math.min(99, p.percent)),
+      });
+    }
+  }, hlsTaskId, localSource ? { localSourcePath: localSource } : {});
+
+  tasks.update(hlsTaskId, userId, { status: 'done', percent: 100, phase: 'done' });
+  tasks.appendLog(taskId, userId, 'HLS conversion complete');
+}
+
 async function runPipelineOnce(userId, fileId, taskId, { convertHls }) {
   const tasks = require('./tasks');
-  const file = db.prepare(
-    "SELECT * FROM files WHERE id = ? AND user_id = ? AND upload_status IN ('uploading', 'failed')"
-  ).get(fileId, userId);
+  let file = getPipelineFile(userId, fileId);
   if (!file) throw new Error('Upload session not found');
 
   const staging = stagingPath(userId, fileId);
+  const stagingExists = fs.existsSync(staging);
   const task = taskId ? tasks.get(taskId, userId) : null;
-  verifyStagingComplete(userId, fileId, file, task);
-
-  const encryptChunkSize = storage.getChunkSizeForFile(fileId, file);
-  tasks.update(taskId, userId, {
-    status: 'processing',
-    phase: 'upload',
-    percent: MAX_RECEIVE_PERCENT,
-    lastLog: 'Processing from server cache — encrypting and uploading to GitHub...',
-  });
-  tasks.appendLog(taskId, userId, 'Server took over — uploading encrypted chunks with auto-retry');
-
-  await uploadChunksFromStaging(userId, fileId, file, staging, encryptChunkSize, taskId);
+  let result = { id: fileId, name: file.name };
 
   const chunksDone = storage.getUploadedChunkCount(fileId);
-  if (chunksDone < file.chunk_count) {
-    throw new Error(`Upload incomplete: ${chunksDone}/${file.chunk_count} chunks after processing`);
-  }
+  const needsChunkUpload = file.upload_status !== 'ready';
 
-  const preview = readPreviewBuffer(staging, file);
-  const onProgress = (patch) => {
-    const pct = typeof patch.percent === 'number'
-      ? Math.max(MAX_PROCESS_PERCENT, Math.min(99, patch.percent))
-      : undefined;
-    tasks.update(taskId, userId, { ...patch, percent: pct ?? undefined });
-    if (patch.lastLog) tasks.appendLog(taskId, userId, patch.lastLog);
-  };
+  if (needsChunkUpload) {
+    verifyStagingComplete(userId, fileId, file, task);
 
-  const result = await storage.finalizeUpload(
-    userId,
-    fileId,
-    preview,
-    onProgress,
-    'api',
-    { taskId, userId }
-  );
+    const encryptChunkSize = storage.getChunkSizeForFile(fileId, file);
+    tasks.update(taskId, userId, {
+      status: 'processing',
+      phase: 'upload',
+      percent: MAX_RECEIVE_PERCENT,
+      lastLog: 'Processing from server cache — encrypting and uploading to GitHub...',
+    });
+    tasks.appendLog(taskId, userId, 'Server took over — uploading encrypted chunks with auto-retry');
 
-  if (convertHls) {
-    const hlsConvert = require('./hls-convert');
-    const ffmpegOk = await hlsConvert.isFfmpegAvailable();
-    if (!ffmpegOk) {
-      tasks.appendLog(taskId, userId, 'HLS skipped — FFmpeg not available on server');
-    } else {
-      const hlsTaskId = uuidv4();
-      tasks.create(userId, {
-        id: hlsTaskId,
-        type: 'hls-convert',
-        title: `Converting ${file.name} to HLS...`,
-        payload: { fileId, fileName: file.name, resumable: false, seamlessSource: true },
-      });
-      tasks.update(taskId, userId, { hlsTaskId, phase: 'hls-convert' });
-      tasks.appendLog(taskId, userId, 'Starting HLS conversion from server cache...');
+    await uploadChunksFromStaging(userId, fileId, file, staging, encryptChunkSize, taskId);
 
-      await hlsConvert.convertFile(userId, fileId, (p) => {
-        tasks.update(hlsTaskId, userId, { ...p, status: 'processing' });
-        if (p.lastLog) tasks.appendLog(hlsTaskId, userId, p.lastLog);
-      }, hlsTaskId, { localSourcePath: staging });
-
-      tasks.update(hlsTaskId, userId, { status: 'done', percent: 100, phase: 'done' });
-      tasks.appendLog(taskId, userId, 'HLS conversion complete');
+    const afterUpload = storage.getUploadedChunkCount(fileId);
+    if (afterUpload < file.chunk_count) {
+      throw new Error(`Upload incomplete: ${afterUpload}/${file.chunk_count} chunks after processing`);
     }
+
+    const preview = readPreviewBuffer(staging, file);
+    const onProgress = (patch) => {
+      const pct = typeof patch.percent === 'number'
+        ? Math.max(MAX_PROCESS_PERCENT, Math.min(99, patch.percent))
+        : undefined;
+      tasks.update(taskId, userId, { ...patch, percent: pct ?? undefined });
+      if (patch.lastLog) tasks.appendLog(taskId, userId, patch.lastLog);
+    };
+
+    result = await storage.finalizeUpload(
+      userId,
+      fileId,
+      preview,
+      onProgress,
+      'api',
+      { taskId, userId },
+    );
+    file = getPipelineFile(userId, fileId);
+  } else if (chunksDone < file.chunk_count) {
+    throw new Error(`Upload incomplete: ${chunksDone}/${file.chunk_count} chunks`);
+  } else if (taskId) {
+    tasks.appendLog(taskId, userId, 'File already stored — continuing with post-processing');
   }
 
-  cleanupStaging(userId, fileId);
+  await runHlsFromStaging(userId, fileId, file, staging, taskId, convertHls);
+
+  if (stagingExists) cleanupStaging(userId, fileId);
   tasks.update(taskId, userId, {
     status: 'done',
     phase: 'done',
@@ -504,14 +548,15 @@ async function processPipeline(userId, fileId, taskId, options = {}) {
 }
 
 async function completeSeamlessReceive(userId, fileId, taskId, options = {}) {
-  const file = db.prepare(
-    "SELECT * FROM files WHERE id = ? AND user_id = ? AND upload_status IN ('uploading', 'failed')"
-  ).get(fileId, userId);
+  const file = getPipelineFile(userId, fileId);
   if (!file) throw new Error('Upload session not found');
 
   const tasks = require('./tasks');
   const task = taskId ? tasks.get(taskId, userId) : null;
-  verifyStagingComplete(userId, fileId, file, task);
+
+  if (file.upload_status !== 'ready') {
+    verifyStagingComplete(userId, fileId, file, task);
+  }
 
   if (task?.status === 'done') {
     return { success: true, done: true, fileId, taskId };
@@ -523,15 +568,21 @@ async function completeSeamlessReceive(userId, fileId, taskId, options = {}) {
   }
 
   const convertHls = options.convertHls ?? !!task?.convertHls;
+  const chunksDone = storage.getUploadedChunkCount(fileId);
+  const uploadComplete = file.upload_status === 'ready' && chunksDone >= file.chunk_count;
 
   tasks.update(taskId, userId, {
     status: 'processing',
-    phase: 'processing',
-    percent: MAX_RECEIVE_PERCENT,
+    phase: uploadComplete ? 'hls-convert' : 'processing',
+    percent: uploadComplete ? MAX_PROCESS_PERCENT : MAX_RECEIVE_PERCENT,
     seamlessPartsDone: task?.seamlessPartsTotal || partCount(file.size),
-    lastLog: 'File cached on server — starting automatic processing',
+    lastLog: uploadComplete
+      ? 'Resuming post-processing (HLS conversion)...'
+      : 'File cached on server — starting automatic processing',
   });
-  tasks.appendLog(taskId, userId, 'Client upload complete; server is processing automatically');
+  tasks.appendLog(taskId, userId, uploadComplete
+    ? 'Upload stored — resuming HLS conversion'
+    : 'Client upload complete; server is processing automatically');
 
   setImmediate(() => {
     processPipeline(userId, fileId, taskId, { convertHls }).catch((err) => {
@@ -543,9 +594,7 @@ async function completeSeamlessReceive(userId, fileId, taskId, options = {}) {
 }
 
 function getSeamlessStatus(userId, fileId) {
-  const file = db.prepare(
-    "SELECT * FROM files WHERE id = ? AND user_id = ? AND upload_status IN ('uploading', 'failed')"
-  ).get(fileId, userId);
+  const file = getPipelineFile(userId, fileId);
   if (!file) return null;
 
   const dest = stagingPath(userId, fileId);
@@ -553,9 +602,12 @@ function getSeamlessStatus(userId, fileId) {
   const totalParts = partCount(file.size);
   const chunksDone = storage.getUploadedChunkCount(fileId);
   const tasks = require('./tasks');
+  const uploadComplete = file.upload_status === 'ready' && chunksDone >= file.chunk_count;
 
   let received = new Set();
   let taskId = null;
+  let convertHls = false;
+  let hlsTaskId = null;
   const taskRow = db.prepare(`
     SELECT id, payload FROM tasks
     WHERE user_id = ? AND type = 'upload' AND payload LIKE ?
@@ -566,10 +618,13 @@ function getSeamlessStatus(userId, fileId) {
     const live = tasks.get(taskRow.id, userId);
     if (live) {
       received = loadReceivedParts(live);
+      convertHls = !!live.convertHls;
+      hlsTaskId = live.hlsTaskId || null;
     } else {
       let payload = {};
       try { payload = JSON.parse(taskRow.payload || '{}'); } catch {}
       received = loadReceivedParts({ seamlessPartsReceived: payload.seamlessPartsReceived });
+      convertHls = !!payload.convertHls;
     }
   }
 
@@ -584,7 +639,10 @@ function getSeamlessStatus(userId, fileId) {
     fileSize: file.size,
     taskId,
     stagingBytes: stat?.size || 0,
-    stagingComplete: received.size >= totalParts,
+    stagingComplete: uploadComplete || received.size >= totalParts,
+    uploadComplete,
+    hlsPending: convertHls && !file.has_hls,
+    hlsTaskId,
     totalParts,
     partSize: SEAMLESS_PART_SIZE,
     partsDone: received.size,
@@ -613,15 +671,23 @@ function resumePendingOnStartup() {
   const tasks = require('./tasks');
 
   const rows = db.prepare(`
-    SELECT id, user_id, name, size, upload_status FROM files
-    WHERE upload_status IN ('uploading', 'failed')
+    SELECT id, user_id, name, size, upload_status, has_hls FROM files
+    WHERE upload_status IN ('uploading', 'failed', 'ready')
   `).all();
 
   for (const file of rows) {
     const staging = stagingPath(file.user_id, file.id);
-    if (!fs.existsSync(staging)) continue;
-    const stat = fs.statSync(staging);
-    if (stat.size < file.size) continue;
+    const stagingExists = fs.existsSync(staging);
+    const chunksDone = storage.getUploadedChunkCount(file.id);
+    const uploadComplete = file.upload_status === 'ready' && chunksDone >= file.chunk_count;
+
+    if (!uploadComplete) {
+      if (!stagingExists) continue;
+      const stat = fs.statSync(staging);
+      if (stat.size < file.size) continue;
+    } else if (file.has_hls) {
+      continue;
+    }
 
     const taskRow = db.prepare(`
       SELECT id, payload FROM tasks
@@ -637,17 +703,18 @@ function resumePendingOnStartup() {
 
     const live = tasks.get(taskRow.id, file.user_id);
     const received = loadReceivedParts(live || { seamlessPartsReceived: payload.seamlessPartsReceived });
-    if (received.size < partCount(file.size)) continue;
+    if (!uploadComplete && received.size < partCount(file.size)) continue;
 
-    const chunksDone = storage.getUploadedChunkCount(file.id);
-    if (chunksDone >= file.chunk_count && file.upload_status === 'ready') continue;
+    if (uploadComplete && !payload.convertHls) continue;
 
     tasks.update(taskRow.id, file.user_id, {
       status: 'processing',
-      phase: 'processing',
+      phase: uploadComplete ? 'hls-convert' : 'processing',
       error: null,
       resumable: true,
-      lastLog: 'Resuming seamless processing after server restart',
+      lastLog: uploadComplete
+        ? 'Resuming HLS conversion after server restart'
+        : 'Resuming seamless processing after server restart',
     });
     tasks.appendLog(taskRow.id, file.user_id, 'Auto-resuming seamless pipeline from server cache');
 
