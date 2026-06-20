@@ -379,6 +379,7 @@ try {
 } catch { /* exists */ }
 
 ensureColumn('api_keys', 'key_secret', 'TEXT');
+ensureColumn('playlists', 'sort_regex', 'TEXT');
 
 try {
   db.exec(`

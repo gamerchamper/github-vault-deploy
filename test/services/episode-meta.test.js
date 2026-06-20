@@ -93,4 +93,36 @@ describe('episode-meta', function () {
       'Game Of Thrones S3 EP.1 Reactionnn.mp4',
     ]);
   });
+
+  it('prefers short EP.N over packed EP.1NN duplicates for the same episode', function () {
+    const items = [
+      { name: 'HxH EP.102 Reactionnn.mp4' },
+      { name: 'HxH EP.2 Reactionnn.mp4' },
+      { name: 'HxH EP.1 Reactionnn.mp4' },
+      { name: 'HxH EP.103 Reactionnn.mp4' },
+      { name: 'HxH EP.3 Reactionnn.mp4' },
+    ];
+    const sorted = episodeMeta.sortItemsByEpisodeMeta(items);
+    expect(sorted.map((i) => i.name)).to.deep.equal([
+      'HxH EP.1 Reactionnn.mp4',
+      'HxH EP.2 Reactionnn.mp4',
+      'HxH EP.102 Reactionnn.mp4',
+      'HxH EP.3 Reactionnn.mp4',
+      'HxH EP.103 Reactionnn.mp4',
+    ]);
+  });
+
+  it('sorts with custom regex saved on playlist', function () {
+    const items = [
+      { name: 'HxH EP.10 Reactionnn.mp4' },
+      { name: 'HxH EP.2 Reactionnn.mp4' },
+      { name: 'HxH EP.1 Reactionnn.mp4' },
+    ];
+    const sorted = episodeMeta.sortItemsByRegex(items, String.raw`EP\.(\d+)`);
+    expect(sorted.map((i) => i.name)).to.deep.equal([
+      'HxH EP.1 Reactionnn.mp4',
+      'HxH EP.2 Reactionnn.mp4',
+      'HxH EP.10 Reactionnn.mp4',
+    ]);
+  });
 });

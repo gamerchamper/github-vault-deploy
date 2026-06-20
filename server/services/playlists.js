@@ -72,6 +72,7 @@ function enrichPlaylist(row, userId = null, req = null) {
     cover_thumbnail_id: cover?.id || null,
     visibility: row.visibility || 'private',
     share_token: row.share_token || null,
+    sort_regex: row.sort_regex || null,
     item_count: stats?.item_count || 0,
     total_bytes: stats?.total_bytes || 0,
     created_at: row.created_at,
@@ -479,12 +480,23 @@ function updatePlaylist(userId, playlistId, patch) {
   const description = patch.description !== undefined ? patch.description : existing.description;
   const visibility = patch.visibility !== undefined ? validateVisibility(patch.visibility) : existing.visibility;
   let coverFileId = patch.cover_file_id !== undefined ? patch.cover_file_id : existing.cover_file_id;
+  const sortRegex = patch.sort_regex !== undefined
+    ? (patch.sort_regex ? String(patch.sort_regex).trim() : null)
+    : existing.sort_regex;
+  if (sortRegex) {
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(sortRegex, 'i');
+    } catch {
+      throw new Error('Invalid sort regex');
+    }
+  }
   if (coverFileId) assertFileOwned(userId, coverFileId);
 
   db.prepare(`
-    UPDATE playlists SET title = ?, description = ?, visibility = ?, cover_file_id = ?, updated_at = CURRENT_TIMESTAMP
+    UPDATE playlists SET title = ?, description = ?, visibility = ?, cover_file_id = ?, sort_regex = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND user_id = ?
-  `).run(title, description, visibility, coverFileId, playlistId, userId);
+  `).run(title, description, visibility, coverFileId, sortRegex, playlistId, userId);
 
   return getPlaylist(userId, playlistId);
 }
@@ -504,6 +516,9 @@ function duplicatePlaylist(userId, playlistId) {
     visibility: 'private',
     cover_file_id: src.cover_file_id,
   });
+  if (src.sort_regex) {
+    updatePlaylist(userId, copy.id, { sort_regex: src.sort_regex });
+  }
   if (src.items?.length) {
     const manualItems = src.items.filter((i) => !i.sync_managed);
     if (manualItems.length) {
@@ -668,8 +683,12 @@ function reorderItems(userId, playlistId, orderedFileIds) {
 }
 
 function smartReorderItems(userId, playlistId) {
+  const row = db.prepare('SELECT sort_regex FROM playlists WHERE id = ? AND user_id = ?').get(playlistId, userId);
+  if (!row) throw new Error('Playlist not found');
   const items = listPlaylistItems(userId, playlistId);
-  const sorted = episodeMeta.sortItemsByEpisodeMeta(items);
+  const sorted = row.sort_regex
+    ? episodeMeta.sortItemsByRegex(items, row.sort_regex)
+    : episodeMeta.sortItemsByEpisodeMeta(items);
   return reorderItems(userId, playlistId, sorted.map((i) => i.id));
 }
 

@@ -106,17 +106,25 @@ const Playlists = {
 
   smartSortBuilderItems() {
     if (!this.builderItems?.length || typeof EpisodeMeta === 'undefined') return;
-    this.builderItems = EpisodeMeta.sortItems(this.builderItems);
+    const regex = document.getElementById('builder-sort-regex')?.value?.trim() || '';
+    this.builderItems = EpisodeMeta.sortItems(this.builderItems, regex || null);
     this.renderBuilderList();
-    App.toast('Sorted by detected season/episode numbers', 'success');
+    App.toast(regex ? 'Sorted using saved regex' : 'Sorted by detected season/episode numbers', 'success');
+  },
+
+  getBuilderSortRegex() {
+    return document.getElementById('builder-sort-regex')?.value?.trim() || '';
   },
 
   episodeMetaBadge(file) {
     if (typeof EpisodeMeta === 'undefined') return '';
     const title = file.display_name || file.name || '';
-    const meta = EpisodeMeta.parse(title, file.parent_path || '');
+    const regex = this.getBuilderSortRegex();
+    const meta = (regex && EpisodeMeta.parseWithRegex(title, regex))
+      || EpisodeMeta.parse(title, file.parent_path || '');
     if (!meta.match || !meta.label) return '';
-    return `<span class="builder-ep-detected" title="Detected from title">${this.escape(meta.label)}</span>`;
+    const hint = regex ? 'Matched sort regex' : 'Detected from title';
+    return `<span class="builder-ep-detected" title="${hint}">${this.escape(meta.label)}</span>`;
   },
 
   async movePlaylistItem(fileId, delta) {
@@ -288,7 +296,7 @@ const Playlists = {
         <div class="curated-hero-actions">
           <button type="button" class="btn-primary" id="btn-playlist-play">▶ Play all</button>
           <button type="button" class="btn-secondary" id="btn-playlist-reorder">Reorder episodes</button>
-          <button type="button" class="btn-secondary" id="btn-playlist-smart-sort" title="Sort by season/episode numbers parsed from filenames">Smart sort</button>
+          <button type="button" class="btn-secondary" id="btn-playlist-smart-sort" title="Sort by saved regex if set, otherwise season/episode from filenames">Smart sort</button>
           <button type="button" class="btn-secondary" id="btn-playlist-edit">Edit playlist</button>
           ${folderLinks.length ? '<button type="button" class="btn-secondary" id="btn-playlist-sync-folders">Sync folders</button>' : ''}
           <button type="button" class="btn-secondary" id="btn-playlist-share">${pl.share_url ? 'Copy share link' : 'Share'}</button>
@@ -523,6 +531,8 @@ const Playlists = {
     if (!modal) return;
     document.getElementById('builder-title').textContent = pl.title;
     modal.dataset.playlistId = pl.id;
+    const regexInput = document.getElementById('builder-sort-regex');
+    if (regexInput) regexInput.value = pl.sort_regex || '';
     this.renderBuilderList();
     modal.classList.remove('hidden');
   },
@@ -625,6 +635,10 @@ const Playlists = {
         display_name: f.display_name || null,
       }));
       await API.playlists.updateItems(id, displayUpdates);
+      const sortRegex = this.getBuilderSortRegex();
+      if (sortRegex !== (current.sort_regex || '')) {
+        await API.playlists.update(id, { sort_regex: sortRegex || null });
+      }
       modal.classList.add('hidden');
       App.toast('Playlist updated', 'success');
       if (explorer.viewMode === 'playlist-detail') {
@@ -881,6 +895,10 @@ const Playlists = {
     document.getElementById('btn-save-collection')?.addEventListener('click', () => this.saveCollectionModal());
     document.getElementById('btn-save-builder')?.addEventListener('click', () => this.saveBuilder());
     document.getElementById('btn-builder-smart-sort')?.addEventListener('click', () => this.smartSortBuilderItems());
+    document.getElementById('builder-sort-regex')?.addEventListener('input', () => {
+      if (document.getElementById('playlist-builder-modal')?.classList.contains('hidden')) return;
+      this.renderBuilderList();
+    });
     document.getElementById('btn-save-collection-builder')?.addEventListener('click', () => this.saveCollectionBuilder());
     document.getElementById('collection-builder-add')?.addEventListener('click', () => this.searchPlaylistsForCollection());
     document.getElementById('collection-builder-search')?.addEventListener('keydown', (e) => {

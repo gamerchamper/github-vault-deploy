@@ -560,6 +560,30 @@
   line-height: 1.45;
 }
 
+.builder-sort-row {
+  margin-bottom: var(--space-md);
+  display: grid;
+  gap: 6px;
+}
+
+.builder-sort-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.builder-sort-regex {
+  font-family: Consolas, ui-monospace, monospace;
+  font-size: 13px;
+}
+
+.builder-sort-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
 .curated-hero-order-hint {
   font-size: 12px;
   color: var(--text-muted);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
   <link rel="stylesheet" href="/css/explorer.css?v=1.0.25">
-  <link rel="stylesheet" href="/css/playlists.css?v=1.0.2">
+  <link rel="stylesheet" href="/css/playlists.css?v=1.0.3">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
   <meta name="theme-color" content="#5b8cf7">
@@ -864,6 +864,11 @@
       </div>
       <div class="modal-body">
         <p class="builder-order-hint">Drag rows or use ↑↓ to set episode order — share pages play items in this sequence.</p>
+        <div class="builder-sort-row">
+          <label class="builder-sort-label" for="builder-sort-regex">Episode sort regex</label>
+          <input type="text" id="builder-sort-regex" class="form-input builder-sort-regex" placeholder="EP\.(\d+)" spellcheck="false" autocomplete="off">
+          <p class="builder-sort-hint">Optional. Capture group 1 is the episode number. Codes like 102 decode as S01E02. Smart sort uses this when set; saved with the playlist.</p>
+        </div>
         <div class="builder-search-row">
           <label class="visually-hidden" for="builder-search">Search vault files</label>
           <input type="text" id="builder-search" class="form-input" placeholder="Search vault to add files…">
@@ -873,7 +878,7 @@
         <div id="builder-item-list" class="builder-item-list vault-scroll"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn-secondary" id="btn-builder-smart-sort" title="Sort by season/episode numbers in titles">Smart sort titles</button>
+        <button type="button" class="btn-secondary" id="btn-builder-smart-sort" title="Sort by regex if set, otherwise by season/episode in titles">Smart sort</button>
         <button type="button" class="btn-primary" id="btn-save-builder">Save playlist</button>
       </div>
     </div>
@@ -1270,8 +1275,8 @@
   <script src="/js/audio-queue.js?v=1.0.0"></script>
   <script src="/js/playlist-queue.js?v=1.0.3"></script>
   <script src="/js/playlist-player.js?v=1.0.4"></script>
-  <script src="/js/episode-meta.js?v=1.0.2"></script>
-  <script src="/js/playlists.js?v=1.0.2"></script>
+  <script src="/js/episode-meta.js?v=1.0.3"></script>
+  <script src="/js/playlists.js?v=1.0.3"></script>
   <script src="/js/viewer-panel-layout.js?v=1.0.9"></script>
   <script src="/js/viewer.js?v=1.0.5"></script>
   <script src="/js/viewers.js?v=1.0.1"></script>
