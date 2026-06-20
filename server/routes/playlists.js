@@ -198,6 +198,11 @@ router.patch('/:id/reorder', (req, res) => {
 
 router.post('/:id/reorder-smart', (req, res) => {
   try {
+    if (req.body?.sort_regex !== undefined) {
+      playlists.updatePlaylist(req.user.id, req.params.id, {
+        sort_regex: req.body.sort_regex || null,
+      });
+    }
     res.json(playlists.smartReorderItems(req.user.id, req.params.id));
   } catch (err) {
     res.status(400).json({ error: err.message });

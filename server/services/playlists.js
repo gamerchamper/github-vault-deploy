@@ -686,10 +686,14 @@ function smartReorderItems(userId, playlistId) {
   const row = db.prepare('SELECT sort_regex FROM playlists WHERE id = ? AND user_id = ?').get(playlistId, userId);
   if (!row) throw new Error('Playlist not found');
   const items = listPlaylistItems(userId, playlistId);
+  const before = items.map((i) => i.id);
   const sorted = row.sort_regex
     ? episodeMeta.sortItemsByRegex(items, row.sort_regex)
     : episodeMeta.sortItemsByEpisodeMeta(items);
-  return reorderItems(userId, playlistId, sorted.map((i) => i.id));
+  const after = sorted.map((i) => i.id);
+  const result = reorderItems(userId, playlistId, after);
+  const moved = after.filter((id, idx) => id !== before[idx]).length;
+  return { ...result, moved, sort_regex: row.sort_regex || null };
 }
 
 function createShareToken(userId, playlistId, req = null) {

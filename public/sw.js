@@ -1,4 +1,4 @@
-const CACHE = 'vault-static-v4';
+const CACHE = 'vault-static-v5';
 const PRECACHE = ['/css/tokens.css', '/css/explorer.css?v=1.0.24'];
 
 self.addEventListener('install', (e) => {

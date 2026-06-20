@@ -299,7 +299,7 @@ const API = {
     updateItem: (id, fileId, body) => API.patch(`/api/playlists/${id}/items/${fileId}`, body),
     updateItems: (id, items) => API.patch(`/api/playlists/${id}/items`, { items }),
     reorder: (id, fileIds) => API.patch(`/api/playlists/${id}/reorder`, { file_ids: fileIds }),
-    smartReorder: (id) => API.post(`/api/playlists/${id}/reorder-smart`),
+    smartReorder: (id, body = {}) => API.post(`/api/playlists/${id}/reorder-smart`, body),
     linkFolder: (id, folderId, opts = {}) => API.post(`/api/playlists/${id}/folders`, {
       folder_id: folderId,
       include_subfolders: !!opts.include_subfolders,

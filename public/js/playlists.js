@@ -94,26 +94,87 @@ const Playlists = {
   async smartSortPlaylist(playlistId) {
     const id = playlistId || this.currentPlaylist?.id || explorer.playlistId;
     if (!id) return;
+    const modal = document.getElementById('playlist-builder-modal');
+    const regexFromBuilder = modal && !modal.classList.contains('hidden')
+      ? this.normalizeSortRegex(this.getBuilderSortRegex())
+      : '';
+    const regex = regexFromBuilder || this.currentPlaylist?.sort_regex || '';
     try {
-      await API.playlists.smartReorder(id);
+      if (regex) this.validateSortRegex(regex);
+      const result = await API.playlists.smartReorder(id, regex ? { sort_regex: regex } : {});
       await this.loadPlaylistDetail(id);
       explorer.render();
-      App.toast('Sorted by season/episode from titles', 'success');
+      if (result.moved > 0) {
+        App.toast(`Reordered ${result.moved} item(s)${regex ? ' using regex' : ''}`, 'success');
+      } else {
+        App.toast(regex
+          ? 'No order change — check regex matches filenames (e.g. EP\\.(\d+))'
+          : 'Already in episode order', 'info');
+      }
     } catch (err) {
       App.toast(err.message, 'error');
     }
   },
 
-  smartSortBuilderItems() {
-    if (!this.builderItems?.length || typeof EpisodeMeta === 'undefined') return;
-    const regex = document.getElementById('builder-sort-regex')?.value?.trim() || '';
-    this.builderItems = EpisodeMeta.sortItems(this.builderItems, regex || null);
-    this.renderBuilderList();
-    App.toast(regex ? 'Sorted using saved regex' : 'Sorted by detected season/episode numbers', 'success');
+  normalizeSortRegex(raw) {
+    let value = String(raw || '').trim();
+    if (!value) return '';
+    const wrapped = value.match(/^\/(.+)\/([a-z]*)$/i);
+    if (wrapped) value = wrapped[1];
+    return value;
+  },
+
+  validateSortRegex(regex) {
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(regex, 'i');
+    } catch (err) {
+      throw new Error(`Invalid sort regex: ${err.message}`);
+    }
+  },
+
+  async smartSortBuilderItems() {
+    const modal = document.getElementById('playlist-builder-modal');
+    const id = modal?.dataset.playlistId;
+    if (!id || !this.builderItems?.length) {
+      App.toast('Nothing to sort', 'error');
+      return;
+    }
+    if (typeof EpisodeMeta === 'undefined') {
+      App.toast('Episode sort script missing — hard-refresh (Ctrl+F5)', 'error');
+      return;
+    }
+    const regex = this.normalizeSortRegex(this.getBuilderSortRegex());
+    try {
+      if (regex) this.validateSortRegex(regex);
+      const beforeIds = this.buildOrderedFileIds();
+      this.builderItems = EpisodeMeta.sortItems(this.builderItems, regex || null);
+      const afterIds = this.buildOrderedFileIds();
+      const moved = afterIds.filter((fid, idx) => fid !== beforeIds[idx]).length;
+      this.renderBuilderList();
+
+      const payload = regex ? { sort_regex: regex } : {};
+      const result = await API.playlists.smartReorder(id, payload);
+      if (explorer.viewMode === 'playlist-detail' && explorer.playlistId === id) {
+        await this.loadPlaylistDetail(id);
+        explorer.render();
+      }
+
+      if (moved > 0 || result.moved > 0) {
+        const n = Math.max(moved, result.moved || 0);
+        App.toast(`Reordered ${n} item(s)${regex ? ' using regex' : ''}. Click Save to keep display names.`, 'success');
+      } else {
+        App.toast(regex
+          ? 'No order change — regex may not match. Try: EP\\.(\d+)'
+          : 'Already in episode order', 'info');
+      }
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
   },
 
   getBuilderSortRegex() {
-    return document.getElementById('builder-sort-regex')?.value?.trim() || '';
+    return this.normalizeSortRegex(document.getElementById('builder-sort-regex')?.value);
   },
 
   episodeMetaBadge(file) {
@@ -552,7 +613,6 @@ const Playlists = {
       row.className = 'builder-item';
       row.draggable = true;
       row.dataset.index = String(idx);
-      const hasAlias = !!(file.display_name?.trim());
       row.innerHTML = `
         <span class="builder-ep-num" title="Episode number">${idx + 1}</span>
         <button type="button" class="builder-move" data-dir="-1" title="Move up" ${idx === 0 ? 'disabled' : ''}>↑</button>
@@ -560,8 +620,8 @@ const Playlists = {
         <span class="builder-drag" aria-hidden="true">⠿</span>
         <div class="builder-item-fields">
           ${this.episodeMetaBadge(file)}
-          <input type="text" class="builder-display-name form-input" value="${this.escape(file.display_name || '')}" placeholder="${this.escape(file.name)}" title="Display name in playlist" aria-label="Display name for ${this.escape(file.name)}">
-          ${hasAlias ? `<span class="builder-file-name" title="Original filename">${this.escape(file.name)}</span>` : ''}
+          <span class="builder-file-name" title="Vault filename">${this.escape(file.name)}</span>
+          <input type="text" class="builder-display-name form-input" value="${this.escape(file.display_name || '')}" placeholder="Display name (optional)" title="Display name in playlist" aria-label="Display name for ${this.escape(file.name)}">
         </div>
         <button type="button" class="builder-remove" data-idx="${idx}" title="Remove">×</button>
       `;
@@ -572,16 +632,6 @@ const Playlists = {
       input?.addEventListener('input', () => {
         const value = input.value.trim();
         file.display_name = value || null;
-        const aliasEl = row.querySelector('.builder-file-name');
-        if (value && !aliasEl) {
-          const span = document.createElement('span');
-          span.className = 'builder-file-name';
-          span.title = 'Original filename';
-          span.textContent = file.name;
-          input.parentElement?.appendChild(span);
-        } else if (!value && aliasEl) {
-          aliasEl.remove();
-        }
       });
       row.addEventListener('dragstart', (e) => { this.dragIndex = idx; e.dataTransfer.effectAllowed = 'move'; });
       row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('drag-over'); });

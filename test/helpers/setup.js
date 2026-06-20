@@ -248,6 +248,7 @@ function createMemoryDb() {
       cover_file_id TEXT,
       visibility TEXT DEFAULT 'private',
       share_token TEXT UNIQUE,
+      sort_regex TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
