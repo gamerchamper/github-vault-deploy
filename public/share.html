@@ -191,6 +191,7 @@
   <script data-cfasync="false" defer src="/js/share-client-stream.js?v=1.0.7"></script>
   <script data-cfasync="false" defer src="/js/share-download.js?v=1.0.10"></script>
   <script data-cfasync="false" defer src="/js/api.js?v=1.0.0"></script>
+  <script data-cfasync="false" defer src="/js/site-access.js?v=1.0.0"></script>
   <script data-cfasync="false" defer src="/js/media-player.js?v=1.0.8"></script>
   <script data-cfasync="false" defer src="/js/playback-memory.js?v=1.0.1"></script>
   <script data-cfasync="false" defer src="/js/playlist-queue.js?v=1.0.3"></script>
@@ -743,12 +744,18 @@
     }
 
     function bootSharePage() {
-      if (typeof DownloadManager === 'undefined' || typeof ShareViewer === 'undefined') {
-        showError('Page scripts failed to load — try a hard refresh or disable Cloudflare Rocket Loader for this site');
+      if (typeof SiteAccess === 'undefined') {
+        showError('Page scripts failed to load — try a hard refresh');
         return;
       }
-      bindShareUi();
-      init();
+      SiteAccess.ensureShareGate(() => {
+        if (typeof DownloadManager === 'undefined' || typeof ShareViewer === 'undefined') {
+          showError('Page scripts failed to load — try a hard refresh or disable Cloudflare Rocket Loader for this site');
+          return;
+        }
+        bindShareUi();
+        init();
+      });
     }
 
     if (document.readyState === 'loading') {

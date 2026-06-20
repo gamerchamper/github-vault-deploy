@@ -8,8 +8,17 @@ const audit = require('../services/audit');
 const router = express.Router();
 const appUrl = require('../services/app-url');
 const localAuth = require('../services/local-auth');
+const siteAccess = require('../services/site-access');
 
 const GITHUB_SCOPES = ['repo', 'user', 'read:org'];
+
+function requireSiteAccessForAuth(req, res, next) {
+  if (!siteAccess.isRequired() || siteAccess.isGranted(req)) return next();
+  if (req.accepts('html')) {
+    return res.redirect('/?site_access=1');
+  }
+  return siteAccess.denyResponse(res, true);
+}
 
 function linkErrorPage(message) {
   const safe = String(message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -33,11 +42,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 </div></body></html>`;
 }
 
-router.get('/github', (req, res, next) => {
+router.get('/github', requireSiteAccessForAuth, (req, res, next) => {
   passport.authenticate('github', { scope: GITHUB_SCOPES })(req, res, next);
 });
 
-router.get('/github/link', (req, res, next) => {
+router.get('/github/link', requireSiteAccessForAuth, (req, res, next) => {
   const startOAuth = () => {
     passport.authenticate('github', { scope: GITHUB_SCOPES })(req, res, next);
   };
@@ -66,7 +75,7 @@ router.get('/github/link', (req, res, next) => {
   startOAuth();
 });
 
-router.get('/github/reconnect', (req, res, next) => {
+router.get('/github/reconnect', requireSiteAccessForAuth, (req, res, next) => {
   passport.authenticate('github', {
     scope: GITHUB_SCOPES,
     authorizationParams: { prompt: 'consent' },
@@ -107,12 +116,15 @@ router.get('/github/callback', (req, res, next) => {
 router.get('/me', (req, res) => {
   res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
 
+  const site_access = siteAccess.status(req);
+
   const apiKeyUser = apiKeys.authenticateKey(apiKeys.extractKey(req));
   if (apiKeyUser) {
     return res.json({
       authenticated: true,
       app_url: appUrl.getAppUrl(req),
       auth_method: 'api-key',
+      site_access,
       user: {
         id: apiKeyUser.id,
         username: apiKeyUser.username,
@@ -126,12 +138,14 @@ router.get('/me', (req, res) => {
       authenticated: false,
       app_url: appUrl.getAppUrl(req),
       local_auth: localAuth.getStatus(req),
+      site_access,
     });
   }
   res.json({
     authenticated: true,
     app_url: appUrl.getAppUrl(req),
     auth_method: req.authType === 'local' ? 'local' : 'github',
+    site_access,
     user: {
       id: req.user.id,
       username: req.user.username,

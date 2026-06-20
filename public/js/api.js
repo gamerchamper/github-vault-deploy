@@ -94,6 +94,11 @@ const API = {
     return res.json();
   },
 
+  access: {
+    status: () => API.get('/api/access/status'),
+    verify: (key) => API.post('/api/access/verify', { key }),
+  },
+
   auth: {
     me: () => API.get('/auth/me'),
     logout: () => API.post('/auth/logout'),

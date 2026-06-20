@@ -14,6 +14,9 @@ const playlists = require('../services/playlists');
 const mediaCache = require('../services/media-cache-headers');
 
 const router = express.Router();
+const { requireSiteAccess } = require('../middleware/site-access');
+
+router.use(requireSiteAccess);
 
 function sharePublisherMeta(userId, file = null) {
   const user = db.prepare('SELECT username, avatar_url FROM users WHERE id = ?').get(userId);

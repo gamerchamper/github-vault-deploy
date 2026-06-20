@@ -241,6 +241,93 @@ body::before {
   gap: 6px;
 }
 
+.site-access-panel {
+  margin-bottom: 24px;
+}
+
+.site-access-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, var(--accent-glow) 0%, transparent 60%),
+    linear-gradient(160deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--title-bar) 100%);
+}
+
+.site-access-overlay.hidden {
+  display: none;
+}
+
+.site-access-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  padding: 40px 32px;
+  text-align: center;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: var(--shadow-xl);
+}
+
+.site-access-card h1 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.site-access-logo {
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.site-access-sub {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.site-access-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.site-access-input {
+  width: 140px;
+  padding: 12px 14px;
+  font-size: 20px;
+  letter-spacing: 0.35em;
+  text-align: center;
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+}
+
+.site-access-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.site-access-unlock-btn {
+  min-width: 96px;
+}
+
+.site-access-error {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.site-access-error.hidden {
+  display: none;
+}
+
 .login-footnote {
   font-size: 11px;
   color: var(--text-muted);

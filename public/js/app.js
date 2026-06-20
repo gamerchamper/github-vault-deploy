@@ -187,6 +187,38 @@ const App = {
     this.clearLegacyShareServiceWorker();
     const params = new URLSearchParams(window.location.search);
     const auth = await this.checkAuth();
+    SiteAccess.applyStatusFromAuth(auth);
+
+    if (SiteAccess.isBlocking()) {
+      document.getElementById('login-screen').classList.remove('hidden');
+      document.getElementById('app').classList.add('hidden');
+      SiteAccess.bindGate(document.getElementById('site-access-panel'), {
+        authPanelEl: document.getElementById('login-auth-panel'),
+        subtitle: 'Enter the site access key before signing in.',
+        onUnlocked: () => this.initAfterSiteAccess(params, auth),
+      });
+      this.updateSetupUrls();
+      this.bindEvents();
+      return;
+    }
+
+    await this.initAfterSiteAccess(params, auth);
+  },
+
+  async initAfterSiteAccess(params, auth) {
+    if (!auth) auth = await this.checkAuth();
+    SiteAccess.applyStatusFromAuth(auth);
+
+    if (SiteAccess.isBlocking()) {
+      document.getElementById('login-screen').classList.remove('hidden');
+      document.getElementById('app').classList.add('hidden');
+      SiteAccess.bindGate(document.getElementById('site-access-panel'), {
+        authPanelEl: document.getElementById('login-auth-panel'),
+        subtitle: 'Enter the site access key to use GitHub Vault.',
+        onUnlocked: () => this.initAfterSiteAccess(params, auth),
+      });
+      return;
+    }
 
     if (auth.authenticated) {
       this.showApp(auth.user);
@@ -205,6 +237,10 @@ const App = {
       }
     } else {
       this.showLogin(auth);
+      if (params.get('site_access') === '1') {
+        this.toast('Enter the site access key before signing in', 'error');
+        window.history.replaceState({}, '', '/');
+      }
       if (params.get('error')) {
         const reason = params.get('reason');
         const msg = reason
@@ -229,6 +265,16 @@ const App = {
     this.teardownRuntime();
     document.getElementById('login-screen').classList.remove('hidden');
     document.getElementById('app').classList.add('hidden');
+
+    const sitePanel = document.getElementById('site-access-panel');
+    const authPanel = document.getElementById('login-auth-panel');
+    if (SiteAccess.isBlocking()) {
+      sitePanel?.classList.remove('hidden');
+      authPanel?.classList.add('hidden');
+    } else {
+      sitePanel?.classList.add('hidden');
+      authPanel?.classList.remove('hidden');
+    }
 
     const hint = document.getElementById('login-local-hint');
     if (hint) {

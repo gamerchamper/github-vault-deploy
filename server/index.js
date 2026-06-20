@@ -200,6 +200,8 @@ app.use(passport.initialize());
 app.use(passport.session());
 app.use(require('./middleware/local-auth').localAuthMiddleware);
 
+app.use('/api/access', require('./routes/access'));
+
 const { trackUserActivity } = require('./middleware/activity');
 app.use('/api', trackUserActivity);
 
@@ -228,6 +230,12 @@ app.listen(PORT, () => {
   const configured = appUrlService.getConfiguredAppUrl();
   const listenAt = configured || `http://localhost:${PORT}`;
   console.log(`GitHub Vault running at ${listenAt}`);
+  try {
+    const siteAccess = require('./services/site-access');
+    if (siteAccess.isRequired()) {
+      console.log('[Site access] 6-digit key gate enabled for login and public shares');
+    }
+  } catch {}
   if (!configured) {
     console.warn(
       'APP_URL not set — share/link URLs use the request Host (or X-Forwarded-* behind a proxy). '
