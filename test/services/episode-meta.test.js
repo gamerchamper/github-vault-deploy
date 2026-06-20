@@ -153,6 +153,41 @@ describe('episode-meta', function () {
       { name: 'HxH EP.1 Reactionnn.mp4' },
       { name: 'random clip.mp4' },
     ];
-    expect(episodeMeta.countMatches(items, String.raw`EP\.(\d+)`)).to.equal(1);
+    expect(episodeMeta.countMatches(items, { sortMode: 'regex', regex: String.raw`EP\.(\d+)` })).to.equal(1);
+  });
+
+  it('parses first contiguous number in filename', function () {
+    const meta = episodeMeta.parseFirstNumberMeta('HxH EP.102 Reactionnn.mp4');
+    expect(meta.match).to.equal(true);
+    expect(meta.number).to.equal(102);
+    expect(meta.label).to.equal('#102');
+  });
+
+  it('sorts by first number left to right', function () {
+    const items = [
+      { name: 'HxH EP.10 Reactionnn.mp4' },
+      { name: 'HxH EP.2 Reactionnn.mp4' },
+      { name: 'HxH EP.1 Reactionnn.mp4' },
+    ];
+    const sorted = episodeMeta.sortPlaylistItems(items, { sortMode: 'first_number' });
+    expect(sorted.map((i) => i.name)).to.deep.equal([
+      'HxH EP.1 Reactionnn.mp4',
+      'HxH EP.2 Reactionnn.mp4',
+      'HxH EP.10 Reactionnn.mp4',
+    ]);
+  });
+
+  it('first number mode orders EP.2 before EP.102 literally', function () {
+    const items = [
+      { name: 'HxH EP.102 Reactionnn.mp4' },
+      { name: 'HxH EP.2 Reactionnn.mp4' },
+      { name: 'HxH EP.1 Reactionnn.mp4' },
+    ];
+    const sorted = episodeMeta.sortPlaylistItems(items, { sortMode: 'first_number' });
+    expect(sorted.map((i) => i.name)).to.deep.equal([
+      'HxH EP.1 Reactionnn.mp4',
+      'HxH EP.2 Reactionnn.mp4',
+      'HxH EP.102 Reactionnn.mp4',
+    ]);
   });
 });

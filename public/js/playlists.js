@@ -91,27 +91,82 @@ const Playlists = {
     explorer.render();
   },
 
+  effectiveSortModeFromPlaylist(pl) {
+    if (!pl) return 'episode';
+    if (pl.sort_mode) return pl.sort_mode;
+    return pl.sort_regex ? 'regex' : 'episode';
+  },
+
+  getBuilderSortMode() {
+    return document.getElementById('builder-sort-mode')?.value || 'episode';
+  },
+
+  resolveBuilderSortContext(playlist = null) {
+    const sortMode = this.getBuilderSortMode() || playlist?.sort_mode || null;
+    const sortRegex = this.getBuilderSortRegex() || playlist?.sort_regex || null;
+    if (typeof EpisodeMeta !== 'undefined') {
+      return EpisodeMeta.resolveSortContext(
+        sortMode,
+        sortMode === 'regex' ? sortRegex : null,
+      );
+    }
+    const mode = sortMode || (sortRegex ? 'regex' : 'episode');
+    return { sortMode: mode, regex: mode === 'regex' ? sortRegex : null };
+  },
+
+  buildSmartSortPayload() {
+    const sort_mode = this.getBuilderSortMode();
+    const payload = { sort_mode };
+    if (sort_mode === 'regex') {
+      payload.sort_regex = this.getBuilderSortRegex() || null;
+    }
+    return payload;
+  },
+
+  syncBuilderSortModeUi() {
+    const mode = this.getBuilderSortMode();
+    document.getElementById('builder-sort-regex-row')?.classList.toggle('hidden', mode !== 'regex');
+  },
+
+  sortModeLabel(sortMode) {
+    if (sortMode === 'first_number') return 'first number';
+    if (sortMode === 'regex') return 'regex';
+    return 'episode detection';
+  },
+
   async smartSortPlaylist(playlistId) {
     const id = playlistId || this.currentPlaylist?.id || explorer.playlistId;
     if (!id) return;
     const modal = document.getElementById('playlist-builder-modal');
-    const regexFromBuilder = modal && !modal.classList.contains('hidden')
-      ? this.normalizeSortRegex(this.getBuilderSortRegex())
-      : '';
-    const regex = regexFromBuilder || this.currentPlaylist?.sort_regex || '';
+    const inBuilder = modal && !modal.classList.contains('hidden');
+    let sortCtx;
+    let payload;
+    if (inBuilder) {
+      sortCtx = this.resolveBuilderSortContext();
+      payload = this.buildSmartSortPayload();
+    } else {
+      const pl = this.currentPlaylist;
+      sortCtx = typeof EpisodeMeta !== 'undefined'
+        ? EpisodeMeta.resolveSortContext(pl?.sort_mode, pl?.sort_regex)
+        : { sortMode: this.effectiveSortModeFromPlaylist(pl), regex: pl?.sort_regex || null };
+      payload = { sort_mode: sortCtx.sortMode };
+      if (sortCtx.sortMode === 'regex') payload.sort_regex = sortCtx.regex;
+    }
     try {
-      if (regex) this.validateSortRegex(regex);
-      const result = await API.playlists.smartReorder(id, regex ? { sort_regex: regex } : {});
+      if (sortCtx.sortMode === 'regex') {
+        if (!sortCtx.regex) throw new Error('Enter a sort regex or change sort method');
+        this.validateSortRegex(sortCtx.regex);
+      }
+      const result = await API.playlists.smartReorder(id, payload);
       await this.loadPlaylistDetail(id);
       explorer.render();
-      if (regex && (result.matched === 0)) {
+      const modeLabel = this.sortModeLabel(sortCtx.sortMode);
+      if (sortCtx.sortMode === 'regex' && result.matched === 0) {
         App.toast(`Regex matched 0/${result.total || '?'} files — click Reaction EP preset or try EP\\.?\\s*(\\d+)`, 'error');
       } else if (result.moved > 0) {
-        App.toast(`Reordered ${result.moved} item(s) (${result.matched}/${result.total} matched)`, 'success');
+        App.toast(`Reordered ${result.moved} item(s) (${result.matched}/${result.total} matched, ${modeLabel})`, 'success');
       } else {
-        App.toast(regex
-          ? `No order change — ${result.matched}/${result.total} matched; list may already be in episode order`
-          : 'Already in episode order', 'info');
+        App.toast(`No order change — ${result.matched}/${result.total} matched (${modeLabel})`, 'info');
       }
     } catch (err) {
       App.toast(err.message, 'error');
@@ -136,6 +191,9 @@ const Playlists = {
   },
 
   applyBuilderSortPreset() {
+    const modeSelect = document.getElementById('builder-sort-mode');
+    if (modeSelect) modeSelect.value = 'regex';
+    this.syncBuilderSortModeUi();
     const input = document.getElementById('builder-sort-regex');
     const preset = (typeof EpisodeMeta !== 'undefined' && EpisodeMeta.DEFAULT_SORT_REGEX)
       || String.raw`EP\.?\s*(\d+)`;
@@ -155,30 +213,35 @@ const Playlists = {
       App.toast('Episode sort script missing — hard-refresh (Ctrl+F5)', 'error');
       return;
     }
-    const regex = this.normalizeSortRegex(this.getBuilderSortRegex());
+    const sortCtx = this.resolveBuilderSortContext();
     try {
-      if (regex) this.validateSortRegex(regex);
+      if (sortCtx.sortMode === 'regex') {
+        if (!sortCtx.regex) throw new Error('Enter a sort regex or change sort method');
+        this.validateSortRegex(sortCtx.regex);
+      }
       const total = this.builderItems.length;
-      const matched = EpisodeMeta.countMatches(this.builderItems, regex || null);
-      if (regex && matched === 0) {
+      const matched = EpisodeMeta.countMatches(this.builderItems, sortCtx);
+      if (sortCtx.sortMode === 'regex' && matched === 0) {
         App.toast(`Regex matched 0/${total} filenames — click Reaction EP preset`, 'error');
         return;
       }
 
       const beforeIds = this.buildOrderedFileIds();
-      const sorted = EpisodeMeta.sortItems(this.builderItems, regex || null);
+      const sorted = EpisodeMeta.sortItems(this.builderItems, sortCtx);
       const clientMoved = sorted.map((f) => f.id).filter((fid, idx) => fid !== beforeIds[idx]).length;
       this.builderItems = sorted;
       this.renderBuilderList();
 
-      const payload = regex ? { sort_regex: regex } : {};
-      const result = await API.playlists.smartReorder(id, payload);
+      const result = await API.playlists.smartReorder(id, this.buildSmartSortPayload());
 
       const pl = await API.playlists.get(id);
       this.builderItems = [...(pl.items || [])];
       this.currentPlaylist = pl;
+      const modeSelect = document.getElementById('builder-sort-mode');
+      if (modeSelect) modeSelect.value = this.effectiveSortModeFromPlaylist(pl);
       const regexInput = document.getElementById('builder-sort-regex');
-      if (regexInput) regexInput.value = pl.sort_regex || regex || '';
+      if (regexInput) regexInput.value = pl.sort_regex || '';
+      this.syncBuilderSortModeUi();
       this.renderBuilderList();
 
       if (explorer.viewMode === 'playlist-detail' && explorer.playlistId === id) {
@@ -188,12 +251,11 @@ const Playlists = {
 
       const moved = Math.max(clientMoved, result.moved || 0);
       const matchCount = result.matched ?? matched;
+      const modeLabel = this.sortModeLabel(sortCtx.sortMode);
       if (moved > 0) {
-        App.toast(`Reordered ${moved} position(s) (${matchCount}/${total} matched)`, 'success');
+        App.toast(`Reordered ${moved} position(s) (${matchCount}/${total} matched, ${modeLabel})`, 'success');
       } else {
-        App.toast(regex
-          ? `No order change — ${matchCount}/${total} matched; order may already be correct`
-          : `No order change — ${matchCount}/${total} detected as episodes`, 'info');
+        App.toast(`No order change — ${matchCount}/${total} matched (${modeLabel})`, 'info');
       }
     } catch (err) {
       App.toast(err.message, 'error');
@@ -206,12 +268,14 @@ const Playlists = {
 
   episodeMetaBadge(file) {
     if (typeof EpisodeMeta === 'undefined') return '';
-    const title = file.display_name || file.name || '';
-    const regex = this.getBuilderSortRegex();
-    const meta = (regex && EpisodeMeta.parseWithRegex(title, regex))
-      || EpisodeMeta.parse(title, file.parent_path || '');
+    const ctx = this.resolveBuilderSortContext();
+    const meta = EpisodeMeta.metaForItem(file, ctx);
     if (!meta.match || !meta.label) return '';
-    const hint = regex ? 'Matched sort regex' : 'Detected from title';
+    const hint = ctx.sortMode === 'regex'
+      ? 'Matched sort regex'
+      : ctx.sortMode === 'first_number'
+        ? 'First number in filename'
+        : 'Detected from title';
     return `<span class="builder-ep-detected" title="${hint}">${this.escape(meta.label)}</span>`;
   },
 
@@ -620,7 +684,10 @@ const Playlists = {
     document.getElementById('builder-title').textContent = pl.title;
     modal.dataset.playlistId = pl.id;
     const regexInput = document.getElementById('builder-sort-regex');
+    const modeSelect = document.getElementById('builder-sort-mode');
+    if (modeSelect) modeSelect.value = this.effectiveSortModeFromPlaylist(pl);
     if (regexInput) regexInput.value = pl.sort_regex || '';
+    this.syncBuilderSortModeUi();
     this.renderBuilderList();
     modal.classList.remove('hidden');
   },
@@ -712,9 +779,14 @@ const Playlists = {
         display_name: f.display_name || null,
       }));
       await API.playlists.updateItems(id, displayUpdates);
+      const sortMode = this.getBuilderSortMode();
       const sortRegex = this.getBuilderSortRegex();
-      if (sortRegex !== (current.sort_regex || '')) {
-        await API.playlists.update(id, { sort_regex: sortRegex || null });
+      const prevMode = this.effectiveSortModeFromPlaylist(current);
+      if (sortMode !== prevMode || (sortMode === 'regex' && sortRegex !== (current.sort_regex || ''))) {
+        await API.playlists.update(id, {
+          sort_mode: sortMode,
+          sort_regex: sortMode === 'regex' ? (sortRegex || null) : current.sort_regex,
+        });
       }
       modal.classList.add('hidden');
       App.toast('Playlist updated', 'success');
@@ -973,6 +1045,10 @@ const Playlists = {
     document.getElementById('btn-save-builder')?.addEventListener('click', () => this.saveBuilder());
     document.getElementById('btn-builder-smart-sort')?.addEventListener('click', () => this.smartSortBuilderItems());
     document.getElementById('btn-builder-sort-preset')?.addEventListener('click', () => this.applyBuilderSortPreset());
+    document.getElementById('builder-sort-mode')?.addEventListener('change', () => {
+      this.syncBuilderSortModeUi();
+      this.renderBuilderList();
+    });
     document.getElementById('builder-sort-regex')?.addEventListener('input', () => {
       if (document.getElementById('playlist-builder-modal')?.classList.contains('hidden')) return;
       this.renderBuilderList();

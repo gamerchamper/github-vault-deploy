@@ -344,6 +344,24 @@ describe('playlists routes', function () {
     expect(res.body.items.map((i) => i.id)).to.deep.equal([ep1.id, ep2.id, ep3.id]);
   });
 
+  it('smart reorders playlist items by first number when sort_mode set', async function () {
+    const ep10 = seedTestFile(db, user.id, { id: 'pl-num-10', name: 'Show EP.10.mp4' });
+    const ep2 = seedTestFile(db, user.id, { id: 'pl-num-2', name: 'Show EP.2.mp4' });
+    const ep1 = seedTestFile(db, user.id, { id: 'pl-num-1', name: 'Show EP.1.mp4' });
+
+    const created = await request(app).post('/api/playlists').send({ title: 'First number sort test' });
+    const id = created.body.id;
+    await request(app)
+      .post(`/api/playlists/${id}/items`)
+      .send({ file_ids: [ep10.id, ep2.id, ep1.id] });
+
+    const res = await request(app)
+      .post(`/api/playlists/${id}/reorder-smart`)
+      .send({ sort_mode: 'first_number' });
+    expect(res.status).to.equal(200);
+    expect(res.body.items.map((i) => i.id)).to.deep.equal([ep1.id, ep2.id, ep10.id]);
+  });
+
   it('includes hls duration on playlist items', async function () {
     const repo = seedTestRepo(db, user.id);
     const hlsFile = seedTestFile(db, user.id, {

@@ -380,6 +380,7 @@ try {
 
 ensureColumn('api_keys', 'key_secret', 'TEXT');
 ensureColumn('playlists', 'sort_regex', 'TEXT');
+ensureColumn('playlists', 'sort_mode', 'TEXT');
 
 try {
   db.exec(`

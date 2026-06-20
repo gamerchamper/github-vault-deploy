@@ -577,6 +577,23 @@
   font-size: 13px;
 }
 
+.builder-sort-mode {
+  max-width: 100%;
+}
+
+.builder-sort-regex-row {
+  display: grid;
+  gap: 6px;
+}
+
+.builder-sort-regex-row.hidden {
+  display: none;
+}
+
+.builder-sort-mode-hint {
+  margin-top: 2px;
+}
+
 .builder-sort-input-row {
   display: flex;
   gap: 8px;

@@ -1,6 +1,47 @@
 const EpisodeMeta = {
-  VERSION: '1.0.6',
+  VERSION: '1.0.7',
   DEFAULT_SORT_REGEX: String.raw`EP\.?\s*(\d+)`,
+  SORT_MODES: ['episode', 'first_number', 'regex'],
+
+  parseFirstNumber(rawTitle) {
+    const title = String(rawTitle || '').trim();
+    const base = title.replace(/\.[a-z0-9]{2,5}$/i, '');
+    const m = base.match(/\d+/);
+    if (!m) {
+      return { number: null, match: false, label: null, sortKey: [9999, base.toLowerCase()] };
+    }
+    const number = parseInt(m[0], 10);
+    if (!Number.isFinite(number)) {
+      return { number: null, match: false, label: null, sortKey: [9999, base.toLowerCase()] };
+    }
+    return {
+      number,
+      match: true,
+      label: `#${number}`,
+      sortKey: [number, base.toLowerCase()],
+    };
+  },
+
+  nonMatchSortKey(title) {
+    const base = String(title || '').replace(/\.[a-z0-9]{2,5}$/i, '');
+    return [9999, base.toLowerCase()];
+  },
+
+  resolveSortContext(sortMode, sortRegex) {
+    const mode = sortMode || (sortRegex ? 'regex' : 'episode');
+    const regex = mode === 'regex' ? (sortRegex || null) : null;
+    return { sortMode: mode, regex };
+  },
+
+  normalizeSortContext(context) {
+    if (typeof context === 'string') {
+      return this.resolveSortContext(context ? 'regex' : 'episode', context || null);
+    }
+    if (context && typeof context === 'object') {
+      return this.resolveSortContext(context.sortMode ?? context.sort_mode, context.regex ?? context.sort_regex);
+    }
+    return this.resolveSortContext(null, null);
+  },
 
   decodePackedEpisode(raw) {
     const n = parseInt(raw, 10);
@@ -167,13 +208,19 @@ const EpisodeMeta = {
     };
   },
 
-  metaForItem(item, regexStr = null) {
+  metaForItem(item, context = null) {
     const title = item.display_name || item.name || '';
-    if (regexStr) {
-      const fromRegex = this.parseWithRegex(title, regexStr);
-      if (fromRegex) return fromRegex;
+    const parentPath = item.parent_path || '';
+    const { sortMode, regex } = this.normalizeSortContext(context);
+    if (sortMode === 'first_number') return this.parseFirstNumber(title);
+    if (sortMode === 'regex' && regex) {
+      return this.parseWithRegex(title, regex) || {
+        match: false,
+        label: null,
+        sortKey: this.nonMatchSortKey(title),
+      };
     }
-    return this.parse(title, item.parent_path || '');
+    return this.parse(title, parentPath);
   },
 
   compareSortKeys(ka, kb) {
@@ -191,19 +238,21 @@ const EpisodeMeta = {
     return meta?.label || '';
   },
 
-  countMatches(items, regexStr = null) {
-    return items.reduce((n, item) => n + (this.metaForItem(item, regexStr).match ? 1 : 0), 0);
+  countMatches(items, context = null) {
+    const ctx = this.normalizeSortContext(context);
+    return items.reduce((n, item) => n + (this.metaForItem(item, ctx).match ? 1 : 0), 0);
   },
 
-  sortItems(items, regexStr = null) {
+  sortItems(items, context = null) {
+    const ctx = this.normalizeSortContext(context);
     return [...items].sort((a, b) => {
-      const ma = this.metaForItem(a, regexStr).sortKey;
-      const mb = this.metaForItem(b, regexStr).sortKey;
+      const ma = this.metaForItem(a, ctx).sortKey;
+      const mb = this.metaForItem(b, ctx).sortKey;
       return this.compareSortKeys(ma, mb);
     });
   },
 
   sortItemsByRegex(items, regexStr) {
-    return this.sortItems(items, regexStr);
+    return this.sortItems(items, { sortMode: 'regex', regex: regexStr });
   },
 };

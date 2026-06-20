@@ -865,12 +865,21 @@
       <div class="modal-body">
         <p class="builder-order-hint">Drag rows or use ↑↓ to set episode order — share pages play items in this sequence.</p>
         <div class="builder-sort-row">
-          <label class="builder-sort-label" for="builder-sort-regex">Episode sort regex</label>
-          <div class="builder-sort-input-row">
-            <input type="text" id="builder-sort-regex" class="form-input builder-sort-regex" placeholder="EP\.?\s*(\d+)" spellcheck="false" autocomplete="off">
-            <button type="button" class="btn-secondary btn-sm" id="btn-builder-sort-preset" title="Fill regex for ImDontai-style HxH EP.N filenames">Reaction EP preset</button>
+          <label class="builder-sort-label" for="builder-sort-mode">Smart sort method</label>
+          <select id="builder-sort-mode" class="form-input builder-sort-mode">
+            <option value="episode">Episode detection (S01E05, EP.N, season folders)</option>
+            <option value="first_number">First number in filename</option>
+            <option value="regex">Custom regex (optional capture group)</option>
+          </select>
+          <div id="builder-sort-regex-row" class="builder-sort-regex-row hidden">
+            <label class="builder-sort-label" for="builder-sort-regex">Sort regex</label>
+            <div class="builder-sort-input-row">
+              <input type="text" id="builder-sort-regex" class="form-input builder-sort-regex" placeholder="EP\.?\s*(\d+)" spellcheck="false" autocomplete="off">
+              <button type="button" class="btn-secondary btn-sm" id="btn-builder-sort-preset" title="Fill regex for ImDontai-style HxH EP.N filenames">Reaction EP preset</button>
+            </div>
+            <p class="builder-sort-hint">Capture group 1 = episode number. Codes like 102 = S01E02. EP.2 sorts before EP.102 (same episode).</p>
           </div>
-          <p class="builder-sort-hint">Capture group 1 = episode number. Codes like 102 = S01E02. EP.2 sorts before EP.102 (same episode). Rows show SxxExx badges when matched.</p>
+          <p class="builder-sort-hint builder-sort-mode-hint">First number uses the leftmost run of digits with no spaces (e.g. EP.2 → 2, EP.102 → 102). Rows show sort badges when matched.</p>
         </div>
         <div class="builder-search-row">
           <label class="visually-hidden" for="builder-search">Search vault files</label>
@@ -1278,8 +1287,8 @@
   <script src="/js/audio-queue.js?v=1.0.0"></script>
   <script src="/js/playlist-queue.js?v=1.0.3"></script>
   <script src="/js/playlist-player.js?v=1.0.4"></script>
-  <script src="/js/episode-meta.js?v=1.0.6"></script>
-  <script src="/js/playlists.js?v=1.0.6"></script>
+  <script src="/js/episode-meta.js?v=1.0.7"></script>
+  <script src="/js/playlists.js?v=1.0.7"></script>
   <script src="/js/viewer-panel-layout.js?v=1.0.9"></script>
   <script src="/js/viewer.js?v=1.0.5"></script>
   <script src="/js/viewers.js?v=1.0.1"></script>
