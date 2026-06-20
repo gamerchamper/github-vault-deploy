@@ -64,6 +64,9 @@ function applyEnvSettings(): void {
   if (process.env.VAULT_SYNC_ENABLED !== undefined) {
     patch.syncEnabled = process.env.VAULT_SYNC_ENABLED !== '0' && process.env.VAULT_SYNC_ENABLED !== 'false';
   }
+  if (process.env.VAULT_CONVERT_HLS !== undefined) {
+    patch.convertHlsEnabled = process.env.VAULT_CONVERT_HLS !== '0' && process.env.VAULT_CONVERT_HLS !== 'false';
+  }
   const extra = parseAdditionalFoldersFromEnv(process.env.VAULT_ADDITIONAL_FOLDERS);
   if (extra.length) patch.additionalSyncFolders = extra;
   if (Object.keys(patch).length) updateSettings(patch);

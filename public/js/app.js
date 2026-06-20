@@ -2188,6 +2188,7 @@ const App = {
   renderAgentCard(agent) {
     const cfg = agent.desired_config || agent.reported_config || {};
     const syncRoot = cfg.syncRootPath || '';
+    const convertHls = cfg.convertHlsEnabled !== false;
     const extra = Array.isArray(cfg.additionalSyncFolders) ? cfg.additionalSyncFolders : [];
     const lastSeen = agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : 'Never';
     const statusClass = agent.status === 'online' ? 'agent-online' : 'agent-offline';
@@ -2210,6 +2211,10 @@ const App = {
         <div class="agent-meta">Last seen: ${this.escapeHtml(lastSeen)}</div>
         <label class="agent-field-label">Main sync folder</label>
         <input class="agent-sync-root" type="text" value="${this.escapeHtml(syncRoot)}" placeholder="C:\\Users\\you\\GitHub Vault">
+        <label class="plan-checkbox agent-hls-toggle">
+          <input type="checkbox" class="agent-convert-hls" ${convertHls ? 'checked' : ''}>
+          Convert uploaded videos to HLS (mp4, mkv, mov, etc.)
+        </label>
         <div class="agent-folders-header">
           <span>Additional sync folders</span>
           <button type="button" class="btn-secondary agent-add-folder" data-agent="${agent.id}">Add folder</button>
@@ -2241,7 +2246,7 @@ const App = {
         enabled: true,
       });
     });
-    return { syncRootPath, additionalSyncFolders: folders };
+    return { syncRootPath, convertHlsEnabled: !!card.querySelector('.agent-convert-hls')?.checked, additionalSyncFolders: folders };
   },
 
   async saveAgentConfig(agentId) {
@@ -2308,8 +2313,8 @@ const App = {
       let chunkSize = 921600;
       let mode = uploadMode;
       let convertHls = false;
-      const isMp4 = /\.mp4$/i.test(file.name) || file.type === 'video/mp4';
-      if (file.size > 100 * 1024 * 1024 || isMp4) {
+      const isVideo = API.isVideoFile(file.name, file.type);
+      if (file.size > 100 * 1024 * 1024 || isVideo) {
         const confirmed = await this.showUploadPlan(file, { defaultMode: uploadMode });
         if (!confirmed) continue;
         chunkSize = confirmed.chunkSize;
@@ -2354,18 +2359,18 @@ const App = {
         ? 'seamless'
         : (defaultMode === 'git' && gitAvailable ? 'git' : UploadPrefs.get());
 
-      const isMp4 = /\.mp4$/i.test(file.name) || file.type === 'video/mp4';
+      const isVideo = API.isVideoFile(file.name, file.type);
       const hlsCheck = document.getElementById('plan-hls-convert');
       const hlsLabel = document.getElementById('plan-hls-label');
       const hlsHint = document.getElementById('plan-hls-hint');
-      if (hlsLabel) hlsLabel.classList.toggle('hidden', !isMp4);
+      if (hlsLabel) hlsLabel.classList.toggle('hidden', !isVideo);
       if (hlsCheck) hlsCheck.checked = false;
       if (hlsHint) hlsHint.classList.add('hidden');
 
       const render = async () => {
         const cs = this.chunkSizeFromMbInput(chunkInput);
         const selectedMode = modeSelect?.value || initialMode;
-        const convertHls = !!(hlsCheck?.checked && isMp4);
+        const convertHls = !!(hlsCheck?.checked && isVideo);
         try {
           const plan = await API.files.plan(file.size, cs, {
             convertHls,
@@ -2458,7 +2463,7 @@ const App = {
       document.getElementById('plan-confirm').onclick = () => {
         const cs = this.chunkSizeFromMbInput(chunkInput);
         const uploadMode = modeSelect?.value || initialMode;
-        const convertHls = !!(hlsCheck?.checked && isMp4);
+        const convertHls = !!(hlsCheck?.checked && isVideo);
         console.log('[upload] plan confirmed', { cs, uploadMode, convertHls, checked: hlsCheck?.checked });
         if (uploadMode !== 'seamless') UploadPrefs.set(uploadMode);
         cleanup();

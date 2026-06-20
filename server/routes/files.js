@@ -18,6 +18,7 @@ const { REPO_CAPACITY_BYTES } = require('../services/capacity');
 const logger = require('../lib/logger');
 const audit = require('../services/audit');
 const contentHash = require('../services/content-hash');
+const videoFormats = require('../services/video-formats');
 
 function auditMeta(req, meta = {}) {
   return {
@@ -332,7 +333,7 @@ router.post('/plan', (req, res) => {
       parseInt(chunkSize, 10) || storage.CHUNK_SIZE,
       req.user.id,
       {
-        convertHls: !!(convertHls && (mimeType?.startsWith('video/') || /\.mp4$/i.test(fileName || ''))),
+        convertHls: videoFormats.shouldConvertHls(!!convertHls, mimeType, fileName),
         mimeType: mimeType || null,
         fileName: fileName || null,
       }
@@ -431,10 +432,7 @@ router.post('/upload/init', async (req, res) => {
     }
 
     const uploadMode = req.body.uploadMode === 'git' ? 'git' : 'api';
-    const convertHls = !!(
-      req.body.convertHls
-      && (mimeType?.startsWith('video/') || /\.mp4$/i.test(fileName || ''))
-    );
+    const convertHls = videoFormats.shouldConvertHls(!!req.body.convertHls, mimeType, fileName);
 
     const session = await storage.initUploadSession(req.user.id, {
       fileName,
@@ -620,10 +618,10 @@ router.post('/upload/complete', chunkUpload.single('preview'), async (req, res) 
 
     const rawConvertHls = req.body.convertHls;
     const convertHls = rawConvertHls === '1' || rawConvertHls === true || rawConvertHls === 'true';
-    const isMp4 = /^video\//.test(result.mime_type) || /\.mp4$/i.test(result.name || '');
+    const isVideo = videoFormats.isVideo(result.mime_type, result.name);
     let hlsTaskId = null;
 
-    console.log(`[upload/complete] convertHls=${convertHls} raw=${JSON.stringify(rawConvertHls)} isMp4=${isMp4} taskId=${!!taskId} name=${result.name}`);
+    console.log(`[upload/complete] convertHls=${convertHls} raw=${JSON.stringify(rawConvertHls)} isVideo=${isVideo} taskId=${!!taskId} name=${result.name}`);
 
     if (taskId) {
       tasks.update(taskId, req.user.id, {
@@ -635,7 +633,7 @@ router.post('/upload/complete', chunkUpload.single('preview'), async (req, res) 
       });
     }
 
-    if (convertHls && isMp4) {
+    if (convertHls && isVideo) {
       hlsTaskId = uuidv4();
       console.log(`[upload/complete] Starting HLS conversion task ${hlsTaskId} for ${fileId}`);
       tasks.create(req.user.id, {
@@ -719,10 +717,7 @@ router.post('/upload/seamless/init', async (req, res) => {
     const parentPath = parentPathField || path || '/';
     if (!fileName || !size) return res.status(400).json({ error: 'fileName and size required' });
 
-    const convertHls = !!(
-      req.body.convertHls
-      && (mimeType?.startsWith('video/') || /\.mp4$/i.test(fileName || ''))
-    );
+    const convertHls = videoFormats.shouldConvertHls(!!req.body.convertHls, mimeType, fileName);
     if (convertHls) {
       const ffmpegOk = await hlsConvert.isFfmpegAvailable();
       if (!ffmpegOk) {
@@ -1121,7 +1116,7 @@ router.post('/hls-convert/:id', async (req, res) => {
       const state = hlsConvert.analyzeHlsSegmentState(fileId, file.size);
       if (state.recoverable) return res.json({ success: true, message: 'Already has HLS' });
     }
-    if (!file.mime_type?.startsWith('video/') && !file.name?.endsWith('.mp4')) {
+    if (!videoFormats.isVideo(file.mime_type, file.name)) {
       return res.status(400).json({ error: 'Only video files can be converted to HLS' });
     }
 

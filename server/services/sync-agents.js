@@ -21,6 +21,7 @@ function parseDesiredConfig(raw) {
   if (Array.isArray(raw.excludedPatterns)) {
     config.excludedPatterns = raw.excludedPatterns.map((p) => String(p)).filter(Boolean).slice(0, 50);
   }
+  if (raw.convertHlsEnabled !== undefined) config.convertHlsEnabled = !!raw.convertHlsEnabled;
   if (Array.isArray(raw.additionalSyncFolders)) {
     config.additionalSyncFolders = raw.additionalSyncFolders
       .filter((f) => f && typeof f.localPath === 'string' && f.localPath.trim())

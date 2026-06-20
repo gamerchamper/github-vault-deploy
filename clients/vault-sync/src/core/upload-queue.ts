@@ -146,6 +146,7 @@ function guessMimeType(fileName: string): string {
   const map: Record<string, string> = {
     '.mp4': 'video/mp4', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
     '.mov': 'video/quicktime', '.avi': 'video/x-msvideo', '.m4v': 'video/x-m4v',
+    '.ogv': 'video/ogg', '.wmv': 'video/x-ms-wmv',
     '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.wav': 'audio/wav',
     '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
     '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -153,6 +154,16 @@ function guessMimeType(fileName: string): string {
     '.json': 'application/json', '.txt': 'text/plain', '.zip': 'application/zip',
   };
   return map[ext] || 'application/octet-stream';
+}
+
+function isVideoFile(fileName: string, mimeType: string | null): boolean {
+  if ((mimeType || '').startsWith('video/')) return true;
+  return /\.(mp4|webm|mkv|avi|mov|m4v|ogv|wmv)$/i.test(fileName);
+}
+
+function shouldConvertHls(settings: ReturnType<typeof getSettings>, fileName: string, mimeType: string): boolean {
+  if (settings.convertHlsEnabled === false) return false;
+  return isVideoFile(fileName, mimeType);
 }
 
 async function ensureFolderOnServer(api: VaultApiClient, parentPath: string): Promise<void> {
@@ -243,8 +254,7 @@ async function uploadEntrySeamless(
   queueRepo.updateQueueEntry(entry.id, { status: 'uploading', startedAt: new Date().toISOString() });
   emitProgress(entry.id, entry.localRelPath, 'uploading', 0);
 
-  const isVideo = mimeType.startsWith('video/') || /\.(mp4|webm|mkv|avi|mov|m4v)$/i.test(fileName);
-  const convertHls = isVideo && /\.mp4$/i.test(fileName);
+  const convertHls = shouldConvertHls(settings, fileName, mimeType);
 
   let initResult = await api.seamlessInit({
     fileName,

@@ -14,6 +14,7 @@ const DEFAULTS = {
     additionalSyncFolders: [],
     agentId: '',
     appliedConfigVersion: 0,
+    convertHlsEnabled: true,
 };
 function getSettings() {
     const db = (0, database_1.getDatabase)();
@@ -35,6 +36,7 @@ function getSettings() {
         additionalSyncFolders: parseAdditionalFolders(map.additionalSyncFolders),
         agentId: map.agentId || '',
         appliedConfigVersion: parseInt(map.appliedConfigVersion || '0', 10) || 0,
+        convertHlsEnabled: map.convertHlsEnabled !== '0',
     };
 }
 function updateSettings(patch) {
@@ -67,6 +69,8 @@ function updateSettings(patch) {
         upsert.run('agentId', patch.agentId);
     if (patch.appliedConfigVersion !== undefined)
         upsert.run('appliedConfigVersion', String(patch.appliedConfigVersion));
+    if (patch.convertHlsEnabled !== undefined)
+        upsert.run('convertHlsEnabled', patch.convertHlsEnabled ? '1' : '0');
     return getSettings();
 }
 function parseAdditionalFolders(raw) {

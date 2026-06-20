@@ -13,6 +13,7 @@ const DEFAULTS: Omit<SettingsType, 'syncRootPath' | 'serverUrl' | 'apiKey'> = {
   additionalSyncFolders: [],
   agentId: '',
   appliedConfigVersion: 0,
+  convertHlsEnabled: true,
 };
 
 export function getSettings(): SettingsType {
@@ -35,6 +36,7 @@ export function getSettings(): SettingsType {
     additionalSyncFolders: parseAdditionalFolders(map.additionalSyncFolders),
     agentId: map.agentId || '',
     appliedConfigVersion: parseInt(map.appliedConfigVersion || '0', 10) || 0,
+    convertHlsEnabled: map.convertHlsEnabled !== '0',
   };
 }
 
@@ -57,6 +59,7 @@ export function updateSettings(patch: Partial<SettingsType>): SettingsType {
   }
   if (patch.agentId !== undefined) upsert.run('agentId', patch.agentId);
   if (patch.appliedConfigVersion !== undefined) upsert.run('appliedConfigVersion', String(patch.appliedConfigVersion));
+  if (patch.convertHlsEnabled !== undefined) upsert.run('convertHlsEnabled', patch.convertHlsEnabled ? '1' : '0');
 
   return getSettings();
 }

@@ -10,6 +10,7 @@ export interface RemoteAgentConfig {
   syncIntervalSeconds?: number;
   syncRootPath?: string;
   excludedPatterns?: string[];
+  convertHlsEnabled?: boolean;
   additionalSyncFolders?: Array<{
     id?: string;
     name?: string;
@@ -32,6 +33,7 @@ export function buildReportedConfig(settings: SyncSettings): RemoteAgentConfig {
     syncIntervalSeconds: settings.syncIntervalSeconds,
     syncRootPath: settings.syncRootPath,
     excludedPatterns: settings.excludedPatterns,
+    convertHlsEnabled: settings.convertHlsEnabled,
     additionalSyncFolders: (settings.additionalSyncFolders || []).map((f) => ({
       id: f.id,
       name: f.name,
@@ -49,6 +51,7 @@ export function applyRemoteAgentConfig(config: RemoteAgentConfig): SyncSettings 
   if (config.syncIntervalSeconds !== undefined) patch.syncIntervalSeconds = config.syncIntervalSeconds;
   if (config.syncRootPath !== undefined) patch.syncRootPath = config.syncRootPath;
   if (config.excludedPatterns !== undefined) patch.excludedPatterns = config.excludedPatterns;
+  if (config.convertHlsEnabled !== undefined) patch.convertHlsEnabled = !!config.convertHlsEnabled;
 
   if (config.additionalSyncFolders !== undefined) {
     const now = new Date().toISOString();

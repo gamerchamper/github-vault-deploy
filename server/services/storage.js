@@ -9,6 +9,7 @@ const thumbnails = require('./thumbnails');
 const accounts = require('./accounts');
 const appUrl = require('./app-url');
 const capacity = require('./capacity');
+const videoFormats = require('./video-formats');
 const { REPO_CAPACITY_BYTES } = capacity;
 
 function touchFile(fileId) {
@@ -261,8 +262,7 @@ function findNextChunkIndex(fileId, totalChunks) {
 }
 
 function shouldReserveHls(convertHls, mimeType, fileName) {
-  if (!convertHls) return false;
-  return (mimeType || '').startsWith('video/') || /\.mp4$/i.test(fileName || '');
+  return videoFormats.shouldConvertHls(convertHls, mimeType, fileName);
 }
 
 function assertUploadCapacity(repos, fileSize, chunkSize, convertHls, mimeType, fileName) {

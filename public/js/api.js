@@ -436,6 +436,10 @@ const API = {
     dismiss: (id) => API.delete(`/api/tasks/${id}`),
     clearFailed: () => API.delete('/api/tasks/failed'),
   },
+
+  isVideoFile(fileName, mimeType) {
+    return isVideoFile(fileName, mimeType);
+  },
 };
 
 function driveBarClass(percent) {
@@ -490,6 +494,12 @@ const UploadPrefs = {
     localStorage.setItem(this.KEY, stored);
   },
 };
+
+function isVideoFile(fileName, mimeType) {
+  if (mimeType?.startsWith('video/')) return true;
+  const ext = String(fileName || '').split('.').pop()?.toLowerCase();
+  return ['mp4', 'webm', 'mkv', 'avi', 'mov', 'm4v', 'ogv', 'wmv'].includes(ext);
+}
 
 function getPreviewType(name, mimeType) {
   const ext = name.split('.').pop().toLowerCase();

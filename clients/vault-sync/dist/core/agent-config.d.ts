@@ -4,6 +4,7 @@ export interface RemoteAgentConfig {
     syncIntervalSeconds?: number;
     syncRootPath?: string;
     excludedPatterns?: string[];
+    convertHlsEnabled?: boolean;
     additionalSyncFolders?: Array<{
         id?: string;
         name?: string;

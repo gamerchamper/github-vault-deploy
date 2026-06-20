@@ -98,6 +98,8 @@ export interface SyncSettings {
   agentId: string;
   /** Last config version applied from server push. */
   appliedConfigVersion: number;
+  /** Convert uploaded videos (mp4, mkv, mov, etc.) to HLS on the server. */
+  convertHlsEnabled: boolean;
 }
 
 /** A local folder synced to /Sync Folder/{name} on the vault server. */

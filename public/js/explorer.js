@@ -647,7 +647,7 @@ class Explorer {
 
   isVideoEligibleForHls(file) {
     return !!file && !file.is_folder
-      && (file.mime_type?.startsWith('video/') || /\.mp4$/i.test(file.name || ''))
+      && API.isVideoFile(file.name || '', file.mime_type || '')
       && (Number(file.has_hls) <= 0 || this.isHlsIncomplete(file));
   }
 

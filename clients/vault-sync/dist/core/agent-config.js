@@ -27,6 +27,7 @@ function buildReportedConfig(settings) {
         syncIntervalSeconds: settings.syncIntervalSeconds,
         syncRootPath: settings.syncRootPath,
         excludedPatterns: settings.excludedPatterns,
+        convertHlsEnabled: settings.convertHlsEnabled,
         additionalSyncFolders: (settings.additionalSyncFolders || []).map((f) => ({
             id: f.id,
             name: f.name,
@@ -46,6 +47,8 @@ function applyRemoteAgentConfig(config) {
         patch.syncRootPath = config.syncRootPath;
     if (config.excludedPatterns !== undefined)
         patch.excludedPatterns = config.excludedPatterns;
+    if (config.convertHlsEnabled !== undefined)
+        patch.convertHlsEnabled = !!config.convertHlsEnabled;
     if (config.additionalSyncFolders !== undefined) {
         const now = new Date().toISOString();
         const existing = new Map((current.additionalSyncFolders || []).map((f) => [f.id, f]));
