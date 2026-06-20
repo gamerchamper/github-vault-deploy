@@ -45,6 +45,20 @@ class VaultApiClient {
     async validateAuth() {
         return this.request('/auth/me');
     }
+    async agentRegister(body) {
+        return this.request('/api/agents/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+    }
+    async agentHeartbeat(body) {
+        return this.request('/api/agents/heartbeat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+    }
     async listFiles(parentPath = '/', limit = 500, offset = 0) {
         const params = new URLSearchParams({ path: parentPath, limit: String(limit), offset: String(offset), sort: 'name', order: 'ASC' });
         return this.request(`/api/files/list?${params}`);

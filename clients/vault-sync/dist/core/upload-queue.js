@@ -50,6 +50,7 @@ const settings_repo_1 = require("../db/settings-repo");
 const api_client_1 = require("./api-client");
 const logger_1 = require("../services/logger");
 const paths_1 = require("../services/paths");
+const sync_mappings_1 = require("../services/sync-mappings");
 const POLL_INTERVAL_MS = 1000;
 const MAX_PART_RETRIES = 12;
 const ensuredFolderPaths = new Set();
@@ -138,7 +139,7 @@ async function processNext() {
         }
         if (msg.includes('already exists')) {
             queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, completedAt: new Date().toISOString(), error: null });
-            markAsSynced(entry, settings.syncRootPath);
+            markAsSynced(entry, settings, entry.fileId);
             emitProgress(entry.id, entry.localRelPath, 'done', 100);
             logger_1.logger.info('upload-queue', `Already on server, marked synced: ${entry.localRelPath}`);
             succeeded = true;
@@ -229,8 +230,8 @@ async function sleep(ms) {
 async function uploadEntrySeamless(entryIn, settings) {
     let entry = entryIn;
     const normalizedRel = (0, paths_1.normalizeRelPath)(entry.localRelPath);
-    const absPath = (0, paths_1.toAbsPath)(settings.syncRootPath, normalizedRel);
-    if (!fs_1.default.existsSync(absPath)) {
+    const absPath = (0, sync_mappings_1.absPathFromStored)(settings, normalizedRel);
+    if (!absPath || !fs_1.default.existsSync(absPath)) {
         queueRepo.updateQueueEntry(entry.id, { status: 'error', error: 'File no longer exists' });
         return;
     }
@@ -245,8 +246,8 @@ async function uploadEntrySeamless(entryIn, settings) {
         entry = { ...entry, size: stat.size };
     }
     const api = new api_client_1.VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
-    const fileName = path_1.default.basename(entry.localRelPath);
-    const parentPath = (0, paths_1.parentPathFromRel)(entry.localRelPath);
+    const fileName = normalizedRel.split('/').filter(Boolean).pop() || entry.localRelPath;
+    const parentPath = (0, sync_mappings_1.remoteParentFromStored)(settings, normalizedRel);
     const mimeType = entry.mimeType || guessMimeType(fileName);
     const chunkSize = computeChunkSize(stat.size);
     if (parentPath && parentPath !== '/') {
@@ -255,7 +256,7 @@ async function uploadEntrySeamless(entryIn, settings) {
     const remoteId = entry.fileId ? null : await resolveRemoteFileId(api, fileName, parentPath, stat.size);
     if (remoteId) {
         queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, fileId: remoteId, completedAt: new Date().toISOString() });
-        markAsSynced(entry, settings.syncRootPath, remoteId);
+        markAsSynced(entry, settings, remoteId);
         emitProgress(entry.id, entry.localRelPath, 'done', 100);
         logger_1.logger.info('upload-queue', `Matched existing remote file: ${entry.localRelPath}`);
         return;
@@ -378,7 +379,9 @@ async function waitForServerProcessing(entry, api, jobId, fileName, stat) {
     }
 }
 function finalizeSuccess(entry, fileName, stat, remoteFileId) {
-    const remotePath = `/${(0, paths_1.normalizeRelPath)(entry.localRelPath)}`;
+    const settings = (0, settings_repo_1.getSettings)();
+    const normalizedRel = (0, paths_1.normalizeRelPath)(entry.localRelPath);
+    const remotePath = (0, sync_mappings_1.remotePathFromStored)(settings, normalizedRel);
     queueRepo.updateQueueEntry(entry.id, { status: 'done', percent: 100, completedAt: new Date().toISOString() });
     fileTreeRepo.upsertFile((0, database_1.getDatabase)(), {
         fileId: remoteFileId,
@@ -399,16 +402,17 @@ function finalizeSuccess(entry, fileName, stat, remoteFileId) {
     emitProgress(entry.id, entry.localRelPath, 'done', 100);
     logger_1.logger.info('upload-queue', `Upload complete: ${entry.localRelPath}`);
 }
-function markAsSynced(entry, syncRoot, remoteFileId = null) {
+function markAsSynced(entry, settings, remoteFileId = null) {
     const normalizedRel = (0, paths_1.normalizeRelPath)(entry.localRelPath);
-    const absPath = (0, paths_1.toAbsPath)(syncRoot, normalizedRel);
+    const absPath = (0, sync_mappings_1.absPathFromStored)(settings, normalizedRel);
     let stat = null;
     try {
-        stat = fs_1.default.statSync(absPath);
+        if (absPath)
+            stat = fs_1.default.statSync(absPath);
     }
     catch { }
-    const fileName = path_1.default.basename(normalizedRel);
-    const remotePath = `/${normalizedRel}`;
+    const fileName = normalizedRel.split('/').filter(Boolean).pop() || normalizedRel;
+    const remotePath = (0, sync_mappings_1.remotePathFromStored)(settings, normalizedRel);
     fileTreeRepo.upsertFile((0, database_1.getDatabase)(), {
         fileId: remoteFileId,
         localRelPath: normalizedRel,

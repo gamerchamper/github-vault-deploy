@@ -7,8 +7,9 @@ import { getSettings } from '../db/settings-repo';
 import { VaultApiClient } from './api-client';
 import { computeFileHash } from '../services/hasher';
 import { logger } from '../services/logger';
-import { normalizeRelPath, toAbsPath, parentPathFromRel, toRemotePath } from '../services/paths';
-import type { SyncFileEntry } from '../shared/types';
+import { normalizeRelPath, parentPathFromRel, toRemotePath } from '../services/paths';
+import { absPathFromStored } from '../services/sync-mappings';
+import type { SyncFileEntry, SyncSettings } from '../shared/types';
 
 const PENDING_REMOVAL_MS = 20_000;
 
@@ -42,13 +43,14 @@ export async function tryResolvePendingRename(newRelPath: string, isFolder: bool
   prunePendingRemovals();
   const normalizedNew = normalizeRelPath(newRelPath);
   const settings = getSettings();
-  if (!settings.syncRootPath || !settings.serverUrl || !settings.apiKey) return false;
+  if (!settings.serverUrl || !settings.apiKey) return false;
 
   if (isFolder) {
     return tryResolveFolderRename(normalizedNew, settings);
   }
 
-  const absPath = toAbsPath(settings.syncRootPath, normalizedNew);
+  const absPath = absPathFromStored(settings, normalizedNew);
+  if (!absPath) return false;
   let stat: fs.Stats;
   try {
     stat = fs.statSync(absPath);
@@ -76,8 +78,8 @@ export async function tryResolvePendingRename(newRelPath: string, isFolder: bool
 
   const byHash = fileTreeRepo.getFileByHash(hash, normalizedNew);
   if (byHash?.fileId && byHash.syncStatus === 'synced' && normalizeRelPath(byHash.localRelPath) !== normalizedNew) {
-    const oldAbs = toAbsPath(settings.syncRootPath, byHash.localRelPath);
-    if (!fs.existsSync(oldAbs)) {
+    const oldAbs = absPathFromStored(settings, byHash.localRelPath);
+    if (!oldAbs || !fs.existsSync(oldAbs)) {
       await applyPathChange(byHash, normalizedNew);
       return true;
     }
@@ -86,13 +88,14 @@ export async function tryResolvePendingRename(newRelPath: string, isFolder: bool
   return false;
 }
 
-async function tryResolveFolderRename(newFolderRel: string, settings: ReturnType<typeof getSettings>): Promise<boolean> {
-  const newAbs = toAbsPath(settings.syncRootPath, newFolderRel);
+async function tryResolveFolderRename(newFolderRel: string, settings: SyncSettings): Promise<boolean> {
+  const newAbs = absPathFromStored(settings, newFolderRel);
+  if (!newAbs) return false;
   if (!fs.statSync(newAbs).isDirectory()) return false;
 
   for (const [oldPath, pending] of pendingRemovals) {
     if (!pending.isFolder || !pending.entry.fileId) continue;
-    if (await folderContentsMatchRename(settings.syncRootPath, oldPath, newFolderRel)) {
+    if (await folderContentsMatchRename(settings, oldPath, newFolderRel)) {
       pendingRemovals.delete(oldPath);
       await applyFolderPathChange(pending.entry, newFolderRel);
       return true;
@@ -101,7 +104,7 @@ async function tryResolveFolderRename(newFolderRel: string, settings: ReturnType
   return false;
 }
 
-async function folderContentsMatchRename(syncRoot: string, oldPrefix: string, newPrefix: string): Promise<boolean> {
+async function folderContentsMatchRename(settings: SyncSettings, oldPrefix: string, newPrefix: string): Promise<boolean> {
   const oldNorm = normalizeRelPath(oldPrefix);
   const newNorm = normalizeRelPath(newPrefix);
   const children = fileTreeRepo.getFilesUnderPrefix(`${oldNorm}/`).filter((f) => !f.isFolder && f.localHash);
@@ -110,8 +113,8 @@ async function folderContentsMatchRename(syncRoot: string, oldPrefix: string, ne
   for (const child of children) {
     const suffix = child.localRelPath.slice(oldNorm.length + 1);
     const candidate = `${newNorm}/${suffix}`;
-    const abs = toAbsPath(syncRoot, candidate);
-    if (!fs.existsSync(abs)) return false;
+    const abs = absPathFromStored(settings, candidate);
+    if (!abs || !fs.existsSync(abs)) return false;
     const stat = fs.statSync(abs);
     if (stat.size !== child.size) return false;
     if (child.localHash) {
@@ -213,7 +216,7 @@ function prunePendingRemovals(): void {
 }
 
 export async function detectRenamesFromScan(
-  syncRoot: string,
+  settings: SyncSettings,
   hashIndex: Map<string, string>,
   known: Set<string>,
   seen: Set<string>,
@@ -225,7 +228,8 @@ export async function detectRenamesFromScan(
     const existing = fileTreeRepo.getFileByRelPath(oldPath);
     if (!existing || existing.isFolder) continue;
     if (!existing.localHash || !existing.fileId) continue;
-    if (fs.existsSync(toAbsPath(syncRoot, oldPath))) continue;
+    const abs = absPathFromStored(settings, oldPath);
+    if (abs && fs.existsSync(abs)) continue;
 
     const key = hashKey(existing.localHash, existing.size);
     const newPath = hashIndex.get(key);
@@ -239,11 +243,13 @@ export async function detectRenamesFromScan(
     if (seen.has(oldPath)) continue;
     const existing = fileTreeRepo.getFileByRelPath(oldPath);
     if (!existing?.isFolder || !existing.fileId) continue;
-    if (fs.existsSync(toAbsPath(syncRoot, oldPath))) continue;
+    const oldAbs = absPathFromStored(settings, oldPath);
+    if (oldAbs && fs.existsSync(oldAbs)) continue;
 
     for (const candidate of seen) {
-      if (!fs.statSync(toAbsPath(syncRoot, candidate)).isDirectory()) continue;
-      if (await folderContentsMatchRename(syncRoot, oldPath, candidate)) {
+      const candidateAbs = absPathFromStored(settings, candidate);
+      if (!candidateAbs || !fs.statSync(candidateAbs).isDirectory()) continue;
+      if (await folderContentsMatchRename(settings, oldPath, candidate)) {
         await applyFolderPathChange(existing, candidate);
         renamed += 1;
         break;

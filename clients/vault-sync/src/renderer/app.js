@@ -29,6 +29,27 @@ var viewMode='grid';
 var currentFilter='all';
 var syncing=false;
 var previewIndex=-1;
+var settingsCache=null;
+
+function isRootLevelPath(fp){
+  fp=fp.replace(/\\/g,'/');
+  if(fp.startsWith('@sync/')){
+    var parts=fp.split('/').filter(Boolean);
+    return parts.length===2;
+  }
+  return fp.indexOf('/')<0;
+}
+
+function childOfPath(fp,parent){
+  fp=fp.replace(/\\/g,'/');
+  parent=parent.replace(/\\/g,'/');
+  if(parent==='/'||parent==='')return isRootLevelPath(fp);
+  if(fp===parent)return false;
+  if(fp.indexOf(parent)!==0)return false;
+  var remainder=fp.slice(parent.length);
+  if(remainder.charAt(0)!=='/')return false;
+  return remainder.slice(1).indexOf('/')<0;
+}
 
 function calcFolderSize(folderRelPath){
   var prefix=folderRelPath.replace(/\\/g,'/');
@@ -64,6 +85,7 @@ async function doLogin(){
 // -- Init --
 async function initApp(){
   var s=await window.vaultSync.getSettings();
+  settingsCache=s;
   if(s.syncRootPath)await window.vaultSync.updateSettings({syncRootPath:s.syncRootPath});
   loadFiles();renderBreadcrumb();
   window.vaultSync.onSyncState(function(st){
@@ -134,16 +156,8 @@ function filterFiles(files){
   return files.filter(function(f){
     var fp=f.localRelPath.replace(/\\/g,'/');
     var normPath=currentPath.replace(/\\/g,'/');
-    if(normPath.charAt(0)==='/')normPath=normPath.slice(1);
-    if(normPath===''){
-      if(fp.indexOf('/')>=0)return false;
-    }else{
-      if(fp===normPath)return false;
-      if(fp.indexOf(normPath)!==0)return false;
-      var remainder=fp.slice(normPath.length);
-      if(remainder.charAt(0)!=='/')return false;
-      if(remainder.slice(1).indexOf('/')>=0)return false;
-    }
+    if(normPath==='/'||normPath==='')normPath='';
+    if(!childOfPath(fp,normPath||'/'))return false;
     if(currentFilter==='all')return true;
     if(currentFilter==='synced')return f.syncStatus==='synced';
     if(currentFilter==='remote')return f.syncStatus==='remote_only';
@@ -270,14 +284,17 @@ function showCtxMenu(e,f){
     if(f.syncStatus==='synced') items.push('<div class="mi" onclick="openPreview(allFiles.find(function(x){return x.localRelPath===\''+q+'\'}));hideCtx()">👁 Open</div>');
   }
   items.push('<div class="sep"></div>');
-  var explorerPath=(window.syncRoot||'')+'\\'+f.localRelPath.split('/').join('\\');
-  items.push('<div class="mi" onclick="window.vaultSync.openFolder(\''+esc(explorerPath)+'\');hideCtx()">📂 Show in Explorer</div>');
+  items.push('<div class="mi" onclick="openLocalPath(\''+q+'\');hideCtx()">📂 Show in Explorer</div>');
   items.push('<div class="sep"></div>');
   items.push('<div class="mi" onclick="refreshAll();hideCtx()">🔄 Refresh</div>');
   menu.innerHTML=items.join('');
   menu.style.display='block';menu.style.left=e.clientX+'px';menu.style.top=e.clientY+'px';
 }
 function hideCtx(){$('ctxMenu').style.display='none'}
+async function openLocalPath(storedRel){
+  var p=await window.vaultSync.resolveLocalPath(storedRel);
+  if(p)window.vaultSync.openFolder(p);
+}
 document.addEventListener('click',function(){hideCtx()});
 
 // -- Download --
@@ -311,8 +328,35 @@ function updateStatusUI(st){
 function setText(id,t){var e=$(id);if(e)e.textContent=t}
 
 // -- Settings --
-function openSettings(){window.vaultSync.getSettings().then(function(s){$('setUrl').value=s.serverUrl||'';$('setKey').value=s.apiKey||'';$('setFolder').value=s.syncRootPath||'';$('settingsModal').classList.remove('hidden');$('setStatus').textContent=''})}
+function renderAdditionalFoldersList(folders){
+  var el=$('additionalFoldersList');if(!el)return;
+  if(!folders||!folders.length){el.innerHTML='<p style="font-size:11px;color:var(--text-muted)">No additional folders yet.</p>';return}
+  el.innerHTML=folders.map(function(f){
+    return'<div class="add-folder-row"><div><strong>'+esc(f.name)+'</strong><div class="path">'+esc(f.localPath)+' → /Sync Folder/'+esc(f.name)+'</div></div><button type="button" class="btn-secondary" onclick="removeAdditionalFolder(\''+esc(f.id)+'\')">Remove</button></div>';
+  }).join('');
+}
+function openSettings(){window.vaultSync.getSettings().then(function(s){settingsCache=s;$('setUrl').value=s.serverUrl||'';$('setKey').value=s.apiKey||'';$('setFolder').value=s.syncRootPath||'';renderAdditionalFoldersList(s.additionalSyncFolders||[]);$('settingsModal').classList.remove('hidden');$('setStatus').textContent=''})}
 function closeSettings(){$('settingsModal').classList.add('hidden')}
+async function addAdditionalFolder(){
+  var pick=await window.vaultSync.pickAdditionalSyncFolder();
+  if(!pick||!pick.ok||!pick.path)return;
+  $('setStatus').textContent='Adding folder…';
+  var r=await window.vaultSync.addAdditionalSyncFolder(pick.path);
+  if(r.ok){
+    settingsCache=await window.vaultSync.getSettings();
+    renderAdditionalFoldersList(settingsCache.additionalSyncFolders||[]);
+    $('setStatus').textContent='✓ Added — syncing to /Sync Folder/'+esc(r.folder.name);
+    refreshAll();
+  }else{
+    $('setStatus').textContent='✗ '+(r.error||'Failed to add folder');
+  }
+}
+async function removeAdditionalFolder(id){
+  if(!confirm('Stop syncing this folder? Files already on the server are not deleted.'))return;
+  settingsCache=await window.vaultSync.removeAdditionalSyncFolder(id);
+  renderAdditionalFoldersList(settingsCache.additionalSyncFolders||[]);
+  refreshAll();
+}
 async function saveSettings(){
   var p={serverUrl:$('setUrl').value.trim(),apiKey:$('setKey').value.trim(),syncRootPath:$('setFolder').value.trim()};
   await window.vaultSync.updateSettings(p);$('settingsModal').classList.add('hidden');
@@ -323,6 +367,7 @@ async function browseFolder(){var f=await window.vaultSync.pickFolder();if(f)$('
 
 // -- Boot --
 window.vaultSync.getSettings().then(function(s){
+  settingsCache=s;
   window.syncRoot=s.syncRootPath;
   if(s.serverUrl&&s.apiKey){
     $('login-screen').classList.add('hidden');

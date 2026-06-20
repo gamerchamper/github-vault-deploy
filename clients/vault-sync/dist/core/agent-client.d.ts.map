@@ -1,0 +1,1 @@
+{"version":3,"file":"agent-client.d.ts","sourceRoot":"","sources":["../../src/core/agent-client.ts"],"names":[],"mappings":"AAIA,OAAO,EAML,KAAK,iBAAiB,EACvB,MAAM,gBAAgB,CAAC;AAKxB,MAAM,WAAW,gBAAgB;IAC/B,cAAc,CAAC,EAAE,CAAC,MAAM,EAAE,iBAAiB,EAAE,OAAO,EAAE,MAAM,KAAK,IAAI,GAAG,OAAO,CAAC,IAAI,CAAC,CAAC;CACvF;AAED,wBAAgB,gBAAgB,CAAC,KAAK,GAAE,gBAAqB,GAAG,MAAM,IAAI,CAoDzE"}

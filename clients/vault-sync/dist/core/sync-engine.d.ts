@@ -8,4 +8,6 @@ export declare function scanLocalFile(relPath: string): Promise<void>;
 export declare function startSyncLoop(): Promise<void>;
 export declare function stopSyncLoop(): void;
 export declare function runSyncCycleNow(): Promise<void>;
+/** Immediate scan + upload for one additional PC folder (does not wait on full sync cycle). */
+export declare function scanAdditionalFolderNow(mappingId: string): Promise<void>;
 //# sourceMappingURL=sync-engine.d.ts.map

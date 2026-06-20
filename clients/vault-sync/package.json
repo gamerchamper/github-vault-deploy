@@ -15,11 +15,13 @@
     "dist:win:signed": "npm run build && electron-builder --win",
     "package:win": "npm run dist:win",
     "package:win:dir": "npm run dist:win:dir",
-    "cache:clean": "node scripts/clean-cache.js"
+    "cache:clean": "node scripts/clean-cache.js",
+    "start:cli": "npm run build && node dist/cli.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
-    "chokidar": "^4.0.3"
+    "chokidar": "^4.0.3",
+    "dotenv": "^16.6.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

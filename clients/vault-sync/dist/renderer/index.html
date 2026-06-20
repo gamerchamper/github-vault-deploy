@@ -200,6 +200,9 @@ a{color:var(--accent);text-decoration:none}
 .filter-chips .chip{padding:4px 12px;border-radius:20px;font-size:11px;color:var(--text-secondary);background:var(--bg-secondary);border:1px solid var(--border);cursor:pointer;white-space:nowrap;transition:all .15s}
 .filter-chips .chip:hover{background:var(--bg-hover);color:var(--text-primary)}
 .filter-chips .chip.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.add-folder-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px;font-size:12px}
+.add-folder-row .path{color:var(--text-muted);font-size:11px;word-break:break-all}
+.add-folder-row button{font-size:11px;padding:4px 8px}
 </style>
 </head>
 <body>
@@ -308,6 +311,12 @@ a{color:var(--accent);text-decoration:none}
     <div class="fg"><label>Server URL</label><input id="setUrl" placeholder="https://vault.example.com"></div>
     <div class="fg"><label>API Key</label><input id="setKey" type="password" placeholder="gv_..."></div>
     <div class="fg"><label>Sync Folder</label><div class="row left"><input id="setFolder" readonly style="flex:1"><button class="btn-secondary" onclick="browseFolder()">Browse</button></div></div>
+    <div class="fg">
+      <label>Additional PC folders → server Sync Folder</label>
+      <p style="font-size:11px;color:var(--text-muted);margin:0 0 8px">Each folder syncs to <strong>/Sync Folder/{name}</strong> on the server (name = folder name on your PC).</p>
+      <div id="additionalFoldersList" style="margin-bottom:8px"></div>
+      <button type="button" class="btn-secondary" onclick="addAdditionalFolder()">+ Add folder to sync</button>
+    </div>
     <div class="row"><button class="btn-secondary" onclick="closeSettings()">Cancel</button><button class="btn-primary" onclick="saveSettings()">Save</button></div>
     <div id="setStatus" style="font-size:12px;margin-top:8px;text-align:center"></div>
   </div>

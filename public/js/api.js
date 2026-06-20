@@ -102,6 +102,12 @@ const API = {
     revokeApiKey: (id) => API.delete(`/auth/api-keys/${id}`),
   },
 
+  agents: {
+    list: () => API.get('/api/agents'),
+    saveConfig: (id, config) => API.put(`/api/agents/${id}/config`, { config }),
+    remove: (id) => API.delete(`/api/agents/${id}`),
+  },
+
   viewQuery(view) {
     if (!view || view === 'primary') return '';
     return `?view=${encodeURIComponent(view)}`;
@@ -191,7 +197,7 @@ const API = {
     },
     plan: (size, chunkSize, { convertHls = false, mimeType = null, fileName = null } = {}) =>
       API.post('/api/files/plan', { size, chunkSize, convertHls, mimeType, fileName }),
-    details: (id) => API.get(`/api/files/details/${id}`),
+    details: (id, view) => API.get(`/api/files/details/${id}${API.viewQuery(view)}`),
     history: (id) => API.get(`/api/files/history/${id}`),
     historyDownload: (id, versionId) => `/api/files/history/${id}/${versionId}/download`,
     historyView: (id, versionId) => `/api/files/history/${id}/${versionId}/view`,

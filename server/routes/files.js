@@ -942,7 +942,7 @@ router.post('/delete-batch', async (req, res) => {
 
 router.get('/details/:id', (req, res) => {
   try {
-    res.json(storage.getFileDetails(req.user.id, req.params.id, req));
+    res.json(storage.getFileDetails(req.user.id, req.params.id, req, req.query.view));
   } catch (err) {
     res.status(404).json({ error: err.message });
   }

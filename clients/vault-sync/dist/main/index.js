@@ -47,11 +47,16 @@ const sync_engine_1 = require("../core/sync-engine");
 const file_watcher_1 = require("../core/file-watcher");
 const upload_queue_1 = require("../core/upload-queue");
 const api_client_1 = require("../core/api-client");
+const folder_sync_1 = require("../core/folder-sync");
 const logger_1 = require("../services/logger");
 const hasher_1 = require("../services/hasher");
+const agent_client_1 = require("../core/agent-client");
+const runtime_1 = require("../core/runtime");
+const sync_mappings_1 = require("../services/sync-mappings");
 let mainWindow = null;
 let tray = null;
 let dataDir;
+let stopAgentClient = null;
 function getDefaultDataDir() {
     const userData = electron_1.app.getPath('userData');
     const dir = path_1.default.join(userData, 'vault-sync-data');
@@ -106,7 +111,10 @@ electron_1.app.whenReady().then(() => {
             mainWindow.webContents.send('upload-progress', p);
         }
     });
-    (0, file_watcher_1.startWatcher)(settings.syncRootPath, (event, filePath) => {
+    (0, file_watcher_1.startAllWatchers)((0, runtime_1.collectWatchRoots)(), (absPath) => {
+        const s = (0, settings_repo_1.getSettings)();
+        return (0, sync_mappings_1.resolveAbsPathToStored)(s, absPath);
+    }, (event, filePath) => {
         (0, sync_engine_1.handleWatcherEvent)(event, filePath).catch((err) => {
             logger_1.logger.warn('watcher', `Event failed (${event} ${filePath}): ${err instanceof Error ? err.message : String(err)}`);
         });
@@ -114,12 +122,16 @@ electron_1.app.whenReady().then(() => {
     (0, upload_queue_1.startProcessing)(2000);
     (0, upload_queue_1.kickQueue)();
     (0, sync_engine_1.startSyncLoop)().catch((err) => logger_1.logger.error('main', `Sync start error: ${err.message}`));
+    stopAgentClient = (0, agent_client_1.startAgentClient)({
+        onRemoteConfig: () => (0, runtime_1.onRemoteConfigApplied)(),
+    });
     logger_1.logger.info('main', 'App started');
 });
 electron_1.app.on('window-all-closed', () => {
     // Don't quit on window close — keep running in tray
 });
 electron_1.app.on('before-quit', () => {
+    stopAgentClient?.();
     (0, sync_engine_1.stopSyncLoop)();
     (0, file_watcher_1.stopWatcher)();
     (0, upload_queue_1.stopProcessing)();
@@ -222,6 +234,7 @@ function setupIPC() {
     electron_1.ipcMain.handle('update-settings', (_event, patch) => {
         (0, settings_repo_1.updateSettings)(patch);
         (0, upload_queue_1.resetFolderCache)();
+        (0, runtime_1.restartWatchers)();
         return (0, settings_repo_1.getSettings)();
     });
     electron_1.ipcMain.handle('get-sync-state', () => (0, sync_engine_1.getSyncState)());
@@ -237,6 +250,57 @@ function setupIPC() {
         if (result.canceled || !result.filePaths.length)
             return null;
         return result.filePaths[0];
+    });
+    electron_1.ipcMain.handle('pick-additional-sync-folder', async () => {
+        const result = await electron_1.dialog.showOpenDialog({
+            properties: ['openDirectory'],
+            title: 'Select folder to sync to Sync Folder on server',
+        });
+        if (result.canceled || !result.filePaths.length)
+            return { ok: false };
+        return { ok: true, path: result.filePaths[0] };
+    });
+    electron_1.ipcMain.handle('add-additional-sync-folder', async (_event, localPath) => {
+        if (!localPath || !fs_1.default.existsSync(localPath)) {
+            return { ok: false, error: 'Folder not found' };
+        }
+        const settings = (0, settings_repo_1.getSettings)();
+        const conflict = (0, sync_mappings_1.pathsConflict)(settings, localPath);
+        if (conflict)
+            return { ok: false, error: conflict };
+        const folder = (0, sync_mappings_1.createAdditionalFolder)(localPath);
+        const next = [...(settings.additionalSyncFolders || []), folder];
+        (0, settings_repo_1.updateSettings)({ additionalSyncFolders: next });
+        if (settings.serverUrl && settings.apiKey) {
+            const api = new api_client_1.VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
+            await (0, folder_sync_1.ensureSyncContainerOnServer)(api);
+        }
+        (0, upload_queue_1.resetFolderCache)();
+        (0, runtime_1.restartWatchers)();
+        await (0, folder_sync_1.registerAdditionalFolderRoots)();
+        try {
+            await (0, sync_engine_1.scanAdditionalFolderNow)(folder.id);
+            (0, upload_queue_1.kickQueue)();
+            logger_1.logger.info('main', `Additional folder queued for sync: ${folder.name}`);
+        }
+        catch (err) {
+            logger_1.logger.error('main', `Additional folder scan failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        (0, sync_engine_1.runSyncCycleNow)().catch((err) => {
+            logger_1.logger.warn('main', `Sync after add folder: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return { ok: true, folder };
+    });
+    electron_1.ipcMain.handle('remove-additional-sync-folder', (_event, folderId) => {
+        const settings = (0, settings_repo_1.getSettings)();
+        const next = (settings.additionalSyncFolders || []).filter((f) => f.id !== folderId);
+        (0, settings_repo_1.updateSettings)({ additionalSyncFolders: next });
+        (0, runtime_1.restartWatchers)();
+        return (0, settings_repo_1.getSettings)();
+    });
+    electron_1.ipcMain.handle('resolve-local-path', (_event, storedRelPath) => {
+        const settings = (0, settings_repo_1.getSettings)();
+        return (0, sync_mappings_1.absPathFromStored)(settings, storedRelPath.replace(/\\/g, '/')) || null;
     });
     electron_1.ipcMain.handle('test-connection', async (_event, serverUrl, apiKey) => {
         try {
@@ -265,7 +329,9 @@ function setupIPC() {
         if (!settings.serverUrl || !settings.apiKey)
             return { ok: false, error: 'Not authenticated' };
         const api = new api_client_1.VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
-        const absPath = path_1.default.join(settings.syncRootPath, localRelPath);
+        const absPath = (0, sync_mappings_1.absPathFromStored)(settings, localRelPath.replace(/\\/g, '/'));
+        if (!absPath)
+            return { ok: false, error: 'Unknown local path' };
         try {
             const result = await api.downloadFile(fileId, localRelPath);
             if (!result.ok)

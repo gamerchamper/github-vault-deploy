@@ -78,6 +78,21 @@ export interface SyncSettings {
     autoStart: boolean;
     notificationsEnabled: boolean;
     lastSyncCursor: string | null;
+    /** Extra PC folders synced under /Sync Folder/{name} on the server. */
+    additionalSyncFolders: AdditionalSyncFolder[];
+    /** Persistent agent id for server registration. */
+    agentId: string;
+    /** Last config version applied from server push. */
+    appliedConfigVersion: number;
+}
+/** A local folder synced to /Sync Folder/{name} on the vault server. */
+export interface AdditionalSyncFolder {
+    id: string;
+    localPath: string;
+    /** Folder name on server (defaults to basename of localPath). */
+    name: string;
+    enabled: boolean;
+    addedAt: string;
 }
 export interface SyncState {
     status: 'idle' | 'syncing' | 'error' | 'offline';

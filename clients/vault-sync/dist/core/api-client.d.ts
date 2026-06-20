@@ -12,6 +12,14 @@ export declare class VaultApiClient {
     validateAuth(): Promise<Result<{
         authenticated: boolean;
     }>>;
+    agentRegister(body: Record<string, unknown>): Promise<Result<{
+        agent: unknown;
+    }>>;
+    agentHeartbeat(body: Record<string, unknown>): Promise<Result<{
+        ok: boolean;
+        configVersion: number;
+        config: Record<string, unknown> | null;
+    }>>;
     listFiles(parentPath?: string, limit?: number, offset?: number): Promise<Result<{
         files: FileEntry[];
         total: number;

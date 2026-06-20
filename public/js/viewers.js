@@ -293,6 +293,8 @@ const LiveViewers = {
     document.getElementById('file-view').classList.add('hidden');
     document.getElementById('viewers-panel').classList.remove('hidden');
     document.getElementById('bandwidth-tab')?.classList.add('hidden');
+    document.getElementById('api-keys-tab')?.classList.add('hidden');
+    document.getElementById('agents-tab')?.classList.add('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'viewers');
     });

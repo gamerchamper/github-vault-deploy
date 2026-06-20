@@ -1678,16 +1678,47 @@ async function downloadFileToPath(userId, fileId, outPath, onProgress = null, vi
   return file;
 }
 
-function getFileDetails(userId, fileId, req = null) {
+function getFileDetails(userId, fileId, req = null, viewParam = null) {
+  const { parseViewParam } = require('./view-mode');
+  const view = parseViewParam(viewParam);
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file) throw new Error('File not found');
 
-  const chunks = db.prepare(`
-    SELECT c.chunk_index, c.repo_path, c.sha, c.size, c.plain_size, c.chunk_iv,
-           r.full_name, r.name as repo_name, r.owner, r.is_metadata
-    FROM chunks c JOIN storage_repos r ON c.repo_id = r.id
-    WHERE c.file_id = ? ORDER BY c.chunk_index
-  `).all(fileId);
+  let chunks;
+  let viewLabel = 'Primary';
+  if (view.type === 'backup') {
+    const account = db.prepare('SELECT username FROM linked_accounts WHERE id = ? AND user_id = ?').get(view.accountId, userId);
+    viewLabel = `Backup (@${account?.username || view.accountId})`;
+    chunks = db.prepare(`
+      SELECT c.chunk_index, c.repo_path, cb.sha, c.size, c.plain_size, c.chunk_iv,
+             r.full_name, r.name as repo_name, r.owner, r.is_metadata
+      FROM chunks c
+      JOIN chunk_backups cb ON cb.chunk_id = c.id
+      JOIN storage_repos r ON cb.repo_id = r.id
+      WHERE c.file_id = ? AND r.linked_account_id = ? AND r.repo_role = 'backup'
+      ORDER BY c.chunk_index
+    `).all(fileId, view.accountId);
+  } else if (view.type === 'storage') {
+    const account = db.prepare('SELECT username FROM linked_accounts WHERE id = ? AND user_id = ?').get(view.accountId, userId);
+    viewLabel = `Storage (@${account?.username || view.accountId})`;
+    chunks = db.prepare(`
+      SELECT c.chunk_index, c.repo_path, c.sha, c.size, c.plain_size, c.chunk_iv,
+             r.full_name, r.name as repo_name, r.owner, r.is_metadata
+      FROM chunks c
+      JOIN storage_repos r ON c.repo_id = r.id
+      WHERE c.file_id = ? AND r.linked_account_id = ?
+      ORDER BY c.chunk_index
+    `).all(fileId, view.accountId);
+  } else {
+    chunks = db.prepare(`
+      SELECT c.chunk_index, c.repo_path, c.sha, c.size, c.plain_size, c.chunk_iv,
+             r.full_name, r.name as repo_name, r.owner, r.is_metadata
+      FROM chunks c JOIN storage_repos r ON c.repo_id = r.id
+      WHERE c.file_id = ? ORDER BY c.chunk_index
+    `).all(fileId);
+  }
+
+  const chunkStats = require('./view-mode').getFileChunkStats(userId, fileId, view);
 
   const reposUsed = {};
   for (const c of chunks) {
@@ -1703,6 +1734,14 @@ function getFileDetails(userId, fileId, req = null) {
   const hlsMinSegments = require('./capacity').estimateMinHlsSegmentCount(file.size);
 
   return {
+    view: {
+      id: viewParam || 'primary',
+      type: view.type,
+      label: viewLabel,
+      chunks_total: chunkStats.chunks_total,
+      chunks_available: chunkStats.chunks_available,
+      status: chunkStats.status,
+    },
     file: {
       id: file.id,
       name: file.name,

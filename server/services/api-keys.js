@@ -21,11 +21,11 @@ function createKey(userId, name) {
   const keyHash = hashKey(key);
   const keyPrefix = key.slice(0, 12);
   const result = db.prepare(`
-    INSERT INTO api_keys (user_id, name, key_hash, key_prefix)
-    VALUES (?, ?, ?, ?)
-  `).run(userId, sanitizeName(name), keyHash, keyPrefix);
+    INSERT INTO api_keys (user_id, name, key_hash, key_prefix, key_secret)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(userId, sanitizeName(name), keyHash, keyPrefix, key);
   const row = db.prepare(`
-    SELECT id, name, key_prefix, created_at, last_used_at, revoked_at
+    SELECT id, name, key_prefix, key_secret, created_at, last_used_at, revoked_at
     FROM api_keys WHERE id = ? AND user_id = ?
   `).get(result.lastInsertRowid, userId);
   return { ...row, key };
@@ -33,7 +33,7 @@ function createKey(userId, name) {
 
 function listKeys(userId) {
   return db.prepare(`
-    SELECT id, name, key_prefix, created_at, last_used_at, revoked_at
+    SELECT id, name, key_prefix, key_secret, created_at, last_used_at, revoked_at
     FROM api_keys
     WHERE user_id = ?
     ORDER BY created_at DESC, id DESC

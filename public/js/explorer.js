@@ -25,6 +25,7 @@ class Explorer {
     this._elementCache = new Map();
     this._boundInfiniteScroll = false;
     this.trashCollapsed = new Set();
+    this.treeExpanded = new Set();
     this.displayFiles = [];
     this._navGen = 0;
     this._loadingDepth = 0;
@@ -1718,21 +1719,36 @@ class Explorer {
 
   renderTree(container, folders, basePath) {
     for (const folder of folders) {
+      const hasChildren = !!(folder.children?.length);
+      const expanded = this.treeExpanded.has(folder.path);
       const el = document.createElement('div');
       el.className = 'tree-item';
       el.dataset.path = folder.path;
-      el.innerHTML = `<span>📁</span> ${this.escape(this.displayName(folder))}`;
+      const toggle = hasChildren
+        ? `<button type="button" class="tree-toggle" data-tree-toggle="${this.escape(folder.path)}" aria-label="${expanded ? 'Collapse' : 'Expand'}">${expanded ? '▾' : '▸'}</button>`
+        : '<span class="tree-toggle-spacer"></span>';
+      el.innerHTML = `${toggle}<span class="tree-folder-icon">📁</span> <span class="tree-label">${this.escape(this.displayName(folder))}</span>`;
       if (this.viewMode === 'files' && folder.path === this.currentPath) {
         el.classList.add('selected');
       }
-      el.addEventListener('click', () => {
+      const toggleBtn = el.querySelector('[data-tree-toggle]');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (this.treeExpanded.has(folder.path)) this.treeExpanded.delete(folder.path);
+          else this.treeExpanded.add(folder.path);
+          this.buildFolderTree();
+        });
+      }
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-tree-toggle]')) return;
         this.pushHistory(folder.path);
         this.navigate(folder.path, { viewMode: 'files', type: this.filterType });
       });
       container.appendChild(el);
-      if (folder.children?.length) {
+      if (hasChildren && expanded) {
         const childContainer = document.createElement('div');
-        childContainer.style.paddingLeft = '12px';
+        childContainer.className = 'tree-children';
         this.renderTree(childContainer, folder.children, folder.path);
         container.appendChild(childContainer);
       }

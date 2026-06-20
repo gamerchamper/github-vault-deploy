@@ -11,6 +11,9 @@ const DEFAULTS = {
     autoStart: false,
     notificationsEnabled: true,
     lastSyncCursor: null,
+    additionalSyncFolders: [],
+    agentId: '',
+    appliedConfigVersion: 0,
 };
 function getSettings() {
     const db = (0, database_1.getDatabase)();
@@ -29,6 +32,9 @@ function getSettings() {
         autoStart: map.autoStart === '1',
         notificationsEnabled: map.notificationsEnabled !== '0',
         lastSyncCursor: map.lastSyncCursor || null,
+        additionalSyncFolders: parseAdditionalFolders(map.additionalSyncFolders),
+        agentId: map.agentId || '',
+        appliedConfigVersion: parseInt(map.appliedConfigVersion || '0', 10) || 0,
     };
 }
 function updateSettings(patch) {
@@ -54,7 +60,27 @@ function updateSettings(patch) {
         upsert.run('notificationsEnabled', patch.notificationsEnabled ? '1' : '0');
     if (patch.lastSyncCursor !== undefined)
         upsert.run('lastSyncCursor', patch.lastSyncCursor || '');
+    if (patch.additionalSyncFolders !== undefined) {
+        upsert.run('additionalSyncFolders', JSON.stringify(patch.additionalSyncFolders));
+    }
+    if (patch.agentId !== undefined)
+        upsert.run('agentId', patch.agentId);
+    if (patch.appliedConfigVersion !== undefined)
+        upsert.run('appliedConfigVersion', String(patch.appliedConfigVersion));
     return getSettings();
+}
+function parseAdditionalFolders(raw) {
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed))
+            return [];
+        return parsed.filter((f) => f && typeof f.id === 'string' && typeof f.localPath === 'string');
+    }
+    catch {
+        return [];
+    }
 }
 function parseJsonArray(raw, fallback) {
     if (!raw)

@@ -3683,6 +3683,54 @@ h3 {
 .api-key-main span { color: var(--text-secondary); font-size: 12px; }
 .api-key-revoked { color: #ff6b6b !important; font-weight: 600; }
 .api-key-empty.error { color: #ff6b6b; }
+.api-key-missing { color: var(--text-secondary); font-size: 12px; font-family: Consolas, ui-monospace, monospace; }
+
+.agents-panel { overflow: auto; }
+.agents-list { display: grid; gap: 12px; padding: 0 20px 20px; }
+.agent-card {
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--glass-bg);
+  display: grid;
+  gap: 10px;
+}
+.agent-card-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.agent-meta { color: var(--text-secondary); font-size: 12px; }
+.agent-status { font-size: 12px; font-weight: 600; text-transform: capitalize; }
+.agent-status.agent-online { color: #4ade80; }
+.agent-status.agent-offline { color: var(--text-muted); }
+.agent-field-label { font-size: 12px; color: var(--text-secondary); }
+.agent-sync-root, .agent-folder-name, .agent-folder-path {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: Consolas, ui-monospace, monospace;
+  font-size: 12px;
+}
+.agent-folders-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.agent-folder-row { display: grid; grid-template-columns: 120px 1fr auto; gap: 8px; align-items: center; }
+.agent-folder-empty { color: var(--text-muted); font-size: 12px; }
+.agent-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+
+.tree-toggle {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+.tree-toggle-spacer { width: 18px; flex-shrink: 0; display: inline-block; }
+.tree-children { padding-left: 12px; }
+.tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 760px) {
   .api-key-command-grid,

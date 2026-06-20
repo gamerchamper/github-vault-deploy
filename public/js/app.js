@@ -1695,6 +1695,42 @@ const App = {
     document.getElementById('api-keys-list')?.addEventListener('click', (e) => {
       const revokeId = e.target.closest('[data-revoke-api-key]')?.dataset.revokeApiKey;
       if (revokeId) this.revokeApiKey(revokeId);
+      const copyVal = e.target.closest('[data-copy-value]')?.dataset.copyValue;
+      if (copyVal) this.copyText(copyVal);
+    });
+
+    document.getElementById('btn-refresh-agents')?.addEventListener('click', () => this.loadAgents());
+    document.getElementById('agents-list')?.addEventListener('click', (e) => {
+      const saveBtn = e.target.closest('.agent-save-config');
+      if (saveBtn) {
+        this.saveAgentConfig(saveBtn.dataset.agent);
+        return;
+      }
+      const removeBtn = e.target.closest('.agent-remove');
+      if (removeBtn) {
+        this.removeAgent(removeBtn.dataset.agent);
+        return;
+      }
+      const addBtn = e.target.closest('.agent-add-folder');
+      if (addBtn) {
+        const container = document.querySelector(`[data-agent-folders="${addBtn.dataset.agent}"]`);
+        const empty = container?.querySelector('.agent-folder-empty');
+        if (empty) empty.remove();
+        const row = document.createElement('div');
+        row.className = 'agent-folder-row';
+        row.dataset.agent = addBtn.dataset.agent;
+        row.innerHTML = `
+          <input class="agent-folder-name" type="text" placeholder="Name">
+          <input class="agent-folder-path" type="text" placeholder="Local folder path">
+          <button type="button" class="btn-secondary agent-remove-folder">Remove</button>
+        `;
+        container?.appendChild(row);
+        return;
+      }
+      const removeFolderBtn = e.target.closest('.agent-remove-folder');
+      if (removeFolderBtn) {
+        removeFolderBtn.closest('.agent-folder-row')?.remove();
+      }
     });
 
     document.getElementById('context-menu').addEventListener('click', (e) => {
@@ -1899,6 +1935,10 @@ const App = {
           this.showApiKeysPanel();
           return;
         }
+        if (item.dataset.view === 'agents') {
+          this.showAgentsPanel();
+          return;
+        }
         if (item.dataset.view === 'favorites') {
           this.showFavoritesPanel();
           return;
@@ -1982,6 +2022,7 @@ const App = {
     document.getElementById('file-view').classList.add('hidden');
     document.getElementById('viewers-panel')?.classList.add('hidden');
     document.getElementById('api-keys-tab')?.classList.add('hidden');
+    document.getElementById('agents-tab')?.classList.add('hidden');
     document.getElementById('bandwidth-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'bandwidth');
@@ -1993,11 +2034,24 @@ const App = {
     document.getElementById('file-view').classList.add('hidden');
     document.getElementById('viewers-panel')?.classList.add('hidden');
     document.getElementById('bandwidth-tab')?.classList.add('hidden');
+    document.getElementById('agents-tab')?.classList.add('hidden');
     document.getElementById('api-keys-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'api-keys');
     });
     this.loadApiKeys();
+  },
+
+  showAgentsPanel() {
+    document.getElementById('file-view').classList.add('hidden');
+    document.getElementById('viewers-panel')?.classList.add('hidden');
+    document.getElementById('bandwidth-tab')?.classList.add('hidden');
+    document.getElementById('api-keys-tab')?.classList.add('hidden');
+    document.getElementById('agents-tab')?.classList.remove('hidden');
+    document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
+      el.classList.toggle('active', el.dataset.view === 'agents');
+    });
+    this.loadAgents();
   },
 
   showFavoritesPanel() {
@@ -2019,6 +2073,7 @@ const App = {
     document.getElementById('viewers-panel')?.classList.add('hidden');
     document.getElementById('bandwidth-tab')?.classList.add('hidden');
     document.getElementById('api-keys-tab')?.classList.add('hidden');
+    document.getElementById('agents-tab')?.classList.add('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === activeView);
     });
@@ -2063,11 +2118,16 @@ const App = {
     const revoked = !!key.revoked_at;
     const created = key.created_at ? new Date(key.created_at).toLocaleString() : 'Unknown';
     const lastUsed = key.last_used_at ? new Date(key.last_used_at).toLocaleString() : 'Never';
+    const fullKey = key.key_secret || key.key || '';
+    const keyDisplay = fullKey
+      ? `<div class="api-key-copy-row"><input class="api-key-value" type="text" readonly value="${this.escapeHtml(fullKey)}" spellcheck="false"><button type="button" class="btn-secondary" data-copy-value="${this.escapeHtml(fullKey)}">Copy</button></div>`
+      : `<span class="api-key-missing">Key not stored — create a new key to see the full value</span>`;
     return `
       <div class="api-key-row ${revoked ? 'revoked' : ''}">
         <div class="api-key-main">
           <strong>${this.escapeHtml(key.name)}</strong>
-          <span>${this.escapeHtml(key.key_prefix)}... · created ${this.escapeHtml(created)} · last used ${this.escapeHtml(lastUsed)}</span>
+          ${keyDisplay}
+          <span>created ${this.escapeHtml(created)} · last used ${this.escapeHtml(lastUsed)}</span>
           ${revoked ? '<span class="api-key-revoked">Revoked</span>' : ''}
         </div>
         <button type="button" class="btn-secondary" data-revoke-api-key="${key.id}" ${revoked ? 'disabled' : ''}>Revoke</button>
@@ -2090,7 +2150,7 @@ const App = {
         command.textContent = `npm run client -- auth --url ${serverUrl} --api-key ${key.key}`;
         newBox.classList.remove('hidden');
         input.value = '';
-        this.toast('API key created. Copy it now.', 'success');
+        this.toast('API key created.', 'success');
         await this.loadApiKeys();
       } catch (err) {
         this.toast(err.message, 'error');
@@ -2104,6 +2164,104 @@ const App = {
       await API.auth.revokeApiKey(id);
       this.toast('API key revoked', 'success');
       await this.loadApiKeys();
+    } catch (err) {
+      this.toast(err.message, 'error');
+    }
+  },
+
+  async loadAgents() {
+    const list = document.getElementById('agents-list');
+    if (!list) return;
+    list.innerHTML = '<div class="api-key-empty">Loading agents...</div>';
+    try {
+      const { agents } = await API.agents.list();
+      if (!agents.length) {
+        list.innerHTML = '<div class="api-key-empty">No sync clients connected yet. Start Vault Sync with an API key to register an agent.</div>';
+        return;
+      }
+      list.innerHTML = agents.map((agent) => this.renderAgentCard(agent)).join('');
+    } catch (err) {
+      list.innerHTML = `<div class="api-key-empty error">${this.escapeHtml(err.message)}</div>`;
+    }
+  },
+
+  renderAgentCard(agent) {
+    const cfg = agent.desired_config || agent.reported_config || {};
+    const syncRoot = cfg.syncRootPath || '';
+    const extra = Array.isArray(cfg.additionalSyncFolders) ? cfg.additionalSyncFolders : [];
+    const lastSeen = agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : 'Never';
+    const statusClass = agent.status === 'online' ? 'agent-online' : 'agent-offline';
+    const extraRows = extra.map((f, i) => `
+      <div class="agent-folder-row" data-agent="${agent.id}" data-folder-id="${this.escapeHtml(f.id || '')}" data-folder-index="${i}">
+        <input class="agent-folder-name" type="text" value="${this.escapeHtml(f.name || '')}" placeholder="Name">
+        <input class="agent-folder-path" type="text" value="${this.escapeHtml(f.localPath || '')}" placeholder="Local folder path">
+        <button type="button" class="btn-secondary agent-remove-folder" data-agent="${agent.id}" data-folder-index="${i}">Remove</button>
+      </div>
+    `).join('');
+    return `
+      <div class="agent-card" data-agent-id="${agent.id}">
+        <div class="agent-card-header">
+          <div>
+            <strong>${this.escapeHtml(agent.name || 'Sync client')}</strong>
+            <span class="agent-meta">${this.escapeHtml(agent.hostname || '')} · ${this.escapeHtml(agent.platform || '')} · ${this.escapeHtml(agent.version || '')}</span>
+          </div>
+          <span class="agent-status ${statusClass}">${this.escapeHtml(agent.status)}</span>
+        </div>
+        <div class="agent-meta">Last seen: ${this.escapeHtml(lastSeen)}</div>
+        <label class="agent-field-label">Main sync folder</label>
+        <input class="agent-sync-root" type="text" value="${this.escapeHtml(syncRoot)}" placeholder="C:\\Users\\you\\GitHub Vault">
+        <div class="agent-folders-header">
+          <span>Additional sync folders</span>
+          <button type="button" class="btn-secondary agent-add-folder" data-agent="${agent.id}">Add folder</button>
+        </div>
+        <div class="agent-folders" data-agent-folders="${agent.id}">
+          ${extraRows || '<div class="agent-folder-empty">No additional folders</div>'}
+        </div>
+        <div class="agent-actions">
+          <button type="button" class="btn-primary agent-save-config" data-agent="${agent.id}">Save & push to client</button>
+          <button type="button" class="btn-secondary agent-remove" data-agent="${agent.id}">Remove agent</button>
+        </div>
+      </div>
+    `;
+  },
+
+  collectAgentConfig(agentId) {
+    const card = document.querySelector(`.agent-card[data-agent-id="${agentId}"]`);
+    if (!card) return null;
+    const syncRootPath = card.querySelector('.agent-sync-root')?.value?.trim() || '';
+    const folders = [];
+    card.querySelectorAll('.agent-folder-row').forEach((row) => {
+      const localPath = row.querySelector('.agent-folder-path')?.value?.trim();
+      if (!localPath) return;
+      const name = row.querySelector('.agent-folder-name')?.value?.trim() || localPath.split(/[/\\]/).pop();
+      folders.push({
+        id: row.dataset.folderId || crypto.randomUUID(),
+        name,
+        localPath,
+        enabled: true,
+      });
+    });
+    return { syncRootPath, additionalSyncFolders: folders };
+  },
+
+  async saveAgentConfig(agentId) {
+    const config = this.collectAgentConfig(agentId);
+    if (!config) return;
+    try {
+      await API.agents.saveConfig(agentId, config);
+      this.toast('Agent config saved — client will apply on next heartbeat', 'success');
+      await this.loadAgents();
+    } catch (err) {
+      this.toast(err.message, 'error');
+    }
+  },
+
+  async removeAgent(agentId) {
+    if (!confirm('Remove this agent from the list? The client can register again later.')) return;
+    try {
+      await API.agents.remove(agentId);
+      this.toast('Agent removed', 'success');
+      await this.loadAgents();
     } catch (err) {
       this.toast(err.message, 'error');
     }
@@ -2364,19 +2522,27 @@ const App = {
   async showDetails(file) {
     const modal = document.getElementById('details-modal');
     const body = document.getElementById('details-body');
+    const view = explorer?.accountView || 'primary';
     modal.classList.remove('hidden');
     body.innerHTML = '<div class="details-loading">Loading...</div>';
 
     try {
-      const d = await API.files.details(file.id);
+      const d = await API.files.details(file.id, view);
+      const viewInfo = d.view && d.view.type !== 'primary'
+        ? `<span>Account view</span><span>${d.view.label} (${d.view.chunks_available}/${d.view.chunks_total} chunks)</span>`
+        : '';
+      const chunkCountLabel = d.view && d.view.type !== 'primary'
+        ? `${d.view.chunks_available} / ${d.view.chunks_total}`
+        : String(d.file.chunk_count);
       body.innerHTML = `
         <div class="details-section">
           <h3>${d.file.name}</h3>
           <div class="details-grid">
             <span>Path</span><span>${d.file.path}</span>
+            ${viewInfo}
             <span>Size</span><span>${formatSize(d.file.size)}</span>
             <span>Type</span><span>${d.file.mime_type || 'unknown'}</span>
-            <span>Chunks</span><span>${d.file.chunk_count}</span>
+            <span>Chunks</span><span>${chunkCountLabel}</span>
             ${d.file.has_hls || d.file.hls_segment_count ? `
             <span>HLS</span><span>${d.file.has_hls ? 'Ready' : 'Incomplete'} — ${d.file.hls_segment_count} segment(s)${d.file.hls_duration_sec ? `, ${explorer.formatHlsDuration(d.file.hls_duration_sec)}` : ''}${d.file.hls_min_segments > 1 ? ` (expected ≥${d.file.hls_min_segments})` : ''}</span>
             ` : ''}
@@ -2385,11 +2551,14 @@ const App = {
           </div>
         </div>
         <div class="details-section">
-          <h4>Repos used</h4>
-          ${Object.entries(d.repos_used).map(([r, n]) => `<div class="plan-repo-row"><span>${r}</span><span>${n} chunks</span></div>`).join('')}
+          <h4>Repos used${d.view && d.view.type !== 'primary' ? ` (${d.view.label})` : ''}</h4>
+          ${Object.keys(d.repos_used).length
+    ? Object.entries(d.repos_used).map(([r, n]) => `<div class="plan-repo-row"><span>${r}</span><span>${n} chunks</span></div>`).join('')
+    : '<p class="plan-error">No chunks in this account view.</p>'}
         </div>
         <div class="details-section details-chunks">
-          <h4>Chunk map</h4>
+          <h4>Chunk map${d.view && d.view.type !== 'primary' ? ` — ${d.view.label}` : ''}</h4>
+          ${d.chunks.length ? `
           <table class="chunk-table">
             <thead><tr><th>#</th><th>Repo</th><th>Path</th><th>Size</th><th>SHA</th></tr></thead>
             <tbody>${d.chunks.map(c => `
@@ -2401,7 +2570,7 @@ const App = {
                 <td class="mono sha-cell">${(c.sha || '').slice(0, 8)}…</td>
               </tr>`).join('')}
             </tbody>
-          </table>
+          </table>` : '<p class="plan-error">No chunks stored for this account view.</p>'}
         </div>
       `;
     } catch (err) {
@@ -2507,6 +2676,16 @@ const App = {
       storageInput.value = '';
       backupInput.value = '';
       this.toast(err.message, 'error');
+    }
+  },
+
+  async copyText(text) {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.toast('Copied', 'success');
+    } catch {
+      this.toast('Copy failed', 'error');
     }
   },
 
@@ -2971,6 +3150,7 @@ document.getElementById('btn-migrate-mysql')?.addEventListener('click', async ()
     { icon: '🔄', label: 'Refresh', action: () => App.refreshAll(), keywords: 'reload' },
     { icon: '⚙️', label: 'Storage Repos', action: () => App.showRepoModal(), keywords: 'settings repos' },
     { icon: '🔑', label: 'API Keys', action: () => App.showApiKeysPanel(), keywords: 'keys tokens' },
+    { icon: '🤖', label: 'Agents', action: () => App.showAgentsPanel(), keywords: 'sync clients' },
     { icon: '📊', label: 'Bandwidth', action: () => App.showBandwidthPanel(), keywords: 'stats' },
     { icon: '👁️', label: 'Live Viewers', action: () => App.showViewersPanel(), keywords: 'presence' },
   ];
@@ -3093,6 +3273,17 @@ document.getElementById('btn-migrate-mysql')?.addEventListener('click', async ()
     document.getElementById('detail-size').textContent = file.is_folder ? '—' : formatSize(file.size || 0);
     document.getElementById('detail-date').textContent = file.created_at ? new Date(file.created_at).toLocaleString() : '—';
     document.getElementById('detail-chunks').textContent = file.is_folder ? '—' : (file.chunk_count || 0);
+    if (!file.is_folder) {
+      const view = explorer?.accountView || 'primary';
+      const chunksEl = document.getElementById('detail-chunks');
+      API.files.details(file.id, view).then((d) => {
+        if (d.view && d.view.type !== 'primary') {
+          chunksEl.textContent = `${d.view.chunks_available} / ${d.view.chunks_total} (${d.view.label})`;
+        } else {
+          chunksEl.textContent = String(d.file.chunk_count || 0);
+        }
+      }).catch(() => {});
+    }
     document.getElementById('detail-mime').textContent = file.mime_type || '—';
     document.getElementById('detail-hash').textContent = file.content_hash ? file.content_hash.slice(0, 20) + '...' : '—';
     document.getElementById('detail-enc').textContent = file.encryption_mode || 'chunk';

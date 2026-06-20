@@ -10,6 +10,9 @@ const DEFAULTS: Omit<SettingsType, 'syncRootPath' | 'serverUrl' | 'apiKey'> = {
   autoStart: false,
   notificationsEnabled: true,
   lastSyncCursor: null,
+  additionalSyncFolders: [],
+  agentId: '',
+  appliedConfigVersion: 0,
 };
 
 export function getSettings(): SettingsType {
@@ -29,6 +32,9 @@ export function getSettings(): SettingsType {
     autoStart: map.autoStart === '1',
     notificationsEnabled: map.notificationsEnabled !== '0',
     lastSyncCursor: map.lastSyncCursor || null,
+    additionalSyncFolders: parseAdditionalFolders(map.additionalSyncFolders),
+    agentId: map.agentId || '',
+    appliedConfigVersion: parseInt(map.appliedConfigVersion || '0', 10) || 0,
   };
 }
 
@@ -46,8 +52,24 @@ export function updateSettings(patch: Partial<SettingsType>): SettingsType {
   if (patch.autoStart !== undefined) upsert.run('autoStart', patch.autoStart ? '1' : '0');
   if (patch.notificationsEnabled !== undefined) upsert.run('notificationsEnabled', patch.notificationsEnabled ? '1' : '0');
   if (patch.lastSyncCursor !== undefined) upsert.run('lastSyncCursor', patch.lastSyncCursor || '');
+  if (patch.additionalSyncFolders !== undefined) {
+    upsert.run('additionalSyncFolders', JSON.stringify(patch.additionalSyncFolders));
+  }
+  if (patch.agentId !== undefined) upsert.run('agentId', patch.agentId);
+  if (patch.appliedConfigVersion !== undefined) upsert.run('appliedConfigVersion', String(patch.appliedConfigVersion));
 
   return getSettings();
+}
+
+function parseAdditionalFolders(raw: string | undefined): SettingsType['additionalSyncFolders'] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((f) => f && typeof f.id === 'string' && typeof f.localPath === 'string');
+  } catch {
+    return [];
+  }
 }
 
 function parseJsonArray(raw: string | undefined, fallback: string[]): string[] {

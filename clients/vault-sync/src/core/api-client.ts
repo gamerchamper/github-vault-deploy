@@ -53,6 +53,22 @@ export class VaultApiClient {
     return this.request('/auth/me');
   }
 
+  async agentRegister(body: Record<string, unknown>): Promise<Result<{ agent: unknown }>> {
+    return this.request('/api/agents/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async agentHeartbeat(body: Record<string, unknown>): Promise<Result<{ ok: boolean; configVersion: number; config: Record<string, unknown> | null }>> {
+    return this.request('/api/agents/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   async listFiles(parentPath = '/', limit = 500, offset = 0): Promise<Result<{ files: FileEntry[]; total: number; hasMore: boolean; nextOffset: number }>> {
     const params = new URLSearchParams({ path: parentPath, limit: String(limit), offset: String(offset), sort: 'name', order: 'ASC' });
     return this.request(`/api/files/list?${params}`);

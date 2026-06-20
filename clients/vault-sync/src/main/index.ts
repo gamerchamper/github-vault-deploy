@@ -5,16 +5,27 @@ import { openDatabase, closeDatabase, getDatabase } from '../db/database';
 import { getSettings, updateSettings } from '../db/settings-repo';
 import * as queueRepo from '../db/queue-repo';
 import * as fileTreeRepo from '../db/file-tree-repo';
-import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange, scanLocalFile, runSyncCycleNow, handleWatcherEvent } from '../core/sync-engine';
-import { startWatcher, stopWatcher } from '../core/file-watcher';
+import { getSyncState, startSyncLoop, stopSyncLoop, onSyncStateChange, scanLocalFile, runSyncCycleNow, handleWatcherEvent, scanAdditionalFolderNow } from '../core/sync-engine';
+import { startAllWatchers, stopWatcher } from '../core/file-watcher';
 import { startProcessing, stopProcessing, setProgressHandler, resetFolderCache, kickQueue } from '../core/upload-queue';
 import { VaultApiClient } from '../core/api-client';
+import { ensureSyncContainerOnServer, registerAdditionalFolderRoots } from '../core/folder-sync';
 import { logger } from '../services/logger';
 import { computeBufferHash } from '../services/hasher';
+import { startAgentClient } from '../core/agent-client';
+import { collectWatchRoots, onRemoteConfigApplied, restartWatchers } from '../core/runtime';
+import {
+  createAdditionalFolder,
+  pathsConflict,
+  resolveAbsPathToStored,
+  absPathFromStored,
+  getEnabledAdditionalFolders,
+} from '../services/sync-mappings';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let dataDir: string;
+let stopAgentClient: (() => void) | null = null;
 
 function getDefaultDataDir(): string {
   const userData = app.getPath('userData');
@@ -77,7 +88,10 @@ app.whenReady().then(() => {
     }
   });
 
-  startWatcher(settings.syncRootPath, (event, filePath) => {
+  startAllWatchers(collectWatchRoots(), (absPath) => {
+    const s = getSettings();
+    return resolveAbsPathToStored(s, absPath);
+  }, (event, filePath) => {
     handleWatcherEvent(event, filePath).catch((err) => {
       logger.warn('watcher', `Event failed (${event} ${filePath}): ${err instanceof Error ? err.message : String(err)}`);
     });
@@ -87,6 +101,10 @@ app.whenReady().then(() => {
   kickQueue();
   startSyncLoop().catch((err) => logger.error('main', `Sync start error: ${err.message}`));
 
+  stopAgentClient = startAgentClient({
+    onRemoteConfig: () => onRemoteConfigApplied(),
+  });
+
   logger.info('main', 'App started');
 });
 
@@ -95,6 +113,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  stopAgentClient?.();
   stopSyncLoop();
   stopWatcher();
   stopProcessing();
@@ -200,6 +219,7 @@ function setupIPC(): void {
   ipcMain.handle('update-settings', (_event, patch: Record<string, unknown>) => {
     updateSettings(patch as any);
     resetFolderCache();
+    restartWatchers();
     return getSettings();
   });
 
@@ -217,6 +237,62 @@ function setupIPC(): void {
     });
     if (result.canceled || !result.filePaths.length) return null;
     return result.filePaths[0];
+  });
+
+  ipcMain.handle('pick-additional-sync-folder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Select folder to sync to Sync Folder on server',
+    });
+    if (result.canceled || !result.filePaths.length) return { ok: false as const };
+    return { ok: true as const, path: result.filePaths[0] };
+  });
+
+  ipcMain.handle('add-additional-sync-folder', async (_event, localPath: string) => {
+    if (!localPath || !fs.existsSync(localPath)) {
+      return { ok: false, error: 'Folder not found' };
+    }
+    const settings = getSettings();
+    const conflict = pathsConflict(settings, localPath);
+    if (conflict) return { ok: false, error: conflict };
+
+    const folder = createAdditionalFolder(localPath);
+    const next = [...(settings.additionalSyncFolders || []), folder];
+    updateSettings({ additionalSyncFolders: next });
+
+    if (settings.serverUrl && settings.apiKey) {
+      const api = new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
+      await ensureSyncContainerOnServer(api);
+    }
+
+    resetFolderCache();
+    restartWatchers();
+    await registerAdditionalFolderRoots();
+    try {
+      await scanAdditionalFolderNow(folder.id);
+      kickQueue();
+      logger.info('main', `Additional folder queued for sync: ${folder.name}`);
+    } catch (err) {
+      logger.error('main', `Additional folder scan failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    runSyncCycleNow().catch((err) => {
+      logger.warn('main', `Sync after add folder: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
+    return { ok: true, folder };
+  });
+
+  ipcMain.handle('remove-additional-sync-folder', (_event, folderId: string) => {
+    const settings = getSettings();
+    const next = (settings.additionalSyncFolders || []).filter((f) => f.id !== folderId);
+    updateSettings({ additionalSyncFolders: next });
+    restartWatchers();
+    return getSettings();
+  });
+
+  ipcMain.handle('resolve-local-path', (_event, storedRelPath: string) => {
+    const settings = getSettings();
+    return absPathFromStored(settings, storedRelPath.replace(/\\/g, '/')) || null;
   });
 
   ipcMain.handle('test-connection', async (_event, serverUrl: string, apiKey: string) => {
@@ -248,7 +324,8 @@ function setupIPC(): void {
     if (!settings.serverUrl || !settings.apiKey) return { ok: false, error: 'Not authenticated' };
 
     const api = new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
-    const absPath = path.join(settings.syncRootPath, localRelPath);
+    const absPath = absPathFromStored(settings, localRelPath.replace(/\\/g, '/'));
+    if (!absPath) return { ok: false, error: 'Unknown local path' };
 
     try {
       const result = await api.downloadFile(fileId, localRelPath);

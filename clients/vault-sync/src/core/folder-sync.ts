@@ -5,7 +5,16 @@ import { getSettings } from '../db/settings-repo';
 import { VaultApiClient } from './api-client';
 import { RemoteListingCache } from './remote-listing-cache';
 import { logger } from '../services/logger';
-import { normalizeRelPath, toAbsPath, parentPathFromRel } from '../services/paths';
+import { normalizeRelPath } from '../services/paths';
+import {
+  absPathFromStored,
+  isAdditionalStoredRel,
+  mappingIdFromStored,
+  remotePrefixForFolderName,
+  findMapping,
+  relWithinSegments,
+  SYNC_CONTAINER_NAME,
+} from '../services/sync-mappings';
 
 interface RemoteFolder {
   id: string;
@@ -100,18 +109,49 @@ async function createRemoteFolder(
   return null;
 }
 
+async function ensureRemotePath(
+  api: VaultApiClient,
+  remoteCache: RemoteListingCache,
+  remotePath: string,
+): Promise<boolean> {
+  const normalized = remotePath.replace(/\\/g, '/');
+  if (normalized === '/' || !normalized) return true;
+
+  const segments = normalized.replace(/^\//, '').split('/').filter(Boolean);
+  let current = '/';
+  for (const seg of segments) {
+    let remote = await resolveRemoteFolder(remoteCache, current, seg);
+    if (!remote) {
+      remote = await createRemoteFolder(api, remoteCache, current, seg, normalized);
+    }
+    if (!remote) return false;
+    current = remote.path;
+  }
+  return true;
+}
+
+/** Ensure the server has /Sync Folder before syncing additional PC folders. */
+export async function ensureSyncContainerOnServer(api?: VaultApiClient): Promise<boolean> {
+  const settings = getSettings();
+  if (!settings.serverUrl || !settings.apiKey) return false;
+  const client = api ?? new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
+  const cache = new RemoteListingCache(client);
+  return ensureRemotePath(client, cache, `/${SYNC_CONTAINER_NAME}`);
+}
+
 /** Ensure a local folder path exists on the server (creates parents as needed). */
 export async function syncLocalFolder(
   relPath: string,
   remoteCache?: RemoteListingCache,
 ): Promise<boolean> {
   const settings = getSettings();
-  if (!settings.syncRootPath || !settings.serverUrl || !settings.apiKey) return false;
+  if (!settings.serverUrl || !settings.apiKey) return false;
 
   const normalized = normalizeRelPath(relPath);
-  if (!normalized) return false;
+  if (!normalized && !isAdditionalStoredRel(relPath)) return false;
 
-  const absPath = toAbsPath(settings.syncRootPath, normalized);
+  const absPath = absPathFromStored(settings, normalized);
+  if (!absPath) return false;
   try {
     if (!fs.existsSync(absPath) || !fs.statSync(absPath).isDirectory()) return false;
   } catch {
@@ -121,16 +161,29 @@ export async function syncLocalFolder(
   const api = new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
   const cache = remoteCache ?? new RemoteListingCache(api);
 
-  const segments = normalized.split('/').filter(Boolean);
-  let builtRel = '';
+  const mappingId = mappingIdFromStored(normalized);
+  const segments = relWithinSegments(normalized);
+
+  if (mappingId) {
+    const mapping = findMapping(settings, mappingId);
+    if (!mapping) return false;
+    await ensureRemotePath(api, cache, `/${SYNC_CONTAINER_NAME}`);
+    await ensureRemotePath(api, cache, remotePrefixForFolderName(mapping.name));
+  }
+
+  let builtRel = mappingId ? `@sync/${mappingId}` : '';
+  let builtRemote = mappingId
+    ? remotePrefixForFolderName(findMapping(settings, mappingId!)!.name)
+    : '/';
   let allOk = true;
 
   for (const seg of segments) {
-    builtRel = builtRel ? `${builtRel}/${seg}` : seg;
-    const parentRemote = parentPathFromRel(builtRel);
+    builtRel = builtRel ? `${builtRel}/${seg}` : (mappingId ? `@sync/${mappingId}/${seg}` : seg);
+    const parentRemote = builtRemote;
     const existing = fileTreeRepo.getFileByRelPath(builtRel);
 
     if (existing?.fileId && existing.syncStatus === 'synced') {
+      builtRemote = existing.remotePath || `${parentRemote}/${seg}`.replace(/\/+/g, '/');
       continue;
     }
 
@@ -141,10 +194,24 @@ export async function syncLocalFolder(
 
     if (remote) {
       upsertSyncedFolder(builtRel, remote);
+      builtRemote = remote.path;
       logger.info('sync', `Folder on server: ${builtRel}`);
     } else {
       upsertLocalOnlyFolder(builtRel, seg);
       allOk = false;
+    }
+  }
+
+  if (mappingId && segments.length === 0) {
+    const mapping = findMapping(settings, mappingId);
+    if (mapping) {
+      const stored = `@sync/${mappingId}`;
+      let remote = await resolveRemoteFolder(cache, `/${SYNC_CONTAINER_NAME}`, mapping.name);
+      if (!remote) {
+        remote = await createRemoteFolder(api, cache, `/${SYNC_CONTAINER_NAME}`, mapping.name, stored);
+      }
+      if (remote) upsertSyncedFolder(stored, remote);
+      else allOk = false;
     }
   }
 
@@ -154,7 +221,7 @@ export async function syncLocalFolder(
 /** Sync all local-only folders (parents before children). */
 export async function syncLocalOnlyFolders(remoteCache?: RemoteListingCache): Promise<number> {
   const settings = getSettings();
-  if (!settings.syncRootPath || !settings.serverUrl || !settings.apiKey) return 0;
+  if (!settings.serverUrl || !settings.apiKey) return 0;
 
   const api = new VaultApiClient({ serverUrl: settings.serverUrl, apiKey: settings.apiKey });
   const cache = remoteCache ?? new RemoteListingCache(api);
@@ -165,8 +232,8 @@ export async function syncLocalOnlyFolders(remoteCache?: RemoteListingCache): Pr
 
   let synced = 0;
   for (const folder of folders) {
-    const absPath = toAbsPath(settings.syncRootPath, folder.localRelPath);
-    if (!fs.existsSync(absPath)) continue;
+    const absPath = absPathFromStored(settings, folder.localRelPath);
+    if (!absPath || !fs.existsSync(absPath)) continue;
     const ok = await syncLocalFolder(folder.localRelPath, cache);
     if (ok) synced += 1;
   }
@@ -175,4 +242,32 @@ export async function syncLocalOnlyFolders(remoteCache?: RemoteListingCache): Pr
     logger.info('sync', `Synced ${synced} local folder(s) to server`);
   }
   return synced;
+}
+
+export async function registerAdditionalFolderRoots(): Promise<void> {
+  const settings = getSettings();
+  const db = getDatabase();
+  for (const mapping of settings.additionalSyncFolders || []) {
+    if (!mapping.enabled || !mapping.localPath) continue;
+    const stored = `@sync/${mapping.id}`;
+    const existing = fileTreeRepo.getFileByRelPath(stored);
+    if (!existing) {
+      fileTreeRepo.upsertFile(db, {
+        fileId: null,
+        localRelPath: stored,
+        remotePath: remotePrefixForFolderName(mapping.name),
+        name: mapping.name,
+        size: 0,
+        mimeType: null,
+        isFolder: true,
+        localMtimeMs: null,
+        localHash: null,
+        remoteHash: null,
+        remoteUpdatedAt: null,
+        syncStatus: 'local_only',
+        syncTaskId: null,
+        syncError: null,
+      });
+    }
+  }
 }

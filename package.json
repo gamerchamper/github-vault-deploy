@@ -24,6 +24,8 @@
     "deploy:push": "node scripts/push-deploy-repo.js",
     "deploy:push:dry-run": "node scripts/push-deploy-repo.js --dry-run",
     "plex:sync": "node clients/plex-sync/sync.js",
+    "sync:cli": "npm --prefix clients/vault-sync run start:cli",
+    "sync:build": "npm --prefix clients/vault-sync run build",
     "plex:integrate": "node scripts/plex-integrate.js",
     "plex:install-agent": "node scripts/plex-install-agent.js",
     "plex:audit": "node scripts/plex-audit.js",

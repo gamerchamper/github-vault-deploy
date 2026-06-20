@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub Vault</title>
-  <link rel="stylesheet" href="/css/explorer.css?v=1.0.24">
+  <link rel="stylesheet" href="/css/explorer.css?v=1.0.25">
   <link rel="stylesheet" href="/css/playlists.css?v=1.0.2">
   <link rel="stylesheet" href="/css/plyr.css?v=1.0.0">
   <link rel="manifest" href="/manifest.webmanifest?v=1.0.0">
@@ -274,6 +274,9 @@
           <div class="sidebar-item" data-view="api-keys">
             <span class="sidebar-icon">🔑</span> API keys
           </div>
+          <div class="sidebar-item" data-view="agents">
+            <span class="sidebar-icon">🤖</span> Agents
+          </div>
         </div>
         <div class="sidebar-section">
           <div class="sidebar-header">Folders</div>
@@ -370,7 +373,7 @@
           </div>
         </div>
         <div id="api-key-new" class="api-key-new hidden">
-          <div class="api-key-new-header">New API key created. Copy it now; it will not be shown again.</div>
+          <div class="api-key-new-header">New API key created.</div>
           <div class="api-key-copy-row">
             <input id="api-key-new-value" class="api-key-value" type="text" readonly spellcheck="false" aria-label="New API key value">
             <button type="button" class="btn-primary" data-copy-target="api-key-new-value">Copy key</button>
@@ -391,6 +394,20 @@
           <strong>Client setup:</strong> create a key, copy the configure command, run it in the project folder, then launch the desktop uploader.
         </div>
         <div id="api-keys-list" class="api-keys-list"></div>
+      </div>
+
+      <!-- Sync Agents -->
+      <div class="viewers-panel agents-panel hidden" id="agents-tab">
+        <div class="viewers-header">
+          <div>
+            <h2 class="viewers-title">Agents</h2>
+            <p class="viewers-subtitle">Connected Vault Sync clients. Edit sync folders here — changes are pushed to the client on its next heartbeat.</p>
+          </div>
+          <button id="btn-refresh-agents" class="btn-secondary" type="button">Refresh</button>
+        </div>
+        <div id="agents-list" class="agents-list">
+          <div class="api-key-empty">Loading agents...</div>
+        </div>
       </div>
 
       <!-- File View -->
@@ -1230,7 +1247,7 @@
 
   <script src="/js/plyr.polyfilled.min.js?v=1.0.0"></script>
   <script src="/js/media-player.js?v=1.0.8"></script>
-  <script src="/js/api.js?v=1.0.14"></script>
+  <script src="/js/api.js?v=1.0.15"></script>
   <script src="/js/playback-memory.js?v=1.0.1"></script>
   <script src="/js/pdf-viewer.js?v=1.0.0"></script>
   <script src="/js/image-viewer.js?v=1.0.0"></script>
@@ -1257,14 +1274,14 @@
   <script src="/js/playlists.js?v=1.0.2"></script>
   <script src="/js/viewer-panel-layout.js?v=1.0.9"></script>
   <script src="/js/viewer.js?v=1.0.5"></script>
-  <script src="/js/viewers.js?v=1.0.0"></script>
+  <script src="/js/viewers.js?v=1.0.1"></script>
   <script src="/js/bandwidth.js?v=1.0.0"></script>
-  <script src="/js/explorer.js?v=1.0.8"></script>
+  <script src="/js/explorer.js?v=1.0.9"></script>
   <script src="/js/upload-center.js?v=1.0.0"></script>
   <script src="/js/global-search.js?v=1.0.0"></script>
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
   <script src="/js/local-upload.js?v=1.0.2"></script>
   <script src="/js/plex-local-sync.js?v=1.0.3"></script>
-  <script src="/js/app.js?v=1.0.27"></script>
+  <script src="/js/app.js?v=1.0.28"></script>
 </body>
 </html>

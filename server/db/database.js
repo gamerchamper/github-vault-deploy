@@ -378,4 +378,29 @@ try {
   `);
 } catch { /* exists */ }
 
+ensureColumn('api_keys', 'key_secret', 'TEXT');
+
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_agents (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      api_key_id INTEGER,
+      name TEXT NOT NULL,
+      hostname TEXT,
+      platform TEXT,
+      client_type TEXT DEFAULT 'vault-sync',
+      version TEXT,
+      last_seen_at DATETIME,
+      config_version INTEGER DEFAULT 0,
+      desired_config_json TEXT,
+      applied_config_version INTEGER DEFAULT 0,
+      reported_config_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_agents_user ON sync_agents(user_id, last_seen_at DESC);
+  `);
+} catch { /* exists */ }
+
 module.exports = db;

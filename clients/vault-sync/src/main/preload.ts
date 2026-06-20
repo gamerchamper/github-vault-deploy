@@ -5,6 +5,14 @@ contextBridge.exposeInMainWorld('vaultSync', {
   updateSettings: (patch: Record<string, unknown>): Promise<unknown> => ipcRenderer.invoke('update-settings', patch),
   getSyncState: (): Promise<unknown> => ipcRenderer.invoke('get-sync-state'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('pick-folder'),
+  pickAdditionalSyncFolder: (): Promise<{ ok: boolean; path?: string }> =>
+    ipcRenderer.invoke('pick-additional-sync-folder'),
+  addAdditionalSyncFolder: (localPath: string): Promise<{ ok: boolean; error?: string; folder?: unknown }> =>
+    ipcRenderer.invoke('add-additional-sync-folder', localPath),
+  removeAdditionalSyncFolder: (folderId: string): Promise<unknown> =>
+    ipcRenderer.invoke('remove-additional-sync-folder', folderId),
+  resolveLocalPath: (storedRelPath: string): Promise<string | null> =>
+    ipcRenderer.invoke('resolve-local-path', storedRelPath),
   testConnection: (serverUrl: string, apiKey: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('test-connection', serverUrl, apiKey),
   getQueue: (): Promise<unknown[]> => ipcRenderer.invoke('get-queue'),
