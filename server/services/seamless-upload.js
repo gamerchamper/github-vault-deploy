@@ -421,19 +421,26 @@ async function runHlsFromStaging(userId, fileId, file, staging, taskId, convertH
   }
 
   const localSource = fs.existsSync(staging) ? staging : null;
-  await hlsConvert.convertFile(userId, fileId, (p) => {
-    tasks.update(hlsTaskId, userId, { ...p, status: 'processing' });
-    if (p.lastLog) tasks.appendLog(hlsTaskId, userId, p.lastLog);
-    if (p.percent != null) {
-      tasks.update(taskId, userId, {
-        phase: p.phase === 'uploading' ? 'hls-upload' : 'hls-convert',
-        percent: Math.max(MAX_PROCESS_PERCENT, Math.min(99, p.percent)),
-      });
-    }
-  }, hlsTaskId, localSource ? { localSourcePath: localSource } : {});
+  try {
+    await hlsConvert.convertFile(userId, fileId, (p) => {
+      tasks.update(hlsTaskId, userId, { ...p, status: 'processing' });
+      if (p.lastLog) tasks.appendLog(hlsTaskId, userId, p.lastLog);
+      if (p.percent != null) {
+        tasks.update(taskId, userId, {
+          phase: p.phase === 'uploading' ? 'hls-upload' : 'hls-convert',
+          percent: Math.max(MAX_PROCESS_PERCENT, Math.min(99, p.percent)),
+        });
+      }
+    }, hlsTaskId, localSource ? { localSourcePath: localSource } : {});
 
-  tasks.update(hlsTaskId, userId, { status: 'done', percent: 100, phase: 'done' });
-  tasks.appendLog(taskId, userId, 'HLS conversion complete');
+    tasks.update(hlsTaskId, userId, { status: 'done', percent: 100, phase: 'done' });
+    tasks.appendLog(taskId, userId, 'HLS conversion complete');
+  } catch (err) {
+    const msg = err?.message || String(err);
+    tasks.update(hlsTaskId, userId, { status: 'error', error: msg, lastLog: msg });
+    tasks.appendLog(hlsTaskId, userId, `HLS conversion failed: ${msg}`);
+    throw err;
+  }
 }
 
 async function runPipelineOnce(userId, fileId, taskId, { convertHls }) {

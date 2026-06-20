@@ -181,12 +181,17 @@ async function assembleFile(userId, fileId, file, workDir, onProgress, options =
 
 function posix(p) { return p.split(path.sep).join('/'); }
 
-async function convertToHls(inputPath, outputDir, segmentDuration, job = null, onProgress = null) {
+function buildHlsConvertArgs(inputPath, outputDir, segmentDuration) {
   const playlistPath = path.join(outputDir, 'playlist.m3u8');
   const segPattern = posix(path.join(outputDir, 'segment_%05d.ts'));
-  const args = [
+  return [
     '-y',
     '-i', posix(inputPath),
+    // MKV/MOV often embed subtitle/data tracks (WebVTT, etc.) that cannot be muxed into MPEG-TS HLS.
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    '-sn',
+    '-dn',
     '-c', 'copy',
     '-force_key_frames', `expr:gte(t,n_forced*${segmentDuration})`,
     '-f', 'hls',
@@ -198,6 +203,10 @@ async function convertToHls(inputPath, outputDir, segmentDuration, job = null, o
     '-loglevel', 'warning',
     posix(playlistPath),
   ];
+}
+
+async function convertToHls(inputPath, outputDir, segmentDuration, job = null, onProgress = null) {
+  const args = buildHlsConvertArgs(inputPath, outputDir, segmentDuration);
 
   let inputDurationSec = null;
   try {
@@ -849,4 +858,5 @@ module.exports = {
   verifyHlsOnGitHub,
   isFfmpegAvailable,
   resumeInterruptedConversions,
+  buildHlsConvertArgs,
 };
