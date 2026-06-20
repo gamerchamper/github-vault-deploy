@@ -1,5 +1,5 @@
-const CACHE = 'vault-static-v2';
-const PRECACHE = ['/css/tokens.css', '/css/explorer.css'];
+const CACHE = 'vault-static-v3';
+const PRECACHE = ['/css/tokens.css', '/css/explorer.css?v=1.0.24'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
@@ -25,13 +25,15 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/')) return;
   if (url.pathname.match(/\.(css|js|woff2?)$/)) {
     e.respondWith(
-      caches.match(e.request).then((cached) => cached || fetch(e.request).then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-        }
-        return res;
-      }))
+      fetch(e.request)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(e.request))
     );
   }
 });

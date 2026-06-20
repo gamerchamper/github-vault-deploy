@@ -265,7 +265,7 @@ const App = {
     Playlists.bindEvents();
     PlaylistPlayer.init();
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js?v=2').catch(() => {});
+      navigator.serviceWorker.register('/sw.js?v=3').catch(() => {});
     }
     BandwidthPanel.init();
     this.initSortSelect();
@@ -2411,15 +2411,24 @@ const App = {
 
   showFileHistory(file) {
     if (!file) return;
-    if (typeof FileHistory !== 'undefined') {
-      if (file.is_folder && FileHistory.openFolder) {
+    if (typeof FileHistory === 'undefined') {
+      this.toast('File history script failed to load. Hard-refresh the page (Ctrl+F5).', 'error');
+      return;
+    }
+    const isFolder = !!(file.is_folder === true || file.is_folder === 1 || file.is_folder === '1');
+    if (isFolder) {
+      if (FileHistory.openFolder) {
         FileHistory.openFolder(file);
-        return;
-      }
-      if (FileHistory.open) {
+      } else if (FileHistory.open) {
         FileHistory.open(file);
-        return;
+      } else {
+        this.toast('Folder history requires a hard refresh (Ctrl+F5).', 'error');
       }
+      return;
+    }
+    if (FileHistory.open) {
+      FileHistory.open(file);
+      return;
     }
     const modal = document.getElementById('file-history-modal');
     if (!modal) {

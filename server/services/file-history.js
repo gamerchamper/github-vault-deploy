@@ -385,15 +385,20 @@ function getFolderRecord(userId, folderId) {
 }
 
 function listDescendantFiles(userId, folderPath) {
-  const prefix = folderPath === '/' ? '/' : folderPath;
-  const like = prefix === '/' ? '/%' : `${prefix}/%`;
+  const normalized = folderPath === '' || !folderPath ? '/' : folderPath;
+  const parentLike = normalized === '/' ? '/%' : `${normalized}/%`;
+  const pathLike = normalized === '/' ? '/%' : `${normalized}/%`;
   return db.prepare(`
     SELECT id, name, path, parent_path, mime_type, size, chunk_count
     FROM files
     WHERE user_id = ? AND is_folder = 0 AND is_deleted = 0
       AND (upload_status IS NULL OR upload_status = 'ready')
-      AND (path = ? OR path LIKE ?)
-  `).all(userId, prefix, like);
+      AND (
+        parent_path = ?
+        OR parent_path LIKE ?
+        OR path LIKE ?
+      )
+  `).all(userId, normalized, parentLike, pathLike);
 }
 
 function loadVersionsForFiles(userId, fileIds) {

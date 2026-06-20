@@ -11,6 +11,10 @@ const FileHistory = {
   folderBrowsePath: '/',
   folderBrowseData: null,
 
+  isFolder(entry) {
+    return !!(entry && (entry.is_folder === true || entry.is_folder === 1 || entry.is_folder === '1'));
+  },
+
   init() {
     const modal = document.getElementById('file-history-modal');
     modal?.addEventListener('click', (e) => {
@@ -58,7 +62,10 @@ const FileHistory = {
   },
 
   async open(file) {
-    if (!file || file.is_folder) return;
+    if (!file) return;
+    if (this.isFolder(file)) {
+      return this.openFolder(file);
+    }
     this.mode = 'file';
     this.folder = null;
     this.folderData = null;
@@ -98,7 +105,10 @@ const FileHistory = {
   },
 
   async openFolder(folder) {
-    if (!folder || !folder.is_folder) return;
+    if (!folder || !this.isFolder(folder)) {
+      App?.toast?.('Could not open folder history for this item', 'error');
+      return;
+    }
     this.mode = 'folder';
     this.folder = folder;
     this.file = null;
