@@ -1,11 +1,28 @@
 const crypto = require('crypto');
+const db = require('../db/database');
+
+const SETTING_KEY = 'site_access_key';
 
 function normalizeKey(raw) {
   const s = String(raw ?? '').trim();
   return /^\d{6}$/.test(s) ? s : null;
 }
 
+function getDbSettingRaw() {
+  try {
+    const row = db.prepare('SELECT value FROM server_settings WHERE key = ?').get(SETTING_KEY);
+    return row === undefined ? undefined : row.value;
+  } catch {
+    return undefined;
+  }
+}
+
 function getConfiguredKey() {
+  const raw = getDbSettingRaw();
+  if (raw !== undefined) {
+    if (raw === '' || raw == null) return null;
+    return normalizeKey(raw);
+  }
   return normalizeKey(process.env.SITE_ACCESS_KEY);
 }
 
@@ -62,6 +79,53 @@ function denyResponse(res, acceptsJson = true) {
   return res.status(403).type('text').send('Site access key required');
 }
 
+function getAdminStatus() {
+  const raw = getDbSettingRaw();
+  const dbKey = raw !== undefined && raw !== '' ? normalizeKey(raw) : null;
+  const envKey = normalizeKey(process.env.SITE_ACCESS_KEY);
+  const explicitlyDisabled = raw !== undefined && (raw === '' || raw == null);
+  let source = 'none';
+  let activeKey = null;
+  if (dbKey) {
+    source = 'database';
+    activeKey = dbKey;
+  } else if (!explicitlyDisabled && envKey) {
+    source = 'environment';
+    activeKey = envKey;
+  } else if (explicitlyDisabled) {
+    source = 'disabled';
+  }
+  return {
+    required: !!activeKey,
+    configured: !!activeKey,
+    source,
+    env_fallback_available: !!envKey && raw === undefined,
+    explicitly_disabled: explicitlyDisabled,
+    key_hint: activeKey ? `••••${activeKey.slice(-2)}` : null,
+  };
+}
+
+function setConfiguredKey(key) {
+  const normalized = normalizeKey(key);
+  if (!normalized) throw new Error('Access key must be exactly 6 digits');
+  db.prepare(`
+    INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(SETTING_KEY, normalized);
+  return normalized;
+}
+
+function clearConfiguredKey() {
+  db.prepare(`
+    INSERT INTO server_settings (key, value, updated_at) VALUES (?, '', datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = '', updated_at = excluded.updated_at
+  `).run(SETTING_KEY);
+}
+
+function resetToEnvironment() {
+  db.prepare('DELETE FROM server_settings WHERE key = ?').run(SETTING_KEY);
+}
+
 module.exports = {
   getConfiguredKey,
   isRequired,
@@ -70,4 +134,8 @@ module.exports = {
   isGranted,
   status,
   denyResponse,
+  getAdminStatus,
+  setConfiguredKey,
+  clearConfiguredKey,
+  resetToEnvironment,
 };

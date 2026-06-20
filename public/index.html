@@ -280,6 +280,9 @@
           <div class="sidebar-item" data-view="agents">
             <span class="sidebar-icon">🤖</span> Agents
           </div>
+          <div class="sidebar-item" data-view="site-access">
+            <span class="sidebar-icon">🔒</span> Site access
+          </div>
         </div>
         <div class="sidebar-section">
           <div class="sidebar-header">Folders</div>
@@ -410,6 +413,27 @@
         </div>
         <div id="agents-list" class="agents-list">
           <div class="api-key-empty">Loading agents...</div>
+        </div>
+      </div>
+
+      <!-- Site Access Key -->
+      <div class="viewers-panel site-access-admin-panel hidden" id="site-access-tab">
+        <div class="viewers-header">
+          <div>
+            <h2 class="viewers-title">Site access key</h2>
+            <p class="viewers-subtitle">Require a 6-digit key before login or opening share links. Helps deter scrapers and unauthorized access.</p>
+          </div>
+        </div>
+        <div id="site-access-admin-status" class="site-access-admin-status"></div>
+        <div class="site-access-admin-form">
+          <label class="form-label" for="site-access-admin-key">Access key</label>
+          <div class="site-access-row site-access-admin-row">
+            <input id="site-access-admin-key" class="site-access-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="6-digit key" autocomplete="off" spellcheck="false">
+            <button id="btn-save-site-access-key" class="btn-primary site-access-unlock-btn" type="button">Save</button>
+            <button id="btn-disable-site-access-key" class="btn-secondary" type="button">Disable</button>
+          </div>
+          <p class="form-hint" id="site-access-admin-hint"></p>
+          <button id="btn-use-env-site-access-key" class="btn-secondary hidden" type="button">Use SITE_ACCESS_KEY from environment</button>
         </div>
       </div>
 

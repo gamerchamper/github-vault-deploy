@@ -1746,6 +1746,9 @@ const App = {
     });
 
     document.getElementById('btn-refresh-agents')?.addEventListener('click', () => this.loadAgents());
+    document.getElementById('btn-save-site-access-key')?.addEventListener('click', () => this.saveSiteAccessKey());
+    document.getElementById('btn-disable-site-access-key')?.addEventListener('click', () => this.disableSiteAccessKey());
+    document.getElementById('btn-use-env-site-access-key')?.addEventListener('click', () => this.useEnvSiteAccessKey());
     document.getElementById('agents-list')?.addEventListener('click', (e) => {
       const saveBtn = e.target.closest('.agent-save-config');
       if (saveBtn) {
@@ -1985,6 +1988,10 @@ const App = {
           this.showAgentsPanel();
           return;
         }
+        if (item.dataset.view === 'site-access') {
+          this.showSiteAccessPanel();
+          return;
+        }
         if (item.dataset.view === 'favorites') {
           this.showFavoritesPanel();
           return;
@@ -2069,6 +2076,7 @@ const App = {
     document.getElementById('viewers-panel')?.classList.add('hidden');
     document.getElementById('api-keys-tab')?.classList.add('hidden');
     document.getElementById('agents-tab')?.classList.add('hidden');
+    document.getElementById('site-access-tab')?.classList.add('hidden');
     document.getElementById('bandwidth-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'bandwidth');
@@ -2081,6 +2089,7 @@ const App = {
     document.getElementById('viewers-panel')?.classList.add('hidden');
     document.getElementById('bandwidth-tab')?.classList.add('hidden');
     document.getElementById('agents-tab')?.classList.add('hidden');
+    document.getElementById('site-access-tab')?.classList.add('hidden');
     document.getElementById('api-keys-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'api-keys');
@@ -2093,11 +2102,25 @@ const App = {
     document.getElementById('viewers-panel')?.classList.add('hidden');
     document.getElementById('bandwidth-tab')?.classList.add('hidden');
     document.getElementById('api-keys-tab')?.classList.add('hidden');
+    document.getElementById('site-access-tab')?.classList.add('hidden');
     document.getElementById('agents-tab')?.classList.remove('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === 'agents');
     });
     this.loadAgents();
+  },
+
+  showSiteAccessPanel() {
+    document.getElementById('file-view').classList.add('hidden');
+    document.getElementById('viewers-panel')?.classList.add('hidden');
+    document.getElementById('bandwidth-tab')?.classList.add('hidden');
+    document.getElementById('api-keys-tab')?.classList.add('hidden');
+    document.getElementById('agents-tab')?.classList.add('hidden');
+    document.getElementById('site-access-tab')?.classList.remove('hidden');
+    document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
+      el.classList.toggle('active', el.dataset.view === 'site-access');
+    });
+    this.loadSiteAccessSettings();
   },
 
   showFavoritesPanel() {
@@ -2120,6 +2143,7 @@ const App = {
     document.getElementById('bandwidth-tab')?.classList.add('hidden');
     document.getElementById('api-keys-tab')?.classList.add('hidden');
     document.getElementById('agents-tab')?.classList.add('hidden');
+    document.getElementById('site-access-tab')?.classList.add('hidden');
     document.querySelectorAll('.sidebar-item[data-view]').forEach((el) => {
       el.classList.toggle('active', el.dataset.view === activeView);
     });
@@ -2213,6 +2237,92 @@ const App = {
     } catch (err) {
       this.toast(err.message, 'error');
     }
+  },
+
+  async loadSiteAccessSettings() {
+    const statusEl = document.getElementById('site-access-admin-status');
+    const hintEl = document.getElementById('site-access-admin-hint');
+    const envBtn = document.getElementById('btn-use-env-site-access-key');
+    const input = document.getElementById('site-access-admin-key');
+    if (!statusEl) return;
+    statusEl.innerHTML = '<div class="api-key-empty">Loading site access settings...</div>';
+    try {
+      const { site_access: sa } = await API.settings.siteAccess();
+      const active = sa.required;
+      const statusClass = active ? 'site-access-status-on' : 'site-access-status-off';
+      const statusLabel = active ? 'Protection enabled' : 'Protection disabled';
+      const hint = sa.key_hint ? `Current key ends in ${this.escapeHtml(sa.key_hint.slice(-2))}` : 'No key configured';
+      let sourceNote = '';
+      if (sa.source === 'environment') {
+        sourceNote = 'Using SITE_ACCESS_KEY from environment.';
+      } else if (sa.source === 'database') {
+        sourceNote = 'Key saved in vault settings.';
+      } else if (sa.explicitly_disabled) {
+        sourceNote = 'Protection disabled in vault settings.';
+      }
+      statusEl.innerHTML = `
+        <div class="site-access-status-card ${statusClass}">
+          <strong>${this.escapeHtml(statusLabel)}</strong>
+          <span>${this.escapeHtml(hint)}</span>
+          ${sourceNote ? `<span class="site-access-source-note">${this.escapeHtml(sourceNote)}</span>` : ''}
+        </div>
+      `;
+      if (hintEl) {
+        hintEl.textContent = 'Enter a new 6-digit key and save. Disable turns off protection even if SITE_ACCESS_KEY is set in .env.';
+      }
+      if (envBtn) {
+        envBtn.classList.toggle('hidden', !(sa.explicitly_disabled && sa.env_fallback_available));
+      }
+      if (input) input.value = '';
+    } catch (err) {
+      statusEl.innerHTML = `<div class="api-key-empty error">${this.escapeHtml(err.message)}</div>`;
+    }
+  },
+
+  async saveSiteAccessKey() {
+    const input = document.getElementById('site-access-admin-key');
+    const btn = document.getElementById('btn-save-site-access-key');
+    const key = input?.value?.trim() || '';
+    if (!/^\d{6}$/.test(key)) {
+      this.toast('Access key must be exactly 6 digits', 'error');
+      return;
+    }
+    await App.withButton(btn, async () => {
+      try {
+        await API.settings.setSiteAccess({ key });
+        this.toast('Site access key saved', 'success');
+        await this.loadSiteAccessSettings();
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
+  },
+
+  async disableSiteAccessKey() {
+    if (!confirm('Disable site access protection? Login and share links will not require a key.')) return;
+    const btn = document.getElementById('btn-disable-site-access-key');
+    await App.withButton(btn, async () => {
+      try {
+        await API.settings.setSiteAccess({ enabled: false });
+        this.toast('Site access protection disabled', 'success');
+        await this.loadSiteAccessSettings();
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
+  },
+
+  async useEnvSiteAccessKey() {
+    const btn = document.getElementById('btn-use-env-site-access-key');
+    await App.withButton(btn, async () => {
+      try {
+        await API.settings.setSiteAccess({ use_environment: true });
+        this.toast('Using SITE_ACCESS_KEY from environment', 'success');
+        await this.loadSiteAccessSettings();
+      } catch (err) {
+        this.toast(err.message, 'error');
+      }
+    });
   },
 
   async loadAgents() {
@@ -3260,6 +3370,7 @@ document.getElementById('btn-migrate-mysql')?.addEventListener('click', async ()
     { icon: '🔄', label: 'Refresh', action: () => App.refreshAll(), keywords: 'reload' },
     { icon: '⚙️', label: 'Storage Repos', action: () => App.showRepoModal(), keywords: 'settings repos' },
     { icon: '🔑', label: 'API Keys', action: () => App.showApiKeysPanel(), keywords: 'keys tokens' },
+    { icon: '🔒', label: 'Site Access', action: () => App.showSiteAccessPanel(), keywords: 'key gate login share' },
     { icon: '🤖', label: 'Agents', action: () => App.showAgentsPanel(), keywords: 'sync clients' },
     { icon: '📊', label: 'Bandwidth', action: () => App.showBandwidthPanel(), keywords: 'stats' },
     { icon: '👁️', label: 'Live Viewers', action: () => App.showViewersPanel(), keywords: 'presence' },

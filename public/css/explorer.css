@@ -3747,6 +3747,44 @@ h3 {
 
 .api-keys-panel { overflow: auto; }
 
+.site-access-admin-panel { overflow: auto; }
+
+.site-access-admin-status {
+  padding: 0 24px 16px;
+}
+
+.site-access-admin-form {
+  padding: 0 24px 24px;
+  max-width: 560px;
+}
+
+.site-access-admin-row {
+  margin-top: 8px;
+}
+
+.site-access-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.site-access-status-card.site-access-status-on {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.site-access-status-card.site-access-status-off {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.site-access-source-note {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .api-key-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 .api-key-name,

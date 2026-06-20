@@ -78,7 +78,7 @@ Metadata (file names, paths, chunk locations, SHAs) is stored locally in SQLite.
 | `APP_URL` | http://localhost:3000 | Must match OAuth callback base URL |
 | `LOCAL_AUTH` | true | Auto-login when visiting via localhost or server LAN IP (set `false` to require GitHub sign-in everywhere) |
 | `LOCAL_AUTH_USER_ID` | (first user) | Which vault user to use for local auto-login |
-| `SITE_ACCESS_KEY` | (unset) | Optional 6-digit key required to unlock the login screen and all public share endpoints |
+| `SITE_ACCESS_KEY` | (unset) | Optional 6-digit key for login and share links; can also be set in **Quick access → Site access** in the vault UI |
 
 ## Docker
 

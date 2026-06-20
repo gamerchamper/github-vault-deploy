@@ -402,6 +402,8 @@ const API = {
   settings: {
     get: () => API.get('/api/settings'),
     update: (patch) => API.patch('/api/settings', patch),
+    siteAccess: () => API.get('/api/settings/site-access'),
+    setSiteAccess: (body) => API.put('/api/settings/site-access', body),
   },
 
   plex: {

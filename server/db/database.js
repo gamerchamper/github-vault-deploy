@@ -406,4 +406,14 @@ try {
   `);
 } catch { /* exists */ }
 
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS server_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+} catch { /* exists */ }
+
 module.exports = db;
