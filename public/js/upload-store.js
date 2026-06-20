@@ -58,7 +58,7 @@ const UploadStore = {
     });
   },
 
-  async createFromFile(file, parentPath, chunkSize, uploadMode = 'api', convertHls = false) {
+  async createFromFile(file, parentPath, chunkSize, uploadMode = 'api', convertHls = false, uploadAccountIds = null) {
     const taskId = `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const session = {
       taskId,
@@ -70,6 +70,7 @@ const UploadStore = {
       chunkSize,
       uploadMode: uploadMode === 'git' ? 'git' : uploadMode === 'seamless' ? 'seamless' : 'api',
       convertHls,
+      uploadAccountIds: uploadAccountIds || null,
       totalChunks: 0,
       chunksDone: 0,
       status: 'pending',

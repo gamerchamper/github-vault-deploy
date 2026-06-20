@@ -914,6 +914,11 @@
         <label for="plan-chunk-size">Chunk size (MB)</label>
         <input type="number" id="plan-chunk-size" value="0.9" min="0.064" max="95" step="0.1">
         <p class="plan-hint">Larger chunks = fewer API calls. GitHub allows max 100 MB per file — encrypted chunks are capped at 95 MB.</p>
+        <div id="plan-upload-accounts" class="plan-upload-accounts hidden">
+          <label class="plan-field-label">Store encrypted chunks on</label>
+          <div id="plan-upload-accounts-list" class="plan-upload-accounts-list"></div>
+          <p class="plan-hint">Select one or more GitHub accounts. Chunks are spread across repos on the accounts you choose.</p>
+        </div>
         <label class="plan-checkbox" id="plan-hls-label">
           <input type="checkbox" id="plan-hls-convert">
           Convert to HLS segments for streaming (video files)

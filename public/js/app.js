@@ -2313,6 +2313,7 @@ const App = {
       let chunkSize = 921600;
       let mode = uploadMode;
       let convertHls = false;
+      let uploadAccountIds = null;
       const isVideo = API.isVideoFile(file.name, file.type);
       if (file.size > 100 * 1024 * 1024 || isVideo) {
         const confirmed = await this.showUploadPlan(file, { defaultMode: uploadMode });
@@ -2320,14 +2321,15 @@ const App = {
         chunkSize = confirmed.chunkSize;
         mode = confirmed.uploadMode || uploadMode;
         convertHls = confirmed.convertHls || false;
+        uploadAccountIds = confirmed.uploadAccountIds || null;
       }
-      specs.push({ file, chunkSize, mode, convertHls });
+      specs.push({ file, chunkSize, mode, convertHls, uploadAccountIds });
     }
 
     if (!specs.length) return;
 
     const results = await this.runWithConcurrency(
-      specs.map((s) => () => this.uploadSingleFile(s.file, s.chunkSize, s.mode, s.convertHls)),
+      specs.map((s) => () => this.uploadSingleFile(s.file, s.chunkSize, s.mode, s.convertHls, s.uploadAccountIds)),
       2
     );
     const failed = results.filter((r) => r && !r.ok);
@@ -2346,7 +2348,49 @@ const App = {
     return Math.round(clamped * MB);
   },
 
+  defaultUploadAccountSelection(targets) {
+    const view = explorer?.accountView || 'primary';
+    if (view.startsWith('storage:')) {
+      const id = view.split(':')[1];
+      if (targets.some((t) => t.id === id)) return [id];
+    }
+    return targets.map((t) => t.id);
+  },
+
+  getSelectedUploadAccountIds() {
+    const checked = [...document.querySelectorAll('#plan-upload-accounts-list input[type="checkbox"]:checked')]
+      .map((el) => el.value);
+    return checked.length ? checked : null;
+  },
+
+  renderUploadAccountChoices(targets, onChange) {
+    const wrap = document.getElementById('plan-upload-accounts');
+    const list = document.getElementById('plan-upload-accounts-list');
+    if (!wrap || !list) return;
+    if (!targets || targets.length <= 1) {
+      wrap.classList.add('hidden');
+      list.innerHTML = '';
+      return;
+    }
+    wrap.classList.remove('hidden');
+    const selected = new Set(this.defaultUploadAccountSelection(targets));
+    list.innerHTML = targets.map((t) => `
+      <label class="plan-account-choice">
+        <input type="checkbox" value="${this.escapeHtml(t.id)}" ${selected.has(t.id) ? 'checked' : ''}>
+        <span>${this.escapeHtml(t.label)}</span>
+        <span class="plan-account-meta">${t.repoCount} repo${t.repoCount === 1 ? '' : 's'}</span>
+      </label>
+    `).join('');
+    list.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      input.addEventListener('change', () => {
+        if (!list.querySelector('input[type="checkbox"]:checked')) input.checked = true;
+        onChange?.();
+      });
+    });
+  },
+
   async showUploadPlan(file, { defaultMode = UploadPrefs.get() } = {}) {
+    const self = this;
     return new Promise((resolve) => {
       const modal = document.getElementById('upload-plan-modal');
       const chunkInput = document.getElementById('plan-chunk-size');
@@ -2367,15 +2411,19 @@ const App = {
       if (hlsCheck) hlsCheck.checked = false;
       if (hlsHint) hlsHint.classList.add('hidden');
 
+      let uploadTargets = [];
+
       const render = async () => {
-        const cs = this.chunkSizeFromMbInput(chunkInput);
+        const cs = self.chunkSizeFromMbInput(chunkInput);
         const selectedMode = modeSelect?.value || initialMode;
         const convertHls = !!(hlsCheck?.checked && isVideo);
+        const uploadAccountIds = self.getSelectedUploadAccountIds();
         try {
           const plan = await API.files.plan(file.size, cs, {
             convertHls,
             mimeType: file.type || null,
             fileName: file.name,
+            uploadAccountIds,
           });
           if (plan.maxChunkMb) {
             chunkInput.max = String(plan.maxChunkMb);
@@ -2434,6 +2482,16 @@ const App = {
         }
       };
 
+      API.files.uploadTargets()
+        .then((data) => {
+          uploadTargets = data.targets || [];
+          self.renderUploadAccountChoices(uploadTargets, render);
+          render();
+        })
+        .catch(() => {
+          self.renderUploadAccountChoices([], render);
+        });
+
       if (hlsCheck) {
         hlsCheck.onchange = () => {
           if (hlsHint) hlsHint.classList.toggle('hidden', !hlsCheck.checked);
@@ -2461,18 +2519,18 @@ const App = {
 
       document.getElementById('plan-cancel').onclick = () => { cleanup(); resolve(null); };
       document.getElementById('plan-confirm').onclick = () => {
-        const cs = this.chunkSizeFromMbInput(chunkInput);
+        const cs = self.chunkSizeFromMbInput(chunkInput);
         const uploadMode = modeSelect?.value || initialMode;
         const convertHls = !!(hlsCheck?.checked && isVideo);
-        console.log('[upload] plan confirmed', { cs, uploadMode, convertHls, checked: hlsCheck?.checked });
+        const uploadAccountIds = self.getSelectedUploadAccountIds();
         if (uploadMode !== 'seamless') UploadPrefs.set(uploadMode);
         cleanup();
-        resolve({ chunkSize: cs, uploadMode, convertHls });
+        resolve({ chunkSize: cs, uploadMode, convertHls, uploadAccountIds });
       };
     });
   },
 
-  async uploadSingleFile(file, chunkSize, uploadMode = 'api', convertHls = false) {
+  async uploadSingleFile(file, chunkSize, uploadMode = 'api', convertHls = false, uploadAccountIds = null) {
     const pendingId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     App.beginUploadActivity();
@@ -2486,7 +2544,8 @@ const App = {
 
     try {
       console.log('[uploadSingleFile] calling upload with convertHls=', convertHls);
-      await API.files.upload(file, explorer.currentPath, chunkSize, convertHls, (job) => {
+      await API.files.upload(
+        file, explorer.currentPath, chunkSize, convertHls, (job) => {
         const pct = job.percent || 0;
         let status = 'Processing...';
         if (job.uploadMode === 'seamless') {
@@ -2511,7 +2570,7 @@ const App = {
         explorer.updatePendingProgress(pendingId, pct, status);
         if (job.id) TaskPanel.tasks.set(job.id, job);
         TaskPanel.render();
-      }, uploadMode);
+      }, uploadMode, uploadAccountIds);
 
       explorer.files = explorer.files.filter((f) => f.id !== pendingId);
       await explorer.refresh({ filesOnly: true });

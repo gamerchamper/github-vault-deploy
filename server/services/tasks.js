@@ -41,7 +41,7 @@ function update(taskId, userId, patch) {
   const nextPayload = { ...payload };
   const payloadKeys = [
     'chunksDone', 'chunksTotal', 'currentRepo', 'file', 'ids', 'done', 'total', 'currentName',
-    'fileId', 'parentPath', 'chunkSize', 'fileSize', 'mimeType', 'resumable', 'fileName', 'nextChunk', 'uploadMode', 'convertHls',
+    'fileId', 'parentPath', 'chunkSize', 'fileSize', 'mimeType', 'resumable', 'fileName', 'nextChunk', 'uploadMode', 'convertHls', 'uploadAccountIds',
     'accountId', 'method', 'log', 'lastLog', 'gitBytesStaged', 'gitRepos', 'names', 'pauseReason',
     'segmentsDone', 'segmentsTotal',
     'seamlessPartSize', 'seamlessPartsTotal', 'seamlessPartsDone', 'seamlessPartsReceived', 'hlsTaskId',

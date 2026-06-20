@@ -2,7 +2,8 @@ const { Octokit } = require('@octokit/rest');
 const rateLimit = require('./github-rate-limit');
 const chunkLookup = require('./chunk-lookup-cache');
 
-function createClient(accessToken) {
+function createClient(accessToken, opts = {}) {
+  const failFastRateLimit = !!opts.failFastRateLimit;
   const octokit = new Octokit({ auth: accessToken });
   const tokenKey = rateLimit.keyForToken(accessToken);
 
@@ -20,7 +21,7 @@ function createClient(accessToken) {
         }
         throw err;
       }
-    });
+    }, { failFastRateLimit });
   });
 
   return octokit;

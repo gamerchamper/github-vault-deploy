@@ -1,8 +1,8 @@
 const SeamlessUpload = {
   PART_CONCURRENCY: 8,
 
-  async start(file, parentPath, chunkSize, convertHls, onProgress) {
-    const session = await UploadStore.createFromFile(file, parentPath, chunkSize, 'seamless', convertHls);
+  async start(file, parentPath, chunkSize, convertHls, onProgress, uploadAccountIds = null) {
+    const session = await UploadStore.createFromFile(file, parentPath, chunkSize, 'seamless', convertHls, uploadAccountIds);
     return this.run(this.attachFile(session, file), onProgress);
   },
 
@@ -89,6 +89,7 @@ const SeamlessUpload = {
         fileId: session.fileId,
         taskId: session.taskId,
         convertHls,
+        uploadAccountIds: session.uploadAccountIds || null,
       });
 
       session.fileId = init.fileId;

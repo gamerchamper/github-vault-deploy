@@ -381,6 +381,7 @@ try {
 ensureColumn('api_keys', 'key_secret', 'TEXT');
 ensureColumn('playlists', 'sort_regex', 'TEXT');
 ensureColumn('playlists', 'sort_mode', 'TEXT');
+ensureColumn('files', 'upload_account_ids', 'TEXT');
 
 try {
   db.exec(`

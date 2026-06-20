@@ -326,7 +326,7 @@ router.get('/folders', (req, res) => {
 
 router.post('/plan', (req, res) => {
   try {
-    const { size, chunkSize, contentHash: hash, convertHls, mimeType, fileName } = req.body;
+    const { size, chunkSize, contentHash: hash, convertHls, mimeType, fileName, uploadAccountIds } = req.body;
     if (!size) return res.status(400).json({ error: 'size required' });
     const plan = storage.planUpload(
       parseInt(size, 10),
@@ -336,6 +336,7 @@ router.post('/plan', (req, res) => {
         convertHls: videoFormats.shouldConvertHls(!!convertHls, mimeType, fileName),
         mimeType: mimeType || null,
         fileName: fileName || null,
+        uploadAccountIds,
       }
     );
     const duplicate = hash ? contentHash.findDuplicate(req.user.id, hash) : null;
@@ -344,6 +345,14 @@ router.post('/plan', (req, res) => {
       duplicate: duplicate ? { id: duplicate.id, name: duplicate.name, path: duplicate.path, size: duplicate.size, created_at: duplicate.created_at } : null,
       feedback: getStorageFeedback(req.user.id, plan),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/upload-targets', (req, res) => {
+  try {
+    res.json({ targets: storage.listUploadTargets(req.user.id) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -433,6 +442,7 @@ router.post('/upload/init', async (req, res) => {
 
     const uploadMode = req.body.uploadMode === 'git' ? 'git' : 'api';
     const convertHls = videoFormats.shouldConvertHls(!!req.body.convertHls, mimeType, fileName);
+    const uploadAccountIds = storage.normalizeUploadAccountIds(req.body.uploadAccountIds);
 
     const session = await storage.initUploadSession(req.user.id, {
       fileName,
@@ -442,6 +452,7 @@ router.post('/upload/init', async (req, res) => {
       chunkSize: parseInt(chunkSize, 10) || storage.CHUNK_SIZE,
       fileId,
       convertHls,
+      uploadAccountIds,
     });
     if (convertHls) {
       const ffmpegOk = await hlsConvert.isFfmpegAvailable();
@@ -465,6 +476,7 @@ router.post('/upload/init', async (req, res) => {
       nextChunk: session.nextChunk,
       uploadMode,
       convertHls,
+      uploadAccountIds: session.uploadAccountIds || uploadAccountIds,
     });
     const resumeMsg = session.chunksDone > 0
       ? `Resuming — ${session.chunksDone}/${session.totalChunks} chunks already stored, starting at chunk ${session.nextChunk}`
@@ -718,6 +730,7 @@ router.post('/upload/seamless/init', async (req, res) => {
     if (!fileName || !size) return res.status(400).json({ error: 'fileName and size required' });
 
     const convertHls = videoFormats.shouldConvertHls(!!req.body.convertHls, mimeType, fileName);
+    const uploadAccountIds = storage.normalizeUploadAccountIds(req.body.uploadAccountIds);
     if (convertHls) {
       const ffmpegOk = await hlsConvert.isFfmpegAvailable();
       if (!ffmpegOk) {
@@ -734,6 +747,7 @@ router.post('/upload/seamless/init', async (req, res) => {
       fileId,
       replaceFileId: replaceFileId || null,
       convertHls,
+      uploadAccountIds,
       taskId,
     });
 

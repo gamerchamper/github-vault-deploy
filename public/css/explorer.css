@@ -2465,6 +2465,35 @@ body::before {
 }
 
 .plan-note, .plan-hint, .plan-error { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+.plan-field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 12px 0 6px;
+}
+.plan-upload-accounts-list {
+  display: grid;
+  gap: 6px;
+}
+.plan-account-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.plan-account-choice input {
+  flex-shrink: 0;
+}
+.plan-account-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
 .plan-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; cursor: pointer; }
 .plan-checkbox input { width: auto; margin: 0; }
 .plan-error { color: var(--danger); }

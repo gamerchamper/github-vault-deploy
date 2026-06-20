@@ -45,11 +45,11 @@ const API = {
     return res.json();
   },
 
-  async upload(file, path, chunkSize, convertHls, onProgress, uploadMode = 'api') {
+  async upload(file, path, chunkSize, convertHls, onProgress, uploadMode = 'api', uploadAccountIds = null) {
     if (uploadMode === 'seamless') {
-      return SeamlessUpload.start(file, path, chunkSize, convertHls, onProgress);
+      return SeamlessUpload.start(file, path, chunkSize, convertHls, onProgress, uploadAccountIds);
     }
-    return UploadManager.start(file, path, chunkSize, convertHls, onProgress, uploadMode);
+    return UploadManager.start(file, path, chunkSize, convertHls, onProgress, uploadMode, uploadAccountIds);
   },
 
   async uploadChunk(fileId, chunkIndex, blob, taskId, uploadMode = 'api', signal) {
@@ -119,8 +119,8 @@ const API = {
       if (view && view !== 'primary') params.set('view', view);
       return API.get(`/api/files/list?${params}`);
     },
-    upload: (file, path, chunkSize, convertHls, onProgress, uploadMode) =>
-      API.upload(file, path, chunkSize, convertHls, onProgress, uploadMode),
+    upload: (file, path, chunkSize, convertHls, onProgress, uploadMode, uploadAccountIds) =>
+      API.upload(file, path, chunkSize, convertHls, onProgress, uploadMode, uploadAccountIds),
     uploadInit: (data) => API.post('/api/files/upload/init', data),
     uploadChunk: (fileId, chunkIndex, blob, taskId, uploadMode, signal) =>
       API.uploadChunk(fileId, chunkIndex, blob, taskId, uploadMode, signal),
@@ -195,8 +195,9 @@ const API = {
       }
       return res.json();
     },
-    plan: (size, chunkSize, { convertHls = false, mimeType = null, fileName = null } = {}) =>
-      API.post('/api/files/plan', { size, chunkSize, convertHls, mimeType, fileName }),
+    plan: (size, chunkSize, { convertHls = false, mimeType = null, fileName = null, uploadAccountIds = null } = {}) =>
+      API.post('/api/files/plan', { size, chunkSize, convertHls, mimeType, fileName, uploadAccountIds }),
+    uploadTargets: () => API.get('/api/files/upload-targets'),
     details: (id, view) => API.get(`/api/files/details/${id}${API.viewQuery(view)}`),
     history: (id) => API.get(`/api/files/history/${id}`),
     historyDownload: (id, versionId) => `/api/files/history/${id}/${versionId}/download`,

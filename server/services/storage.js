@@ -55,8 +55,211 @@ function getUser(userId) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
 }
 
-function getActiveRepos(userId) {
-  return db.prepare(`
+function normalizeUploadAccountIds(raw) {
+  if (raw == null || raw === undefined) return null;
+  let list = raw;
+  if (typeof list === 'string') {
+    const trimmed = list.trim();
+    if (!trimmed) return null;
+    try {
+      list = JSON.parse(trimmed);
+    } catch {
+      list = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  if (!Array.isArray(list) || !list.length) return null;
+  const out = [];
+  for (const item of list) {
+    if (item === 'primary' || item === null || item === undefined || item === '' || item === 0 || item === '0') {
+      out.push('primary');
+      continue;
+    }
+    const n = parseInt(item, 10);
+    if (!Number.isFinite(n) || n < 1) throw new Error('Invalid upload account selection');
+    out.push(String(n));
+  }
+  return [...new Set(out)];
+}
+
+function getUploadAccountIdsForFile(fileId) {
+  const row = db.prepare('SELECT upload_account_ids FROM files WHERE id = ?').get(fileId);
+  if (!row?.upload_account_ids) return null;
+  try {
+    return normalizeUploadAccountIds(JSON.parse(row.upload_account_ids));
+  } catch {
+    return null;
+  }
+}
+
+function filterReposByUploadAccounts(repos, uploadAccountIds) {
+  if (!uploadAccountIds?.length) return repos;
+  const allowPrimary = uploadAccountIds.includes('primary');
+  const linked = new Set(
+    uploadAccountIds
+      .filter((id) => id !== 'primary')
+      .map((id) => parseInt(id, 10))
+      .filter((n) => Number.isFinite(n)),
+  );
+  return repos.filter((repo) => {
+    if (!repo.linked_account_id) return allowPrimary;
+    return linked.has(repo.linked_account_id);
+  });
+}
+
+function repoToUploadAccountId(repo) {
+  return repo.linked_account_id ? String(repo.linked_account_id) : 'primary';
+}
+
+function isRepoRateLimited(userId, repo) {
+  const rateLimit = require('./github-rate-limit');
+  const token = accounts.getTokenForRepo(userId, repo);
+  if (!token) return true;
+  const key = rateLimit.keyForToken(token);
+  if (rateLimit.isPaused(key)) return true;
+  const quota = rateLimit.getQuotaStatus(key);
+  if (quota?.exhausted) return true;
+  if (quota?.remaining != null && quota.remaining <= 0) return true;
+  return false;
+}
+
+function filterReposByRateLimit(userId, repos) {
+  return repos.filter((repo) => !isRepoRateLimited(userId, repo));
+}
+
+function sortReposByQuota(userId, repos) {
+  const rateLimit = require('./github-rate-limit');
+  return [...repos].sort((a, b) => {
+    const tokenA = accounts.getTokenForRepo(userId, a);
+    const tokenB = accounts.getTokenForRepo(userId, b);
+    const keyA = rateLimit.keyForToken(tokenA);
+    const keyB = rateLimit.keyForToken(tokenB);
+    const pausedA = rateLimit.isPaused(keyA);
+    const pausedB = rateLimit.isPaused(keyB);
+    if (pausedA !== pausedB) return pausedA ? 1 : -1;
+    const remA = rateLimit.getQuotaStatus(keyA)?.remaining ?? 5000;
+    const remB = rateLimit.getQuotaStatus(keyB)?.remaining ?? 5000;
+    return remB - remA;
+  });
+}
+
+function expandUploadAccountsForFile(userId, fileId, taskContext) {
+  const allRepos = getActiveRepos(userId, { uploadAccountIds: null });
+  const healthy = filterReposByRateLimit(userId, allRepos);
+  if (!healthy.length) return false;
+
+  const newIds = [...new Set(healthy.map(repoToUploadAccountId))];
+  const current = getUploadAccountIdsForFile(fileId);
+  if (current?.length === newIds.length && current.every((id) => newIds.includes(id))) {
+    return false;
+  }
+
+  db.prepare('UPDATE files SET upload_account_ids = ? WHERE id = ?')
+    .run(JSON.stringify(newIds), fileId);
+
+  const logger = require('../lib/logger');
+  logger.info('upload_accounts_replanned', { userId, fileId, uploadAccountIds: newIds });
+
+  if (taskContext?.taskId) {
+    const tasks = require('./tasks');
+    tasks.appendLog(
+      taskContext.taskId,
+      taskContext.userId,
+      'Rate-limited storage account(s) — replanned upload to other accounts',
+      { uploadAccountIds: newIds },
+    );
+  }
+  return true;
+}
+
+function getUploadReposForChunk(userId, fileId, taskContext) {
+  let repos = getActiveReposForFile(userId, fileId);
+  let healthy = filterReposByRateLimit(userId, repos);
+  let replanned = false;
+
+  if (!healthy.length && repos.length) {
+    replanned = expandUploadAccountsForFile(userId, fileId, taskContext);
+    if (replanned) {
+      repos = getActiveReposForFile(userId, fileId);
+      healthy = filterReposByRateLimit(userId, repos);
+    }
+  }
+
+  const pool = healthy.length ? healthy : repos;
+  return { repos: sortReposByQuota(userId, pool), replanned };
+}
+
+function hasAlternateHealthyUploadToken(userId, repos, excludeTokenKey) {
+  const rateLimit = require('./github-rate-limit');
+  for (const repo of repos) {
+    if (isRepoRateLimited(userId, repo)) continue;
+    const key = rateLimit.keyForToken(accounts.getTokenForRepo(userId, repo));
+    if (key !== excludeTokenKey) return true;
+  }
+  return false;
+}
+
+function setupRateLimitTaskCallback(tokenKey, taskContext) {
+  if (!taskContext?.taskId) return () => {};
+  const rateLimit = require('./github-rate-limit');
+  const tasks = require('./tasks');
+  return rateLimit.setWaitCallback(tokenKey, (info) => {
+    const secs = Math.ceil(info.waitMs / 1000);
+    const mins = Math.ceil(secs / 60);
+    const waitLabel = mins >= 2 ? `${mins} min` : `${secs}s`;
+    tasks.update(taskContext.taskId, taskContext.userId, {
+      phase: 'rate-limit',
+      currentRepo: `GitHub rate limit — resuming in ${waitLabel}`,
+      lastLog: `Waiting for GitHub rate limit (${waitLabel})`,
+    });
+  });
+}
+
+function listUploadTargets(userId) {
+  const user = db.prepare('SELECT username FROM users WHERE id = ?').get(userId);
+  const allRepos = db.prepare(`
+    SELECT r.id, r.full_name, r.linked_account_id, r.total_bytes,
+           la.username AS linked_username, la.role
+    FROM storage_repos r
+    LEFT JOIN linked_accounts la ON r.linked_account_id = la.id
+    WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
+      AND (r.repo_role IS NULL OR r.repo_role = 'primary')
+      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
+      AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
+    ORDER BY r.linked_account_id IS NOT NULL, la.username, r.full_name
+  `).all(userId, REPO_CAPACITY_BYTES);
+
+  const targets = [];
+  const primaryRepos = allRepos.filter((r) => !r.linked_account_id);
+  if (primaryRepos.length) {
+    targets.push({
+      id: 'primary',
+      type: 'primary',
+      label: `Primary (@${user?.username || 'you'})`,
+      repoCount: primaryRepos.length,
+    });
+  }
+
+  const byLinked = new Map();
+  for (const repo of allRepos) {
+    if (!repo.linked_account_id) continue;
+    const key = String(repo.linked_account_id);
+    if (!byLinked.has(key)) {
+      byLinked.set(key, {
+        id: key,
+        type: 'storage',
+        linkedAccountId: repo.linked_account_id,
+        label: `Storage (@${repo.linked_username || 'linked'})`,
+        repoCount: 0,
+      });
+    }
+    byLinked.get(key).repoCount += 1;
+  }
+  targets.push(...byLinked.values());
+  return targets;
+}
+
+function getActiveRepos(userId, options = {}) {
+  const repos = db.prepare(`
     SELECT r.* FROM storage_repos r
     LEFT JOIN linked_accounts la ON r.linked_account_id = la.id
     WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
@@ -65,6 +268,11 @@ function getActiveRepos(userId) {
       AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
     ORDER BY r.chunk_count ASC
   `).all(userId, REPO_CAPACITY_BYTES);
+  return filterReposByUploadAccounts(repos, options.uploadAccountIds);
+}
+
+function getActiveReposForFile(userId, fileId) {
+  return getActiveRepos(userId, { uploadAccountIds: getUploadAccountIdsForFile(fileId) });
 }
 
 function pickRepo(repos, index) {
@@ -115,24 +323,27 @@ function insertChunkRow({
   }
 }
 
-async function recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath) {
-  const repos = getActiveRepos(userId);
+async function recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath, taskContext = null) {
+  const { repos } = getUploadReposForChunk(userId, fileId, taskContext);
   if (!repos.length) {
     throw new Error('Storage repository was removed. Add a repo in Settings, then click Resume.');
   }
-  const { repo, octokit, owner, repoName } = await resolveRepoForChunkUpload(userId, repos, chunkIdx);
-  const sha = await github.uploadChunk(
-    octokit, owner, repoName, repoPath, encrypted, repo.default_branch
+  return uploadEncryptedChunkToGitHub(
+    userId, fileId, repos, chunkIdx, repoPath, encrypted, null, taskContext,
   );
-  return { repo, sha };
 }
 
-function pickActiveRepo(userId, repos, chunkIdx) {
+function pickActiveRepo(userId, repos, chunkIdx, fileId = null) {
   let pool = repos;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const repo = pickRepo(pool, chunkIdx);
+    const healthy = filterReposByRateLimit(userId, pool);
+    const usePool = healthy.length ? healthy : pool;
+    const repo = pickRepo(usePool, chunkIdx);
     if (repo && storageRepoExists(repo.id)) return repo;
-    pool = getActiveRepos(userId);
+    if (fileId) {
+      expandUploadAccountsForFile(userId, fileId, null);
+    }
+    pool = fileId ? getActiveReposForFile(userId, fileId) : getActiveRepos(userId);
     if (!pool.length) break;
   }
   throw new Error('Storage repository unavailable. Check Settings → Storage, then click Resume.');
@@ -158,6 +369,10 @@ async function resolveRepoForChunkUpload(userId, repos, chunkIdx) {
 
   for (let offset = 0; offset < repos.length; offset++) {
     const repo = repos[(start + offset) % repos.length];
+    if (isRepoRateLimited(userId, repo)) {
+      tried.push(`${repo.full_name} (rate limited)`);
+      continue;
+    }
     const [owner, repoName] = repo.full_name.split('/');
     const octokit = accounts.createClientForUpload(userId, repo);
 
@@ -189,6 +404,174 @@ async function resolveRepoForChunkUpload(userId, repos, chunkIdx) {
     `No accessible storage repositories for upload (tried: ${tried.join(', ')}). `
     + 'Re-link storage accounts or create new repos in Settings.'
   );
+}
+
+async function tryUploadToRepo(userId, repo, pool, repoPath, encrypted, existingSha, taskContext, { failFast = false } = {}) {
+  const rateLimit = require('./github-rate-limit');
+  const token = accounts.getTokenForRepo(userId, repo);
+  const tokenKey = rateLimit.keyForToken(token);
+  const [owner, repoName] = repo.full_name.split('/');
+  const octokit = failFast
+    ? github.createClient(token, { failFastRateLimit: true })
+    : accounts.createClientForUpload(userId, repo);
+
+  const info = await github.getRepoInfo(octokit, owner, repoName);
+  const branch = info.default_branch || 'main';
+  if (branch !== repo.default_branch) {
+    db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
+    repo.default_branch = branch;
+  }
+
+  const clearRateCb = failFast ? () => {} : setupRateLimitTaskCallback(tokenKey, taskContext);
+  try {
+    let sha;
+    try {
+      sha = await github.uploadChunk(
+        octokit, owner, repoName, repoPath, encrypted, branch, existingSha,
+      );
+    } catch (uploadErr) {
+      if (failFast && (uploadErr.isRateLimitFailFast || rateLimit.isRateLimitError(uploadErr))) {
+        throw uploadErr;
+      }
+      if (isGitHubNotFound(uploadErr)) {
+        const info2 = await github.getRepoInfo(octokit, owner, repoName);
+        const branch2 = info2.default_branch || 'main';
+        if (branch2 !== repo.default_branch) {
+          db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch2, repo.id);
+          repo.default_branch = branch2;
+        }
+        sha = await github.uploadChunk(
+          octokit, owner, repoName, repoPath, encrypted, branch2, existingSha,
+        );
+      } else {
+        throw uploadErr;
+      }
+    }
+    return { repo, sha, octokit, owner, repoName };
+  } finally {
+    clearRateCb();
+  }
+}
+
+async function tryUploadRepoPool(userId, fileId, pool, chunkIdx, repoPath, encrypted, existingSha, taskContext) {
+  const rateLimit = require('./github-rate-limit');
+  const logger = require('../lib/logger');
+  const tasks = taskContext?.taskId ? require('./tasks') : null;
+  const triedTokenKeys = new Set();
+  const start = chunkIdx % pool.length;
+
+  for (let offset = 0; offset < pool.length; offset++) {
+    const repo = pool[(start + offset) % pool.length];
+    const token = accounts.getTokenForRepo(userId, repo);
+    const tokenKey = rateLimit.keyForToken(token);
+    if (triedTokenKeys.has(tokenKey)) continue;
+    if (isRepoRateLimited(userId, repo)) continue;
+
+    const failFast = hasAlternateHealthyUploadToken(userId, pool, tokenKey);
+    try {
+      return await tryUploadToRepo(
+        userId, repo, pool, repoPath, encrypted, existingSha, taskContext, { failFast },
+      );
+    } catch (err) {
+      if (failFast && (err.isRateLimitFailFast || rateLimit.isRateLimitError(err))) {
+        triedTokenKeys.add(tokenKey);
+        if (err.response?.headers) rateLimit.noteHeaders(tokenKey, err.response.headers);
+        if (tasks) {
+          const [owner] = repo.full_name.split('/');
+          tasks.appendLog(
+            taskContext.taskId,
+            taskContext.userId,
+            `Rate limit on @${owner} — trying another storage account`,
+          );
+        }
+        continue;
+      }
+      if (isGitHubNotFound(err) || isGitHubAccessDenied(err)) {
+        db.prepare('UPDATE storage_repos SET is_active = 0 WHERE id = ?').run(repo.id);
+        logger.warn('storage_repo_unavailable', {
+          userId,
+          repo: repo.full_name,
+          error: err.response?.data?.message || err.message,
+        });
+        continue;
+      }
+      throw new Error(formatUploadGitHubError(err, repo));
+    }
+  }
+  return null;
+}
+
+async function uploadEncryptedChunkToGitHub(
+  userId, fileId, repos, chunkIdx, repoPath, encrypted, existingSha, taskContext,
+) {
+  const rateLimit = require('./github-rate-limit');
+  const tasks = taskContext?.taskId ? require('./tasks') : null;
+
+  for (let round = 0; round < 2; round++) {
+    const { repos: pool, replanned } = fileId != null
+      ? getUploadReposForChunk(userId, fileId, taskContext)
+      : {
+        repos: sortReposByQuota(
+          userId,
+          filterReposByRateLimit(userId, repos).length
+            ? filterReposByRateLimit(userId, repos)
+            : repos,
+        ),
+        replanned: false,
+      };
+
+    if (replanned && tasks) {
+      tasks.appendLog(
+        taskContext.taskId,
+        taskContext.userId,
+        'Rate-limited storage account(s) — replanned chunk upload to other accounts',
+      );
+    }
+
+    const result = await tryUploadRepoPool(
+      userId, fileId, pool, chunkIdx, repoPath, encrypted, existingSha, taskContext,
+    );
+    if (result) return result;
+
+    if (fileId != null && round === 0 && expandUploadAccountsForFile(userId, fileId, taskContext)) {
+      continue;
+    }
+    break;
+  }
+
+  const fallbackRepos = fileId != null
+    ? getActiveReposForFile(userId, fileId)
+    : repos;
+  const { repo, octokit, owner, repoName } = await resolveRepoForChunkUpload(
+    userId, fallbackRepos, chunkIdx,
+  );
+  const tokenKey = rateLimit.keyForToken(accounts.getTokenForRepo(userId, repo));
+  const clearRateCb = setupRateLimitTaskCallback(tokenKey, taskContext);
+  try {
+    let sha;
+    try {
+      sha = await github.uploadChunk(
+        octokit, owner, repoName, repoPath, encrypted, repo.default_branch, existingSha,
+      );
+    } catch (uploadErr) {
+      if (isGitHubNotFound(uploadErr)) {
+        const info = await github.getRepoInfo(octokit, owner, repoName);
+        const branch = info.default_branch || 'main';
+        if (branch !== repo.default_branch) {
+          db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
+          repo.default_branch = branch;
+        }
+        sha = await github.uploadChunk(
+          octokit, owner, repoName, repoPath, encrypted, branch, existingSha,
+        );
+      } else {
+        throw new Error(formatUploadGitHubError(uploadErr, repo));
+      }
+    }
+    return { repo, sha, octokit, owner, repoName };
+  } finally {
+    clearRateCb();
+  }
 }
 
 function formatUploadGitHubError(err, repo) {
@@ -275,9 +658,17 @@ function assertUploadCapacity(repos, fileSize, chunkSize, convertHls, mimeType, 
 }
 
 function planUpload(fileSize, chunkSize, userId, options = {}) {
-  const { convertHls = false, mimeType = null, fileName = null } = options;
+  const {
+    convertHls = false,
+    mimeType = null,
+    fileName = null,
+    uploadAccountIds: rawUploadAccountIds = null,
+  } = options;
+  const uploadAccountIds = normalizeUploadAccountIds(rawUploadAccountIds);
   const normalizedChunkSize = normalizeChunkSize(chunkSize);
-  const repos = getActiveRepos(userId);
+  let repos = getActiveRepos(userId, { uploadAccountIds });
+  const healthyRepos = filterReposByRateLimit(userId, repos);
+  if (healthyRepos.length) repos = sortReposByQuota(userId, healthyRepos);
   const repoCount = Math.max(repos.length, 1);
   const reserveHls = shouldReserveHls(convertHls, mimeType, fileName);
 
@@ -657,18 +1048,25 @@ async function initUploadSession(userId, params) {
     replaceFileId = null,
     contentSource = 'upload',
     convertHls = false,
+    uploadAccountIds: rawUploadAccountIds = null,
   } = params;
+
+  const uploadAccountIds = normalizeUploadAccountIds(rawUploadAccountIds);
+  const accountIdsJson = uploadAccountIds ? JSON.stringify(uploadAccountIds) : null;
 
   let chunkSize = normalizeChunkSize(rawChunkSize);
   const user = getUser(userId);
   if (!user) throw new Error('User not found');
   if (!user.master_key) throw new Error('Encryption not initialized. Please refresh and try again.');
 
-  const repos = getActiveRepos(userId);
+  const repos = getActiveRepos(userId, { uploadAccountIds });
   if (!repos.length) {
     const anyActive = db.prepare(
       'SELECT COUNT(*) as count FROM storage_repos WHERE user_id = ? AND is_active = 1 AND is_metadata = 0 AND COALESCE(total_bytes, 0) >= ?'
     ).get(userId, REPO_CAPACITY_BYTES);
+    if (uploadAccountIds) {
+      throw new Error('No storage repositories available on the selected account(s)');
+    }
     throw new Error(anyActive.count > 0
       ? 'All storage repositories are full (reached 1 GB limit). Add more repos or remove files.'
       : 'No storage repositories configured.');
@@ -705,12 +1103,14 @@ async function initUploadSession(userId, params) {
 
     db.prepare(`
       UPDATE files SET size = ?, mime_type = ?, chunk_count = ?, upload_status = 'uploading',
+        upload_account_ids = COALESCE(?, upload_account_ids),
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
       size,
       mimeType || ready.mime_type || 'application/octet-stream',
       totalChunks,
+      accountIdsJson,
       fileId,
     );
   } else if (fileId) {
@@ -727,9 +1127,17 @@ async function initUploadSession(userId, params) {
     if (existing.size !== size || existing.name !== fileName) {
       throw new Error('File does not match the interrupted upload');
     }
+    const storedIds = getUploadAccountIdsForFile(fileId);
+    if (storedIds && uploadAccountIds
+      && JSON.stringify([...storedIds].sort()) !== JSON.stringify([...uploadAccountIds].sort())) {
+      throw new Error('Upload account selection does not match the interrupted session');
+    }
     totalChunks = existing.chunk_count;
     chunkSize = resolveResumeChunkSize(userId, fileId, rawChunkSize, totalChunks, size);
-    db.prepare('UPDATE files SET upload_status = ? WHERE id = ?').run('uploading', fileId);
+    db.prepare(`
+      UPDATE files SET upload_status = 'uploading', upload_account_ids = COALESCE(upload_account_ids, ?)
+      WHERE id = ?
+    `).run(accountIdsJson, fileId);
     await cleanupEmptyUploadDuplicates(userId, fileName, parentPath, size, fileId);
   } else {
     const conflict = db.prepare(`
@@ -750,13 +1158,14 @@ async function initUploadSession(userId, params) {
     db.prepare(`
       INSERT INTO files (
         id, user_id, name, path, size, mime_type, parent_path, chunk_count,
-        has_thumbnail, encryption_meta, encryption_mode, upload_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'chunk', 'uploading')
+        has_thumbnail, encryption_meta, encryption_mode, upload_status, upload_account_ids
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'chunk', 'uploading', ?)
     `).run(
       fileId, userId, fileName, filePath, size,
       mimeType || 'application/octet-stream',
       normalizedParent, totalChunks,
-      JSON.stringify(encryptionMeta)
+      JSON.stringify(encryptionMeta),
+      accountIdsJson,
     );
   }
 
@@ -775,6 +1184,7 @@ async function initUploadSession(userId, params) {
     nextChunk,
     resumable: chunksDone > 0,
     percent: uploadPercent(chunksDone, totalChunks),
+    uploadAccountIds: getUploadAccountIdsForFile(fileId),
   };
 }
 
@@ -815,8 +1225,8 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
     };
   }
 
-  let repos = getActiveRepos(userId);
-  if (!repos.length) throw new Error('No storage repositories configured');
+  const { repos } = getUploadReposForChunk(userId, fileId, taskContext);
+  if (!repos.length) throw new Error('No storage repositories configured for this upload');
 
   const fileKey = await getFileKeyFromMeta(userId, file);
   const { encrypted, iv, authTag } = crypto.encryptChunk(buffer, fileKey);
@@ -824,12 +1234,9 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
 
   let sha = 'pending';
   let repo;
-  let octokit;
-  let owner;
-  let repoName;
 
   if (uploadMode === 'git') {
-    repo = pickActiveRepo(userId, repos, chunkIdx);
+    repo = pickActiveRepo(userId, repos, chunkIdx, fileId);
     const gitUpload = require('./git-upload');
     const available = await gitUpload.isGitAvailable();
     if (!available) throw new Error('Git is not installed on the server');
@@ -841,61 +1248,17 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
       : null;
     await gitUpload.writeChunk(userId, fileId, repo, chunkIdx, repoPath, encrypted, onLog);
   } else {
-    ({ repo, octokit, owner, repoName } = await resolveRepoForChunkUpload(userId, repos, chunkIdx));
-    const rateLimit = require('./github-rate-limit');
-    const token = accounts.getTokenForRepo(userId, repo);
-    const tokenKey = rateLimit.keyForToken(token);
-    let clearRateCb = () => {};
-    if (taskContext?.taskId) {
-      const tasks = require('./tasks');
-      clearRateCb = rateLimit.setWaitCallback(tokenKey, (info) => {
-        const secs = Math.ceil(info.waitMs / 1000);
-        const mins = Math.ceil(secs / 60);
-        const waitLabel = mins >= 2 ? `${mins} min` : `${secs}s`;
-        tasks.update(taskContext.taskId, taskContext.userId, {
-          phase: 'rate-limit',
-          currentRepo: `GitHub rate limit — resuming in ${waitLabel}`,
-          lastLog: `Waiting for GitHub rate limit (${waitLabel})`,
-        });
-      });
-    }
     const startTime = Date.now();
-    try {
-      try {
-        sha = await github.uploadChunk(
-          octokit, owner, repoName, repoPath,
-          encrypted, repo.default_branch
-        );
-      } catch (uploadErr) {
-        if (isGitHubNotFound(uploadErr)) {
-          try {
-            const info = await github.getRepoInfo(octokit, owner, repoName);
-            const branch = info.default_branch || 'main';
-            if (branch !== repo.default_branch) {
-              db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
-              repo.default_branch = branch;
-            }
-            sha = await github.uploadChunk(
-              octokit, owner, repoName, repoPath,
-              encrypted, branch
-            );
-          } catch (retryErr) {
-            throw new Error(formatUploadGitHubError(retryErr, repo));
-          }
-        } else {
-          throw uploadErr;
-        }
-      }
-    } finally {
-      clearRateCb();
-      const elapsed = Date.now() - startTime;
-      if (elapsed > 30000) {
-        const logger = require('../lib/logger');
-        logger.warn('slow_github_upload', {
-          userId, fileId, chunkIndex, repo: repo.full_name,
-          elapsedMs: elapsed, size: encrypted.length,
-        });
-      }
+    ({ repo, sha } = await uploadEncryptedChunkToGitHub(
+      userId, fileId, repos, chunkIdx, repoPath, encrypted, null, taskContext,
+    ));
+    const elapsed = Date.now() - startTime;
+    if (elapsed > 30000) {
+      const logger = require('../lib/logger');
+      logger.warn('slow_github_upload', {
+        userId, fileId, chunkIndex, repo: repo.full_name,
+        elapsedMs: elapsed, size: encrypted.length,
+      });
     }
   }
 
@@ -904,7 +1267,7 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
     if (uploadMode === 'git') {
       throw new Error('Storage repository was removed during upload. Click Resume to continue.');
     }
-    ({ repo, sha } = await recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath));
+    ({ repo, sha } = await recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath, taskContext));
   }
 
   const persistChunk = () => {
@@ -930,7 +1293,7 @@ async function uploadPlainChunk(userId, fileId, chunkIndex, buffer, uploadMode =
     persistChunk();
   } catch (err) {
     if (uploadMode !== 'git' && /storage repository changed/i.test(err.message)) {
-      ({ repo, sha } = await recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath));
+      ({ repo, sha } = await recoverChunkRepo(userId, fileId, chunkIdx, encrypted, repoPath, taskContext));
       persistChunk();
     } else {
       throw err;
@@ -2708,9 +3071,6 @@ async function repairFileChunk(userId, fileId, chunkIndex, buffer, taskContext =
 
   let repo = null;
   let repoPath;
-  let octokit;
-  let owner;
-  let repoName;
   let existingSha = null;
 
   if (existing) {
@@ -2718,8 +3078,8 @@ async function repairFileChunk(userId, fileId, chunkIndex, buffer, taskContext =
     if (existingRepo?.is_active) {
       repo = existingRepo;
       repoPath = existing.repo_path;
-      [owner, repoName] = repo.full_name.split('/');
-      octokit = accounts.createClientForRepo(userId, repo);
+      const [owner, repoName] = repo.full_name.split('/');
+      const octokit = accounts.createClientForRepo(userId, repo);
       const remoteSha = await github.getFileSha(
         octokit, owner, repoName, repoPath, repo.default_branch,
         { subsystem: 'verify-repair', bypassMissing: true }
@@ -2741,57 +3101,25 @@ async function repairFileChunk(userId, fileId, chunkIndex, buffer, taskContext =
     }
   }
 
-  const repos = getActiveRepos(userId);
-  if (!repos.length) throw new Error('No storage repositories configured');
-
-  if (!repo) {
-    ({ repo, octokit, owner, repoName } = await resolveRepoForChunkUpload(userId, repos, chunkIdx));
-    repoPath = `.vault/chunks/${fileId}/${String(chunkIdx).padStart(5, '0')}.bin`;
-  }
-
   const fileKey = await getFileKeyFromMeta(userId, file);
   const { encrypted, iv, authTag } = crypto.encryptChunk(buffer, fileKey);
 
-  const rateLimit = require('./github-rate-limit');
-  const token = accounts.getTokenForRepo(userId, repo);
-  const tokenKey = rateLimit.keyForToken(token);
-  let clearRateCb = () => {};
-  if (taskContext?.taskId) {
-    const tasks = require('./tasks');
-    clearRateCb = rateLimit.setWaitCallback(tokenKey, (info) => {
-      const secs = Math.ceil(info.waitMs / 1000);
-      tasks.update(taskContext.taskId, taskContext.userId, {
-        phase: 'rate-limit',
-        currentRepo: `GitHub rate limit — resuming in ${secs}s`,
-        lastLog: `Waiting for GitHub rate limit (${secs}s)`,
-      });
-    });
+  const { repos } = getUploadReposForChunk(userId, fileId, taskContext);
+  if (!repos.length) throw new Error('No storage repositories configured for this upload');
+
+  if (!repo) {
+    repoPath = `.vault/chunks/${fileId}/${String(chunkIdx).padStart(5, '0')}.bin`;
   }
 
-  let sha = 'pending';
-  try {
-    try {
-      sha = await github.uploadChunk(
-        octokit, owner, repoName, repoPath, encrypted, repo.default_branch, existingSha
-      );
-    } catch (uploadErr) {
-      if (isGitHubNotFound(uploadErr)) {
-        const info = await github.getRepoInfo(octokit, owner, repoName);
-        const branch = info.default_branch || 'main';
-        if (branch !== repo.default_branch) {
-          db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
-          repo.default_branch = branch;
-        }
-        sha = await github.uploadChunk(
-          octokit, owner, repoName, repoPath, encrypted, branch, existingSha
-        );
-      } else {
-        throw uploadErr;
-      }
-    }
-  } finally {
-    clearRateCb();
+  let uploadRepos = repos;
+  if (repo && !isRepoRateLimited(userId, repo)) {
+    uploadRepos = [repo, ...repos.filter((r) => r.id !== repo.id)];
   }
+
+  let sha;
+  ({ repo, sha } = await uploadEncryptedChunkToGitHub(
+    userId, fileId, uploadRepos, chunkIdx, repoPath, encrypted, existingSha, taskContext,
+  ));
 
   const updateRepo = db.prepare(
     'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
@@ -2936,6 +3264,13 @@ module.exports = {
   shareThumbnailAvailable,
   getShareThumbnail,
   planUpload,
+  listUploadTargets,
+  normalizeUploadAccountIds,
+  getUploadAccountIdsForFile,
+  getUploadReposForChunk,
+  expandUploadAccountsForFile,
+  isRepoRateLimited,
+  filterReposByRateLimit,
   normalizeChunkSize,
   githubRawUrl,
   addRepo,

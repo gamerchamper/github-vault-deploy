@@ -38,9 +38,9 @@ const UploadManager = {
     this.files.delete(taskId);
   },
 
-  async start(file, parentPath, chunkSize, convertHls, onProgress, uploadMode = 'api') {
+  async start(file, parentPath, chunkSize, convertHls, onProgress, uploadMode = 'api', uploadAccountIds = null) {
     const session = this.attachFile(
-      await UploadStore.createFromFile(file, parentPath, chunkSize, uploadMode, convertHls),
+      await UploadStore.createFromFile(file, parentPath, chunkSize, uploadMode, convertHls, uploadAccountIds),
       file
     );
     return this.run(session, onProgress);
@@ -104,6 +104,7 @@ const UploadManager = {
 
     const uploadMode = session.uploadMode || 'api';
     const convertHls = session.convertHls || false;
+    const uploadAccountIds = session.uploadAccountIds || null;
     let init;
     let taskId;
 
@@ -118,6 +119,7 @@ const UploadManager = {
         taskId: session.taskId,
         uploadMode,
         convertHls,
+        uploadAccountIds,
       });
 
       session.fileId = init.fileId;

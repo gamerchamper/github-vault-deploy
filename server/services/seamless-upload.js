@@ -106,7 +106,10 @@ async function initSeamlessUpload(userId, params) {
     replaceFileId = null,
     convertHls = false,
     taskId: existingTaskId,
+    uploadAccountIds: rawUploadAccountIds = null,
   } = params;
+
+  const uploadAccountIds = storage.normalizeUploadAccountIds(rawUploadAccountIds);
 
   const session = await storage.initUploadSession(userId, {
     fileName,
@@ -118,6 +121,7 @@ async function initSeamlessUpload(userId, params) {
     replaceFileId,
     contentSource: replaceFileId ? 'sync' : 'upload',
     convertHls,
+    uploadAccountIds,
   });
 
   const fileId = session.fileId;
@@ -163,6 +167,7 @@ async function initSeamlessUpload(userId, params) {
       parentPath: parentPath || '/',
       chunkSize: session.chunkSize,
       convertHls: !!convertHls,
+      uploadAccountIds: session.uploadAccountIds || uploadAccountIds,
       resumable: true,
     });
   } else {
@@ -186,6 +191,7 @@ async function initSeamlessUpload(userId, params) {
         parentPath: parentPath || '/',
         chunkSize: session.chunkSize,
         convertHls: !!convertHls,
+        uploadAccountIds: session.uploadAccountIds || uploadAccountIds,
       },
     });
     tasks.update(jobId, userId, {

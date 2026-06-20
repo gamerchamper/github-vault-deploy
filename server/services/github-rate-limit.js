@@ -210,7 +210,7 @@ async function waitIfNeeded(tokenKey) {
   await sleep(waitMs);
 }
 
-async function withRetry(tokenKey, fn) {
+async function withRetry(tokenKey, fn, opts = {}) {
   attemptedCallCount++;
   const workloadGovernor = require('./workload-governor');
   const slot = await workloadGovernor.acquireGitHubOp();
@@ -229,6 +229,13 @@ async function withRetry(tokenKey, fn) {
           waitMs,
           message: err.response?.data?.message || err.message,
         });
+        if (opts.failFastRateLimit) {
+          const failErr = new Error(err.response?.data?.message || err.message || 'GitHub rate limit exceeded');
+          failErr.isRateLimitFailFast = true;
+          failErr.status = err.status;
+          failErr.response = err.response;
+          throw failErr;
+        }
         console.warn(
           `[GitHub rate limit] token ${tokenKey} — pausing ${Math.ceil(waitMs / 1000)}s`
         );
