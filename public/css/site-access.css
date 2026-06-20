@@ -1,0 +1,293 @@
+/**
+ * Site access gate — login inline panel + share-page modal
+ * Uses tokens.css variables; safe to load on share pages without explorer.css
+ */
+
+@keyframes site-access-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes site-access-scale-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+body.site-access-modal-open {
+  overflow: hidden;
+}
+
+/* ── Share / collection gate modal ── */
+
+.site-access-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: site-access-fade-in 0.2s ease;
+}
+
+.site-access-modal.hidden {
+  display: none;
+}
+
+.site-access-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.62);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.site-access-modal-content {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 420px);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+  animation: site-access-scale-in 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.site-access-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--glass-border);
+  background: linear-gradient(180deg, rgba(91, 140, 247, 0.08) 0%, transparent 100%);
+}
+
+.site-access-modal-icon {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--accent-glow);
+  border: 1px solid rgba(91, 140, 247, 0.25);
+  color: var(--accent);
+}
+
+.site-access-modal-icon svg {
+  display: block;
+}
+
+.site-access-modal-titles {
+  min-width: 0;
+  text-align: left;
+}
+
+.site-access-modal-titles h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.2px;
+  color: var(--text-primary);
+}
+
+.site-access-modal-brand {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.site-access-modal-body {
+  padding: 22px 24px 8px;
+  text-align: left;
+}
+
+.site-access-modal-footer {
+  padding: 16px 24px 22px;
+}
+
+.site-access-modal-footer .site-access-unlock-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 560;
+}
+
+/* ── Login screen inline gate ── */
+
+.site-access-panel {
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.site-access-inline {
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border);
+  background: rgba(91, 140, 247, 0.06);
+}
+
+.site-access-inline-badge {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+  border-radius: 10px;
+  background: var(--accent-glow);
+  border: 1px solid rgba(91, 140, 247, 0.22);
+  color: var(--accent);
+}
+
+.site-access-inline-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 620;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+.site-access-inline .site-access-unlock-btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 560;
+}
+
+/* ── Shared form elements ── */
+
+.site-access-desc {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.site-access-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.site-access-label {
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.site-access-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  font-size: 22px;
+  letter-spacing: 0.42em;
+  text-align: center;
+  font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.site-access-input::placeholder {
+  letter-spacing: 0.12em;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.site-access-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.site-access-unlock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+.site-access-unlock-btn.loading {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.site-access-error {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--danger);
+  background: rgba(248, 91, 111, 0.1);
+  border: 1px solid rgba(248, 91, 111, 0.22);
+  border-radius: var(--radius);
+}
+
+.site-access-error.hidden {
+  display: none;
+}
+
+/* Admin settings panel (Quick access tab) */
+.site-access-admin-panel { overflow: auto; }
+
+.site-access-admin-status {
+  padding: 0 24px 16px;
+}
+
+.site-access-admin-form {
+  padding: 0 24px 24px;
+  max-width: 560px;
+}
+
+.site-access-admin-row {
+  margin-top: 8px;
+}
+
+.site-access-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.site-access-status-card.site-access-status-on {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.site-access-status-card.site-access-status-off {
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.site-access-source-note {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.site-access-admin-row.site-access-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.site-access-admin-row .site-access-input {
+  width: auto;
+  min-width: 140px;
+  flex: 1 1 140px;
+}
