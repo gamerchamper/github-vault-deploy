@@ -361,6 +361,254 @@ async function listManifestCommits(userId, fileId, limit = 30) {
   }
 }
 
+function dayKeyFromIso(iso) {
+  if (!iso) return null;
+  return String(iso).slice(0, 10);
+}
+
+function endOfDayIso(dayKey) {
+  return `${dayKey}T23:59:59.999Z`;
+}
+
+function resolveFolderPath(folder) {
+  if (folder.path) return folder.path;
+  if (!folder.parent_path || folder.parent_path === '/') return `/${folder.name}`;
+  return `${folder.parent_path}/${folder.name}`;
+}
+
+function getFolderRecord(userId, folderId) {
+  const folder = db.prepare(`
+    SELECT * FROM files WHERE id = ? AND user_id = ? AND is_folder = 1 AND is_deleted = 0
+  `).get(folderId, userId);
+  if (!folder) throw new Error('Folder not found');
+  return folder;
+}
+
+function listDescendantFiles(userId, folderPath) {
+  const prefix = folderPath === '/' ? '/' : folderPath;
+  const like = prefix === '/' ? '/%' : `${prefix}/%`;
+  return db.prepare(`
+    SELECT id, name, path, parent_path, mime_type, size, chunk_count
+    FROM files
+    WHERE user_id = ? AND is_folder = 0 AND is_deleted = 0
+      AND (upload_status IS NULL OR upload_status = 'ready')
+      AND (path = ? OR path LIKE ?)
+  `).all(userId, prefix, like);
+}
+
+function loadVersionsForFiles(userId, fileIds) {
+  if (!fileIds.length) return [];
+  const placeholders = fileIds.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT v.*, f.name AS file_name, f.path AS file_path
+    FROM file_versions v
+    JOIN files f ON f.id = v.file_id
+    WHERE v.user_id = ? AND v.file_id IN (${placeholders})
+    ORDER BY v.created_at DESC
+  `).all(userId, ...fileIds);
+}
+
+function versionToStateItem(row, fileId) {
+  let snapshot;
+  try {
+    snapshot = JSON.parse(row.manifest_json);
+  } catch {
+    return null;
+  }
+  return {
+    fileId: fileId || row.file_id,
+    versionId: row.id,
+    versionNum: row.version_num,
+    name: snapshot.name || row.file_name,
+    path: snapshot.path || row.file_path,
+    parent_path: snapshot.parent_path ?? '/',
+    size: snapshot.size,
+    mime_type: snapshot.mime_type,
+    chunk_count: snapshot.chunk_count || snapshot.chunks?.length || 0,
+    source: row.source,
+    createdAt: row.created_at,
+    downloadable: snapshotIsDownloadable(snapshot),
+  };
+}
+
+function buildFolderDayState(userId, folderId, dayKey) {
+  const folder = getFolderRecord(userId, folderId);
+  const folderPath = resolveFolderPath(folder);
+  const files = listDescendantFiles(userId, folderPath);
+  const end = endOfDayIso(dayKey);
+  const state = [];
+
+  for (const file of files) {
+    const row = db.prepare(`
+      SELECT v.*, f.name AS file_name, f.path AS file_path
+      FROM file_versions v
+      JOIN files f ON f.id = v.file_id
+      WHERE v.file_id = ? AND v.user_id = ? AND v.created_at <= ?
+      ORDER BY v.version_num DESC
+      LIMIT 1
+    `).get(file.id, userId, end);
+    if (!row) continue;
+    const item = versionToStateItem(row, file.id);
+    if (item) state.push(item);
+  }
+
+  return { folderPath, folderName: folder.name, dayKey, end, files: state };
+}
+
+function browseFolderDayState(state, listParentPath) {
+  const parent = listParentPath || '/';
+  const folderNames = new Set();
+  const files = [];
+
+  for (const item of state) {
+    const path = item.path || '';
+    const itemParent = item.parent_path || '/';
+
+    if (itemParent === parent) {
+      files.push({
+        id: item.fileId,
+        name: item.name,
+        path: item.path,
+        parent_path: itemParent,
+        size: item.size,
+        mime_type: item.mime_type,
+        chunk_count: item.chunk_count,
+        is_folder: false,
+        versionId: item.versionId,
+        versionNum: item.versionNum,
+        downloadable: item.downloadable,
+      });
+      continue;
+    }
+
+    const prefix = parent === '/' ? '/' : `${parent}/`;
+    if (!path.startsWith(prefix) || path === parent) continue;
+
+    let rel;
+    if (parent === '/') {
+      rel = path.replace(/^\//, '');
+    } else {
+      rel = path.slice(parent.length + 1);
+    }
+    const segments = rel.split('/').filter(Boolean);
+    if (segments.length >= 1) {
+      folderNames.add(segments[0]);
+    }
+  }
+
+  const folders = [...folderNames].sort((a, b) => a.localeCompare(b)).map((name) => ({
+    id: `hist-folder:${parent}/${name}`,
+    name,
+    path: parent === '/' ? `/${name}` : `${parent}/${name}`,
+    parent_path: parent,
+    is_folder: true,
+  }));
+
+  files.sort((a, b) => a.name.localeCompare(b.name));
+  return { parentPath: parent, folders, files };
+}
+
+async function listFolderHistory(userId, folderId) {
+  if (!ENABLED) {
+    return { enabled: false, folderId, days: [] };
+  }
+
+  const folder = getFolderRecord(userId, folderId);
+  const folderPath = resolveFolderPath(folder);
+  const descendantFiles = listDescendantFiles(userId, folderPath);
+  const fileIds = descendantFiles.map((f) => f.id);
+
+  if (!fileIds.length) {
+    return {
+      enabled: true,
+      folderId,
+      folderPath,
+      folderName: folder.name,
+      days: [],
+      fileCount: 0,
+    };
+  }
+
+  const allVersions = loadVersionsForFiles(userId, fileIds);
+  const dayMap = new Map();
+
+  for (const row of allVersions) {
+    const key = dayKeyFromIso(row.created_at);
+    if (!key) continue;
+    if (!dayMap.has(key)) {
+      dayMap.set(key, { day: key, changes: [] });
+    }
+    const bucket = dayMap.get(key);
+    const item = versionToStateItem(row);
+    if (item) bucket.changes.push(item);
+  }
+
+  const days = [...dayMap.values()]
+    .map((bucket) => {
+      const end = endOfDayIso(bucket.day);
+      let stateCount = 0;
+      let restorable = 0;
+      for (const fileId of fileIds) {
+        const row = db.prepare(`
+          SELECT manifest_json FROM file_versions
+          WHERE file_id = ? AND user_id = ? AND created_at <= ?
+          ORDER BY version_num DESC LIMIT 1
+        `).get(fileId, userId, end);
+        if (!row) continue;
+        stateCount += 1;
+        try {
+          if (snapshotIsDownloadable(JSON.parse(row.manifest_json))) restorable += 1;
+        } catch { /* skip */ }
+      }
+      return {
+        day: bucket.day,
+        label: formatDayLabel(bucket.day),
+        changeCount: bucket.changes.length,
+        changes: bucket.changes.sort((a, b) => a.name.localeCompare(b.name)),
+        stateFileCount: stateCount,
+        restorableCount: restorable,
+      };
+    })
+    .sort((a, b) => b.day.localeCompare(a.day));
+
+  return {
+    enabled: true,
+    folderId,
+    folderPath,
+    folderName: folder.name,
+    fileCount: fileIds.length,
+    days,
+  };
+}
+
+function formatDayLabel(dayKey) {
+  try {
+    const d = new Date(`${dayKey}T12:00:00Z`);
+    return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return dayKey;
+  }
+}
+
+function browseFolderDay(userId, folderId, dayKey, listParentPath) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey || '')) {
+    throw new Error('Invalid day');
+  }
+  const { folderPath, files: state } = buildFolderDayState(userId, folderId, dayKey);
+  const parent = listParentPath || folderPath;
+  if (parent !== folderPath && !parent.startsWith(`${folderPath}/`)) {
+    throw new Error('Path is outside this folder');
+  }
+  const listing = browseFolderDayState(state, parent);
+  return {
+    folderId,
+    folderPath,
+    dayKey,
+    ...listing,
+    totalItems: listing.folders.length + listing.files.length,
+  };
+}
+
 async function listVersions(userId, fileId) {
   if (!ENABLED) {
     return { enabled: false, versions: [], gitCommits: [] };
@@ -455,9 +703,13 @@ module.exports = {
   recordVersionBeforeReplace,
   backfillVersionsFromGit,
   listVersions,
+  listFolderHistory,
+  browseFolderDay,
+  buildFolderDayState,
   getVersion,
   getVersionDetails,
   contentFingerprint,
   listManifestCommits,
   snapshotIsDownloadable,
+  resolveFolderPath,
 };

@@ -948,6 +948,47 @@ router.get('/details/:id', (req, res) => {
   }
 });
 
+router.get('/history/folder/:folderId', async (req, res) => {
+  try {
+    const fileHistory = require('../services/file-history');
+    res.json(await fileHistory.listFolderHistory(req.user.id, req.params.folderId));
+  } catch (err) {
+    const code = err.message === 'Folder not found' ? 404 : 500;
+    res.status(code).json({ error: err.message });
+  }
+});
+
+router.get('/history/folder/:folderId/day/:dayKey/browse', async (req, res) => {
+  try {
+    const fileHistory = require('../services/file-history');
+    const parentPath = req.query.parentPath || undefined;
+    res.json(fileHistory.browseFolderDay(
+      req.user.id,
+      req.params.folderId,
+      req.params.dayKey,
+      parentPath,
+    ));
+  } catch (err) {
+    const code = err.message === 'Folder not found' || err.message === 'Path is outside this folder'
+      ? 404
+      : err.message === 'Invalid day'
+        ? 400
+        : 500;
+    res.status(code).json({ error: err.message });
+  }
+});
+
+router.post('/history/folder/:folderId/day/:dayKey/restore', async (req, res) => {
+  try {
+    res.json(await storage.restoreFolderDay(req.user.id, req.params.folderId, req.params.dayKey));
+  } catch (err) {
+    const code = err.message === 'Folder not found' ? 404
+      : err.message === 'Invalid day' || err.message === 'File history is disabled' ? 400
+        : 500;
+    res.status(code).json({ error: err.message });
+  }
+});
+
 router.get('/history/:id', async (req, res) => {
   try {
     const fileHistory = require('../services/file-history');

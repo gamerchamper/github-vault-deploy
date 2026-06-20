@@ -198,6 +198,14 @@ const API = {
     historyStream: (id, versionId) => `/api/files/history/${id}/${versionId}/stream`,
     historyDetails: (id, versionId) => API.get(`/api/files/history/${id}/${versionId}/details`),
     historyRestore: (id, versionId) => API.post(`/api/files/history/${id}/${versionId}/restore`),
+    folderHistory: (folderId) => API.get(`/api/files/history/folder/${folderId}`),
+    folderHistoryBrowse: (folderId, dayKey, parentPath) => {
+      const q = parentPath ? `?parentPath=${encodeURIComponent(parentPath)}` : '';
+      return API.get(`/api/files/history/folder/${folderId}/day/${dayKey}/browse${q}`);
+    },
+    folderHistoryRestore: (folderId, dayKey) => API.post(
+      `/api/files/history/folder/${folderId}/day/${dayKey}/restore`,
+    ),
     share: (id) => API.post(`/api/files/share/${id}`),
     unshare: (id) => API.delete(`/api/files/share/${id}`),
     shareSettings: () => API.get('/api/files/share/settings'),

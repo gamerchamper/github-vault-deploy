@@ -1729,7 +1729,7 @@ const App = {
       }
       if (action === 'rename') explorer.startRename(file);
       if (action === 'details') App.showDetails(file);
-      if (action === 'view-history' && !file.is_folder) App.showFileHistory(file);
+      if (action === 'view-history') App.showFileHistory(file);
       if (action === 'share') App.shareFile(file);
       if (action === 'download' && !file.is_folder) explorer.downloadFile(file);
       if (action === 'move') explorer.showMoveDialog([...explorer.selected]);
@@ -2410,10 +2410,16 @@ const App = {
   },
 
   showFileHistory(file) {
-    if (!file || file.is_folder) return;
-    if (typeof FileHistory !== 'undefined' && FileHistory.open) {
-      FileHistory.open(file);
-      return;
+    if (!file) return;
+    if (typeof FileHistory !== 'undefined') {
+      if (file.is_folder && FileHistory.openFolder) {
+        FileHistory.openFolder(file);
+        return;
+      }
+      if (FileHistory.open) {
+        FileHistory.open(file);
+        return;
+      }
     }
     const modal = document.getElementById('file-history-modal');
     if (!modal) {

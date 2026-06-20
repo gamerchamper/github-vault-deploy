@@ -1393,6 +1393,60 @@ async function restoreFileVersion(userId, fileId, versionId) {
   };
 }
 
+function isValidDayKey(dayKey) {
+  return typeof dayKey === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dayKey);
+}
+
+async function restoreFolderDay(userId, folderId, dayKey) {
+  const fileHistory = require('./file-history');
+  if (!fileHistory.isEnabled()) {
+    throw new Error('File history is disabled');
+  }
+  if (!isValidDayKey(dayKey)) {
+    throw new Error('Invalid day');
+  }
+
+  const { folderPath, folderName, files: state } = fileHistory.buildFolderDayState(userId, folderId, dayKey);
+  const restored = [];
+  const skipped = [];
+  const failed = [];
+
+  for (const item of state) {
+    if (!item.downloadable) {
+      skipped.push({ fileId: item.fileId, name: item.name, reason: 'not_downloadable' });
+      continue;
+    }
+    try {
+      const result = await restoreFileVersion(userId, item.fileId, item.versionId);
+      if (result.unchanged) {
+        skipped.push({ fileId: item.fileId, name: item.name, reason: 'unchanged' });
+      } else {
+        restored.push({
+          fileId: item.fileId,
+          name: item.name,
+          versionNum: result.restoredFromVersion,
+        });
+      }
+    } catch (err) {
+      failed.push({ fileId: item.fileId, name: item.name, error: err.message });
+    }
+  }
+
+  return {
+    folderId,
+    folderPath,
+    folderName,
+    dayKey,
+    totalInState: state.length,
+    restoredCount: restored.length,
+    skippedCount: skipped.length,
+    failedCount: failed.length,
+    restored,
+    skipped,
+    failed,
+  };
+}
+
 function previewByteLimit(file) {
   return thumbnails.previewByteLimit(file.mime_type, file.name, file.size);
 }
@@ -2811,6 +2865,7 @@ module.exports = {
   downloadFile,
   downloadFileVersion,
   restoreFileVersion,
+  restoreFolderDay,
   downloadFileToPath,
   downloadFileWithProgress,
   deleteFile,
