@@ -62,6 +62,7 @@ function isTransientError(err) {
     'a file with this name already exists',
     'upload session was removed',
     'already in progress on the server',
+    'is not defined',
   ];
   return !permanent.some((p) => msg.includes(p));
 }

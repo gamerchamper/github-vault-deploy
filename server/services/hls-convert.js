@@ -206,6 +206,7 @@ function buildHlsConvertArgs(inputPath, outputDir, segmentDuration) {
 }
 
 async function convertToHls(inputPath, outputDir, segmentDuration, job = null, onProgress = null) {
+  const playlistPath = path.join(outputDir, 'playlist.m3u8');
   const args = buildHlsConvertArgs(inputPath, outputDir, segmentDuration);
 
   let inputDurationSec = null;
