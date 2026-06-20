@@ -686,14 +686,22 @@ function smartReorderItems(userId, playlistId) {
   const row = db.prepare('SELECT sort_regex FROM playlists WHERE id = ? AND user_id = ?').get(playlistId, userId);
   if (!row) throw new Error('Playlist not found');
   const items = listPlaylistItems(userId, playlistId);
+  const regex = row.sort_regex || null;
   const before = items.map((i) => i.id);
-  const sorted = row.sort_regex
-    ? episodeMeta.sortItemsByRegex(items, row.sort_regex)
+  const matched = episodeMeta.countMatches(items, regex);
+  const sorted = regex
+    ? episodeMeta.sortItemsByRegex(items, regex)
     : episodeMeta.sortItemsByEpisodeMeta(items);
   const after = sorted.map((i) => i.id);
   const result = reorderItems(userId, playlistId, after);
   const moved = after.filter((id, idx) => id !== before[idx]).length;
-  return { ...result, moved, sort_regex: row.sort_regex || null };
+  return {
+    ...result,
+    moved,
+    matched,
+    total: items.length,
+    sort_regex: row.sort_regex || null,
+  };
 }
 
 function createShareToken(userId, playlistId, req = null) {

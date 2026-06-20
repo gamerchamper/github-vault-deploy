@@ -577,6 +577,22 @@
   font-size: 13px;
 }
 
+.builder-sort-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.builder-sort-input-row .builder-sort-regex {
+  flex: 1;
+  min-width: 0;
+}
+
+.builder-sort-input-row .btn-sm {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .builder-sort-hint {
   font-size: 11px;
   color: var(--text-muted);

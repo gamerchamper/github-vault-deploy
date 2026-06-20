@@ -1,4 +1,7 @@
 const EpisodeMeta = {
+  VERSION: '1.0.6',
+  DEFAULT_SORT_REGEX: String.raw`EP\.?\s*(\d+)`,
+
   decodePackedEpisode(raw) {
     const n = parseInt(raw, 10);
     if (!Number.isFinite(n)) return { season: null, episode: null };
@@ -12,18 +15,12 @@ const EpisodeMeta = {
     return { season: 1, episode: n };
   },
 
-  duplicatePreference(rawEpisode, season, episode) {
-    if (rawEpisode == null || !Number.isFinite(rawEpisode)) return 1;
-    if (rawEpisode < 100) return 0;
-    if (season != null && episode != null && rawEpisode === season * 100 + episode) return 1;
-    return 1;
-  },
-
   buildSortKey(season, episode, rawEpisode, titleBase) {
     const sortSeason = season == null ? 9999 : season;
     const sortEpisode = episode == null ? 9999 : episode;
-    const dup = this.duplicatePreference(rawEpisode, season, episode);
-    return [sortSeason, sortEpisode, dup, String(titleBase || '').toLowerCase()];
+    const packed = rawEpisode != null && rawEpisode >= 100 ? 1 : 0;
+    const rawTie = rawEpisode == null ? 9999 : rawEpisode;
+    return [sortSeason, sortEpisode, packed, rawTie, String(titleBase || '').toLowerCase()];
   },
 
   extractSeasonHint(...sources) {
@@ -52,7 +49,7 @@ const EpisodeMeta = {
     const title = String(rawTitle || '').trim();
     const path = String(parentPath || '').trim();
     if (!title && !path) {
-      return { season: null, episode: null, rawEpisode: null, match: false, label: null, sortKey: [9999, 9999, 1, ''] };
+      return { season: null, episode: null, rawEpisode: null, match: false, label: null, sortKey: this.buildSortKey(null, null, null, '') };
     }
 
     const base = title.replace(/\.[a-z0-9]{2,5}$/i, '');
@@ -67,6 +64,7 @@ const EpisodeMeta = {
       /\bSeason[\s._-]*(\d{1,2})[\s._-]*Episode[\s._-]*(\d{1,3})\b/i,
       /\bSeason[\s._-]*(\d{1,2})[\s._-]*Ep[\s._-]*(\d{1,3})\b/i,
       /\bS(\d{1,2})[\s._-]*Ep[\s._-]*(\d{1,3})\b/i,
+      /\bEP\.?\s*(\d{1,4})\b/i,
       /\bEp(?:isode)?[\s._-]*(\d{1,4})\b/i,
       /\bE(\d{1,4})\b/i,
       /\bPart[\s._-]*(\d{1,3})\b/i,
@@ -169,10 +167,22 @@ const EpisodeMeta = {
     };
   },
 
+  metaForItem(item, regexStr = null) {
+    const title = item.display_name || item.name || '';
+    if (regexStr) {
+      const fromRegex = this.parseWithRegex(title, regexStr);
+      if (fromRegex) return fromRegex;
+    }
+    return this.parse(title, item.parent_path || '');
+  },
+
   compareSortKeys(ka, kb) {
-    for (let i = 0; i < 4; i += 1) {
-      if (ka[i] < kb[i]) return -1;
-      if (ka[i] > kb[i]) return 1;
+    const len = Math.max(ka.length, kb.length);
+    for (let i = 0; i < len; i += 1) {
+      const av = ka[i] ?? '';
+      const bv = kb[i] ?? '';
+      if (av < bv) return -1;
+      if (av > bv) return 1;
     }
     return 0;
   },
@@ -181,18 +191,15 @@ const EpisodeMeta = {
     return meta?.label || '';
   },
 
+  countMatches(items, regexStr = null) {
+    return items.reduce((n, item) => n + (this.metaForItem(item, regexStr).match ? 1 : 0), 0);
+  },
+
   sortItems(items, regexStr = null) {
     return [...items].sort((a, b) => {
-      const titleA = a.display_name || a.name || '';
-      const titleB = b.display_name || b.name || '';
-      if (regexStr) {
-        const ma = this.parseWithRegex(titleA, regexStr) || this.parse(titleA, a.parent_path || '');
-        const mb = this.parseWithRegex(titleB, regexStr) || this.parse(titleB, b.parent_path || '');
-        return this.compareSortKeys(ma.sortKey, mb.sortKey);
-      }
-      const ma = this.parse(titleA, a.parent_path || '');
-      const mb = this.parse(titleB, b.parent_path || '');
-      return this.compareSortKeys(ma.sortKey, mb.sortKey);
+      const ma = this.metaForItem(a, regexStr).sortKey;
+      const mb = this.metaForItem(b, regexStr).sortKey;
+      return this.compareSortKeys(ma, mb);
     });
   },
 

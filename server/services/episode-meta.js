@@ -33,25 +33,19 @@ function decodePackedEpisode(raw) {
   return { season: 1, episode: n };
 }
 
-function duplicatePreference(rawEpisode, season, episode) {
-  if (rawEpisode == null || !Number.isFinite(rawEpisode)) return 1;
-  if (rawEpisode < 100) return 0;
-  if (season != null && episode != null && rawEpisode === season * 100 + episode) return 1;
-  return 1;
-}
-
 function buildSortKey(season, episode, rawEpisode, titleBase) {
   const sortSeason = season == null ? 9999 : season;
   const sortEpisode = episode == null ? 9999 : episode;
-  const dup = duplicatePreference(rawEpisode, season, episode);
-  return [sortSeason, sortEpisode, dup, String(titleBase || '').toLowerCase()];
+  const packed = rawEpisode != null && rawEpisode >= 100 ? 1 : 0;
+  const rawTie = rawEpisode == null ? 9999 : rawEpisode;
+  return [sortSeason, sortEpisode, packed, rawTie, String(titleBase || '').toLowerCase()];
 }
 
 function parseEpisodeMeta(rawTitle, parentPath = '') {
   const title = String(rawTitle || '').trim();
   const path = String(parentPath || '').trim();
   if (!title && !path) {
-    return { season: null, episode: null, rawEpisode: null, match: false, label: null, sortKey: [9999, 9999, 1, ''] };
+    return { season: null, episode: null, rawEpisode: null, match: false, label: null, sortKey: buildSortKey(null, null, null, '') };
   }
 
   const base = title.replace(/\.[a-z0-9]{2,5}$/i, '');
@@ -66,6 +60,7 @@ function parseEpisodeMeta(rawTitle, parentPath = '') {
     /\bSeason[\s._-]*(\d{1,2})[\s._-]*Episode[\s._-]*(\d{1,3})\b/i,
     /\bSeason[\s._-]*(\d{1,2})[\s._-]*Ep[\s._-]*(\d{1,3})\b/i,
     /\bS(\d{1,2})[\s._-]*Ep[\s._-]*(\d{1,3})\b/i,
+    /\bEP\.?\s*(\d{1,4})\b/i,
     /\bEp(?:isode)?[\s._-]*(\d{1,4})\b/i,
     /\bE(\d{1,4})\b/i,
     /\bPart[\s._-]*(\d{1,3})\b/i,
@@ -168,10 +163,22 @@ function parseRegexSortMeta(rawTitle, regexStr) {
   };
 }
 
+function metaForItem(item, regexStr = null) {
+  const title = item.display_name || item.name || '';
+  if (regexStr) {
+    const fromRegex = parseRegexSortMeta(title, regexStr);
+    if (fromRegex) return fromRegex;
+  }
+  return parseEpisodeMeta(title, item.parent_path || '');
+}
+
 function compareSortKeys(ka, kb) {
-  for (let i = 0; i < 4; i += 1) {
-    if (ka[i] < kb[i]) return -1;
-    if (ka[i] > kb[i]) return 1;
+  const len = Math.max(ka.length, kb.length);
+  for (let i = 0; i < len; i += 1) {
+    const av = ka[i] ?? '';
+    const bv = kb[i] ?? '';
+    if (av < bv) return -1;
+    if (av > bv) return 1;
   }
   return 0;
 }
@@ -183,35 +190,34 @@ function compareEpisodeTitles(titleA, titleB, parentPathA = '', parentPathB = ''
 }
 
 function comparePlaylistItems(a, b, regexStr = null) {
-  const titleA = a.display_name || a.name || '';
-  const titleB = b.display_name || b.name || '';
-  if (regexStr) {
-    const ra = parseRegexSortMeta(titleA, regexStr) || parseEpisodeMeta(titleA, a.parent_path || '');
-    const rb = parseRegexSortMeta(titleB, regexStr) || parseEpisodeMeta(titleB, b.parent_path || '');
-    return compareSortKeys(ra.sortKey, rb.sortKey);
-  }
-  return compareEpisodeTitles(titleA, titleB, a.parent_path || '', b.parent_path || '');
+  const ma = metaForItem(a, regexStr);
+  const mb = metaForItem(b, regexStr);
+  return compareSortKeys(ma.sortKey, mb.sortKey);
 }
 
-function sortItemsByEpisodeMeta(items, { descending = false } = {}) {
-  const sorted = [...items].sort((a, b) => comparePlaylistItems(a, b));
+function countMatches(items, regexStr = null) {
+  return items.reduce((n, item) => n + (metaForItem(item, regexStr).match ? 1 : 0), 0);
+}
+
+function sortItemsByEpisodeMeta(items, { descending = false, regex = null } = {}) {
+  const sorted = [...items].sort((a, b) => comparePlaylistItems(a, b, regex));
   if (descending) sorted.reverse();
   return sorted;
 }
 
-function sortItemsByRegex(items, regexStr, { descending = false } = {}) {
-  if (!regexStr?.trim()) return sortItemsByEpisodeMeta(items, { descending });
-  const sorted = [...items].sort((a, b) => comparePlaylistItems(a, b, regexStr));
-  if (descending) sorted.reverse();
-  return sorted;
+function sortItemsByRegex(items, regexStr, options = {}) {
+  return sortItemsByEpisodeMeta(items, { ...options, regex: regexStr });
 }
 
 module.exports = {
   parseEpisodeMeta,
   parseRegexSortMeta,
+  metaForItem,
   compareEpisodeTitles,
   comparePlaylistItems,
+  countMatches,
   sortItemsByEpisodeMeta,
   sortItemsByRegex,
   decodePackedEpisode,
+  DEFAULT_SORT_REGEX: String.raw`EP\.?\s*(\d+)`,
 };

@@ -104,11 +104,13 @@ const Playlists = {
       const result = await API.playlists.smartReorder(id, regex ? { sort_regex: regex } : {});
       await this.loadPlaylistDetail(id);
       explorer.render();
-      if (result.moved > 0) {
-        App.toast(`Reordered ${result.moved} item(s)${regex ? ' using regex' : ''}`, 'success');
+      if (regex && (result.matched === 0)) {
+        App.toast(`Regex matched 0/${result.total || '?'} files — click Reaction EP preset or try EP\\.?\\s*(\\d+)`, 'error');
+      } else if (result.moved > 0) {
+        App.toast(`Reordered ${result.moved} item(s) (${result.matched}/${result.total} matched)`, 'success');
       } else {
         App.toast(regex
-          ? 'No order change — check regex matches filenames (e.g. EP\\.(\d+))'
+          ? `No order change — ${result.matched}/${result.total} matched; list may already be in episode order`
           : 'Already in episode order', 'info');
       }
     } catch (err) {
@@ -133,6 +135,15 @@ const Playlists = {
     }
   },
 
+  applyBuilderSortPreset() {
+    const input = document.getElementById('builder-sort-regex');
+    const preset = (typeof EpisodeMeta !== 'undefined' && EpisodeMeta.DEFAULT_SORT_REGEX)
+      || String.raw`EP\.?\s*(\d+)`;
+    if (input) input.value = preset;
+    this.renderBuilderList();
+    App.toast('Reaction EP preset applied — click Smart sort', 'info');
+  },
+
   async smartSortBuilderItems() {
     const modal = document.getElementById('playlist-builder-modal');
     const id = modal?.dataset.playlistId;
@@ -140,33 +151,49 @@ const Playlists = {
       App.toast('Nothing to sort', 'error');
       return;
     }
-    if (typeof EpisodeMeta === 'undefined') {
+    if (typeof EpisodeMeta === 'undefined' || !EpisodeMeta.sortItems) {
       App.toast('Episode sort script missing — hard-refresh (Ctrl+F5)', 'error');
       return;
     }
     const regex = this.normalizeSortRegex(this.getBuilderSortRegex());
     try {
       if (regex) this.validateSortRegex(regex);
+      const total = this.builderItems.length;
+      const matched = EpisodeMeta.countMatches(this.builderItems, regex || null);
+      if (regex && matched === 0) {
+        App.toast(`Regex matched 0/${total} filenames — click Reaction EP preset`, 'error');
+        return;
+      }
+
       const beforeIds = this.buildOrderedFileIds();
-      this.builderItems = EpisodeMeta.sortItems(this.builderItems, regex || null);
-      const afterIds = this.buildOrderedFileIds();
-      const moved = afterIds.filter((fid, idx) => fid !== beforeIds[idx]).length;
+      const sorted = EpisodeMeta.sortItems(this.builderItems, regex || null);
+      const clientMoved = sorted.map((f) => f.id).filter((fid, idx) => fid !== beforeIds[idx]).length;
+      this.builderItems = sorted;
       this.renderBuilderList();
 
       const payload = regex ? { sort_regex: regex } : {};
       const result = await API.playlists.smartReorder(id, payload);
+
+      const pl = await API.playlists.get(id);
+      this.builderItems = [...(pl.items || [])];
+      this.currentPlaylist = pl;
+      const regexInput = document.getElementById('builder-sort-regex');
+      if (regexInput) regexInput.value = pl.sort_regex || regex || '';
+      this.renderBuilderList();
+
       if (explorer.viewMode === 'playlist-detail' && explorer.playlistId === id) {
         await this.loadPlaylistDetail(id);
         explorer.render();
       }
 
-      if (moved > 0 || result.moved > 0) {
-        const n = Math.max(moved, result.moved || 0);
-        App.toast(`Reordered ${n} item(s)${regex ? ' using regex' : ''}. Click Save to keep display names.`, 'success');
+      const moved = Math.max(clientMoved, result.moved || 0);
+      const matchCount = result.matched ?? matched;
+      if (moved > 0) {
+        App.toast(`Reordered ${moved} position(s) (${matchCount}/${total} matched)`, 'success');
       } else {
         App.toast(regex
-          ? 'No order change — regex may not match. Try: EP\\.(\d+)'
-          : 'Already in episode order', 'info');
+          ? `No order change — ${matchCount}/${total} matched; order may already be correct`
+          : `No order change — ${matchCount}/${total} detected as episodes`, 'info');
       }
     } catch (err) {
       App.toast(err.message, 'error');
@@ -945,6 +972,7 @@ const Playlists = {
     document.getElementById('btn-save-collection')?.addEventListener('click', () => this.saveCollectionModal());
     document.getElementById('btn-save-builder')?.addEventListener('click', () => this.saveBuilder());
     document.getElementById('btn-builder-smart-sort')?.addEventListener('click', () => this.smartSortBuilderItems());
+    document.getElementById('btn-builder-sort-preset')?.addEventListener('click', () => this.applyBuilderSortPreset());
     document.getElementById('builder-sort-regex')?.addEventListener('input', () => {
       if (document.getElementById('playlist-builder-modal')?.classList.contains('hidden')) return;
       this.renderBuilderList();

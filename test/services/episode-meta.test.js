@@ -125,4 +125,34 @@ describe('episode-meta', function () {
       'HxH EP.10 Reactionnn.mp4',
     ]);
   });
+
+  it('reorders interleaved EP.N / EP.1NN duplicate filenames', function () {
+    const items = [
+      { id: 'a', name: 'HxH EP.1 Reactionnn.mp4' },
+      { id: 'b', name: 'HxH EP.102 Reactionnn.mp4' },
+      { id: 'c', name: 'HxH EP.2 Reactionnn.mp4' },
+      { id: 'd', name: 'HxH EP.103 Reactionnn.mp4' },
+      { id: 'e', name: 'HxH EP.3 Reactionnn.mp4' },
+    ];
+    const before = items.map((i) => i.id);
+    const sorted = episodeMeta.sortItemsByRegex(items, String.raw`EP\.(\d+)`);
+    const after = sorted.map((i) => i.id);
+    const moved = after.filter((id, idx) => id !== before[idx]).length;
+    expect(moved).to.be.above(0);
+    expect(sorted.map((i) => i.name)).to.deep.equal([
+      'HxH EP.1 Reactionnn.mp4',
+      'HxH EP.2 Reactionnn.mp4',
+      'HxH EP.102 Reactionnn.mp4',
+      'HxH EP.3 Reactionnn.mp4',
+      'HxH EP.103 Reactionnn.mp4',
+    ]);
+  });
+
+  it('countMatches reports regex hits', function () {
+    const items = [
+      { name: 'HxH EP.1 Reactionnn.mp4' },
+      { name: 'random clip.mp4' },
+    ];
+    expect(episodeMeta.countMatches(items, String.raw`EP\.(\d+)`)).to.equal(1);
+  });
 });

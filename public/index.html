@@ -866,8 +866,11 @@
         <p class="builder-order-hint">Drag rows or use ↑↓ to set episode order — share pages play items in this sequence.</p>
         <div class="builder-sort-row">
           <label class="builder-sort-label" for="builder-sort-regex">Episode sort regex</label>
-          <input type="text" id="builder-sort-regex" class="form-input builder-sort-regex" placeholder="EP\.(\d+)" spellcheck="false" autocomplete="off">
-          <p class="builder-sort-hint">Optional. Capture group 1 is the episode number. Codes like 102 decode as S01E02. Smart sort uses this when set; saved with the playlist.</p>
+          <div class="builder-sort-input-row">
+            <input type="text" id="builder-sort-regex" class="form-input builder-sort-regex" placeholder="EP\.?\s*(\d+)" spellcheck="false" autocomplete="off">
+            <button type="button" class="btn-secondary btn-sm" id="btn-builder-sort-preset" title="Fill regex for ImDontai-style HxH EP.N filenames">Reaction EP preset</button>
+          </div>
+          <p class="builder-sort-hint">Capture group 1 = episode number. Codes like 102 = S01E02. EP.2 sorts before EP.102 (same episode). Rows show SxxExx badges when matched.</p>
         </div>
         <div class="builder-search-row">
           <label class="visually-hidden" for="builder-search">Search vault files</label>
@@ -1275,8 +1278,8 @@
   <script src="/js/audio-queue.js?v=1.0.0"></script>
   <script src="/js/playlist-queue.js?v=1.0.3"></script>
   <script src="/js/playlist-player.js?v=1.0.4"></script>
-  <script src="/js/episode-meta.js?v=1.0.4"></script>
-  <script src="/js/playlists.js?v=1.0.4"></script>
+  <script src="/js/episode-meta.js?v=1.0.6"></script>
+  <script src="/js/playlists.js?v=1.0.6"></script>
   <script src="/js/viewer-panel-layout.js?v=1.0.9"></script>
   <script src="/js/viewer.js?v=1.0.5"></script>
   <script src="/js/viewers.js?v=1.0.1"></script>
