@@ -54,4 +54,17 @@ describe('upload capacity with HLS reserve', function () {
     expect(projection.fits).to.equal(false);
     expect(projection.insufficientBytes).to.be.greaterThan(0);
   });
+
+  it('does not double-count HLS bytes when upload already reserved space', function () {
+    seedTestFile(db, userId, { id: 'file-hls-2', name: 'big.mkv', path: '/big.mkv', upload_status: 'uploading' });
+    const repos = db.prepare('SELECT * FROM storage_repos WHERE user_id = ?').all(userId);
+    capacity.reserveHlsStorage(userId, 'file-hls-2', 1_500_000_000, repos);
+
+    const withoutFlag = capacity.projectHlsStorage(repos, 1_500_000_000, { alreadyReserved: false });
+    const withFlag = capacity.projectHlsStorage(repos, 1_500_000_000, { alreadyReserved: true });
+
+    expect(withoutFlag.fits).to.equal(false);
+    expect(withFlag.fits).to.equal(true);
+    expect(withFlag.repoOverflow).to.have.length(0);
+  });
 });

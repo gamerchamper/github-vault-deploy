@@ -1139,7 +1139,9 @@ router.post('/hls-convert/:id', async (req, res) => {
       return res.status(400).json({ error: 'No storage repositories with free space for HLS' });
     }
     const capacity = require('../services/capacity');
-    const hlsFit = capacity.checkHlsConversionFits(repos, file.size);
+    const hlsFit = capacity.checkHlsConversionFits(repos, file.size, {
+      alreadyReserved: !!file.hls_reserved,
+    });
     if (!hlsFit.fits) {
       return res.status(400).json({ error: capacity.hlsFitsError(hlsFit) });
     }

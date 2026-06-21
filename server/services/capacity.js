@@ -106,7 +106,8 @@ function checkUploadFits(repos, fileSize, chunkSize, convertHls = false) {
   return projectUploadStorage(repos, fileSize, chunkSize, convertHls);
 }
 
-function projectHlsStorage(repos, fileSize) {
+function projectHlsStorage(repos, fileSize, options = {}) {
+  const { alreadyReserved = false } = options;
   const hlsBytes = estimateHlsBytes(fileSize);
   const segmentCount = Math.max(1, Math.ceil(hlsBytes / AVG_HLS_SEGMENT_BYTES));
   const avgSegmentBytes = Math.ceil(hlsBytes / segmentCount);
@@ -127,11 +128,14 @@ function projectHlsStorage(repos, fileSize) {
       fits: false,
       insufficientBytes: hlsBytes,
       repoOverflow: [],
+      alreadyReserved,
     };
   }
 
-  for (let i = 0; i < segmentCount; i++) {
-    projections[i % projections.length].projectedBytes += avgSegmentBytes;
+  if (!alreadyReserved) {
+    for (let i = 0; i < segmentCount; i++) {
+      projections[i % projections.length].projectedBytes += avgSegmentBytes;
+    }
   }
 
   const poolAvailableBytes = repos.reduce(
@@ -139,7 +143,9 @@ function projectHlsStorage(repos, fileSize) {
     0
   );
   const repoOverflow = projections.filter((p) => p.projectedBytes > REPO_CAPACITY_BYTES);
-  const fits = repoOverflow.length === 0 && hlsBytes <= poolAvailableBytes;
+  const fits = alreadyReserved
+    ? repoOverflow.length === 0
+    : repoOverflow.length === 0 && hlsBytes <= poolAvailableBytes;
 
   return {
     hlsBytes,
@@ -149,28 +155,45 @@ function projectHlsStorage(repos, fileSize) {
     fits,
     insufficientBytes: fits ? 0 : Math.max(0, hlsBytes - poolAvailableBytes),
     repoOverflow,
+    alreadyReserved,
   };
 }
 
-function checkHlsConversionFits(repos, fileSize) {
-  return projectHlsStorage(repos, fileSize);
+function checkHlsConversionFits(repos, fileSize, options = {}) {
+  return projectHlsStorage(repos, fileSize, options);
 }
 
 function hlsFitsError(projection) {
   const parts = [
     `Need ${formatBytesShort(projection.hlsBytes)} for HLS segments (~${projection.segmentCount})`,
-    `but only ${formatBytesShort(projection.poolAvailableBytes)} is free across active repos.`,
   ];
+
+  if (projection.alreadyReserved) {
+    parts[0] = `HLS space was reserved at upload, but per-repo limits are exceeded after storing encrypted chunks`;
+  }
+
   if (projection.repoOverflow.length) {
+    const overflowDetail = projection.repoOverflow.slice(0, 8).map((r) => {
+      const over = Math.max(0, r.projectedBytes - REPO_CAPACITY_BYTES);
+      return over > 0 ? `${r.full_name} (+${formatBytesShort(over)})` : r.full_name;
+    }).join(', ');
     parts.push(
-      `These repos would exceed the ${formatBytesShort(REPO_CAPACITY_BYTES)} limit: `
-      + projection.repoOverflow.slice(0, 8).map((r) => r.full_name).join(', ')
+      `${projection.repoOverflow.length === 1 ? 'This repo exceeds' : 'These repos exceed'} `
+      + `the ${formatBytesShort(REPO_CAPACITY_BYTES)} per-repo limit: ${overflowDetail}`
       + (projection.repoOverflow.length > 8 ? ` (+${projection.repoOverflow.length - 8} more)` : '')
     );
-  } else {
-    parts.push('Add storage repositories or delete files to free space.');
+    if (!projection.alreadyReserved && projection.poolAvailableBytes >= projection.hlsBytes) {
+      parts.push('The vault pool still has free space overall — spread HLS across more repos or free space on the full repos.');
+    }
   }
-  return parts.join(' ');
+
+  if (!projection.fits && (!projection.repoOverflow.length || projection.poolAvailableBytes < projection.hlsBytes)) {
+    parts.push(`Only ${formatBytesShort(projection.poolAvailableBytes)} is free across active repos. Add storage repositories or delete files.`);
+  } else if (!projection.fits && projection.repoOverflow.length) {
+    parts.push('Add storage repositories or delete files on the full repos, then resume.');
+  }
+
+  return parts.join('. ') + '.';
 }
 
 function formatBytesShort(bytes) {

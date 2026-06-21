@@ -520,7 +520,8 @@ async function convertFile(userId, fileId, onProgress, taskId = null, options = 
   if (repos.length === 0) { hlsLog('No repos found'); throw new Error('No storage repositories with free space for HLS'); }
   hlsLog(`Found ${repos.length} repos for HLS storage`);
 
-  const hlsFit = capacity.checkHlsConversionFits(repos, file.size);
+  const alreadyReserved = !!file.hls_reserved;
+  const hlsFit = capacity.checkHlsConversionFits(repos, file.size, { alreadyReserved });
   if (!hlsFit.fits) {
     throw new Error(capacity.hlsFitsError(hlsFit));
   }
