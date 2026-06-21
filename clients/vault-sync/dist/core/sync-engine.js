@@ -232,7 +232,13 @@ async function syncRemoteMetadata(api, settings) {
     const db = (0, database_1.getDatabase)();
     const walkRoots = (0, sync_mappings_1.listRemoteWalkRoots)(settings);
     async function walkFolder(folderPath) {
-        const result = await api.listFiles(folderPath, 500, 0);
+        let result = await api.listFiles(folderPath, 500, 0);
+        if (!result.ok) {
+            for (let attempt = 1; attempt <= 3 && !result.ok; attempt++) {
+                await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+                result = await api.listFiles(folderPath, 500, 0);
+            }
+        }
         if (!result.ok) {
             logger_1.logger.error('sync', `Failed to list ${folderPath}: ${result.error.message}`);
             return;

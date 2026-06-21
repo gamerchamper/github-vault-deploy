@@ -224,7 +224,13 @@ async function syncRemoteMetadata(api: VaultApiClient, settings: ReturnType<type
   const walkRoots = listRemoteWalkRoots(settings);
 
   async function walkFolder(folderPath: string): Promise<void> {
-    const result = await api.listFiles(folderPath, 500, 0);
+    let result = await api.listFiles(folderPath, 500, 0);
+    if (!result.ok) {
+      for (let attempt = 1; attempt <= 3 && !result.ok; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+        result = await api.listFiles(folderPath, 500, 0);
+      }
+    }
     if (!result.ok) {
       logger.error('sync', `Failed to list ${folderPath}: ${result.error.message}`);
       return;

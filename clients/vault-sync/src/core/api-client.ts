@@ -13,6 +13,18 @@ function baseFetch(url: string, init: RequestInit = {}, timeoutMs = 30000): Prom
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+function parseErrorBody(text: string, status: number): string {
+  if (!text) return status ? `HTTP ${status}` : 'Request failed';
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown; message?: unknown };
+    if (typeof parsed.error === 'string' && parsed.error.trim()) return parsed.error;
+    if (typeof parsed.message === 'string' && parsed.message.trim()) return parsed.message;
+  } catch {
+    // plain text body
+  }
+  return text;
+}
+
 export class VaultApiClient {
   constructor(private config: VaultApiConfig) {}
 
@@ -39,7 +51,7 @@ export class VaultApiClient {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+        return err({ message: parseErrorBody(text, res.status), status: res.status });
       }
       const data = await res.json() as T;
       return ok(data);
@@ -71,7 +83,7 @@ export class VaultApiClient {
 
   async listFiles(parentPath = '/', limit = 500, offset = 0): Promise<Result<{ files: FileEntry[]; total: number; hasMore: boolean; nextOffset: number }>> {
     const params = new URLSearchParams({ path: parentPath, limit: String(limit), offset: String(offset), sort: 'name', order: 'ASC' });
-    return this.request(`/api/files/list?${params}`);
+    return this.request(`/api/files/list?${params}`, {}, 120000);
   }
 
   async getFileDetails(fileId: string): Promise<Result<FileEntry>> {
@@ -126,7 +138,7 @@ export class VaultApiClient {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+        return err({ message: parseErrorBody(text, res.status), status: res.status });
       }
       return ok(await res.json() as any);
     } catch (e: unknown) {
@@ -167,7 +179,7 @@ export class VaultApiClient {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+        return err({ message: parseErrorBody(text, res.status), status: res.status });
       }
       return ok(await res.json() as any);
     } catch (e: unknown) {
@@ -252,7 +264,7 @@ export class VaultApiClient {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+        return err({ message: parseErrorBody(text, res.status), status: res.status });
       }
       return ok(await res.json() as any);
     } catch (e: unknown) {
@@ -297,7 +309,7 @@ export class VaultApiClient {
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        return err({ message: text || `HTTP ${res.status}`, status: res.status });
+        return err({ message: parseErrorBody(text, res.status), status: res.status });
       }
 
       const total = parseInt(res.headers.get('content-length') || '0', 10);

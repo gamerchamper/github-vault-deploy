@@ -26,6 +26,21 @@ function isStaleSessionError(msg: string): boolean {
   return /upload session not found|already completed/i.test(msg);
 }
 
+function isPermanentUploadError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return (
+    /exceed the .* limit/.test(lower)
+    || /would exceed the/.test(lower)
+    || /not enough storage/.test(lower)
+    || /all storage repositories are full/.test(lower)
+    || /no storage repositories/.test(lower)
+    || /ffmpeg is required/.test(lower)
+    || /file no longer exists/i.test(msg)
+    || /empty file \(0 bytes\)/i.test(msg)
+    || /encryption not initialized/.test(lower)
+  );
+}
+
 function clearUploadSession(entryId: number): void {
   queueRepo.updateQueueEntry(entryId, { fileId: null, taskId: null, sessionJson: null });
 }
@@ -116,17 +131,20 @@ async function processNext(): Promise<void> {
         clearUploadSession(entry.id);
       }
       logger.error('upload-queue', `Upload failed for ${entry.localRelPath}: ${msg}`);
-      if (entry.retryCount + 1 >= entry.maxRetries) {
+      const permanent = isPermanentUploadError(msg);
+      if (permanent || entry.retryCount + 1 >= entry.maxRetries) {
         queueRepo.updateQueueEntry(entry.id, { status: 'error', error: msg, retryCount: entry.retryCount + 1 });
         emitProgress(entry.id, entry.localRelPath, 'error', 0);
       } else {
         queueRepo.updateQueueEntry(entry.id, { status: 'pending', error: msg, retryCount: entry.retryCount + 1 });
         emitProgress(entry.id, entry.localRelPath, 'pending', 0);
       }
-      const backoffMs = isStaleSessionError(msg)
-        ? 2000
-        : Math.min(30000, 2000 * Math.pow(2, Math.min(entry.retryCount, 4)));
-      scheduleRetry(backoffMs);
+      if (!permanent) {
+        const backoffMs = isStaleSessionError(msg)
+          ? 2000
+          : Math.min(30000, 2000 * Math.pow(2, Math.min(entry.retryCount, 4)));
+        scheduleRetry(backoffMs);
+      }
     }
   } finally {
     processing = false;

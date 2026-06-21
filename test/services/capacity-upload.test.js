@@ -42,6 +42,25 @@ describe('upload capacity with HLS reserve', function () {
     expect(after.reserved_bytes).to.equal(capacity.estimateHlsBytes(100_000_000) - 2_000_000);
   });
 
+  it('spreads upload across emptier repos when one repo is nearly full', function () {
+    seedTestRepo(db, userId, { full_name: 'test/caprepo2', name: 'vault-storage-2', default_branch: 'main' });
+    db.prepare(`
+      UPDATE storage_repos
+      SET total_bytes = ?
+      WHERE user_id = ? AND full_name = 'test/caprepo'
+    `).run(capacity.REPO_CAPACITY_BYTES - 20_000_000, userId);
+    db.prepare(`
+      UPDATE storage_repos
+      SET total_bytes = 0, reserved_bytes = 0
+      WHERE user_id = ? AND full_name = 'test/caprepo2'
+    `).run(userId);
+
+    const repos = db.prepare('SELECT * FROM storage_repos WHERE user_id = ? ORDER BY full_name').all(userId);
+    const projection = capacity.projectUploadStorage(repos, 500_000_000, 900_000, true);
+    expect(projection.fits).to.equal(true);
+    expect(projection.repoOverflow).to.have.length(0);
+  });
+
   it('marks a nearly full repo as insufficient when HLS is enabled', function () {
     db.prepare(`
       UPDATE storage_repos

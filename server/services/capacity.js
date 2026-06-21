@@ -40,12 +40,37 @@ function distributeBytesAcrossRepos(repos, totalBytes) {
   return perRepo;
 }
 
+/** Assign each byte block to the repo with the most remaining headroom (avoids false overflow on nearly-full repos). */
+function assignGreedy(projections, bytes) {
+  if (!projections.length || bytes <= 0) return;
+  let bestIdx = -1;
+  let bestRoom = -1;
+  for (let i = 0; i < projections.length; i++) {
+    const room = REPO_CAPACITY_BYTES - projections[i].projectedBytes;
+    if (room >= bytes && room > bestRoom) {
+      bestRoom = room;
+      bestIdx = i;
+    }
+  }
+  if (bestIdx < 0) {
+    for (let i = 0; i < projections.length; i++) {
+      const room = REPO_CAPACITY_BYTES - projections[i].projectedBytes;
+      if (room > bestRoom) {
+        bestRoom = room;
+        bestIdx = i;
+      }
+    }
+  }
+  if (bestIdx >= 0) {
+    projections[bestIdx].projectedBytes += bytes;
+  }
+}
+
 function projectUploadStorage(repos, fileSize, chunkSize, convertHls = false) {
   const uploadBytes = estimateEncryptedUploadBytes(fileSize);
   const hlsBytes = convertHls ? estimateHlsBytes(fileSize) : 0;
   const normalizedChunkSize = Math.max(64 * 1024, parseInt(chunkSize, 10) || 921600);
   const chunkCount = Math.ceil(uploadBytes / normalizedChunkSize) || 1;
-  const avgChunkBytes = Math.ceil(uploadBytes / chunkCount);
   const segmentCount = hlsBytes > 0
     ? Math.max(1, Math.ceil(hlsBytes / AVG_HLS_SEGMENT_BYTES))
     : 0;
@@ -74,10 +99,12 @@ function projectUploadStorage(repos, fileSize, chunkSize, convertHls = false) {
   }
 
   for (let i = 0; i < chunkCount; i++) {
-    projections[i % projections.length].projectedBytes += avgChunkBytes;
+    const start = i * normalizedChunkSize;
+    const chunkBytes = Math.min(normalizedChunkSize, uploadBytes - start);
+    assignGreedy(projections, chunkBytes);
   }
   for (let i = 0; i < segmentCount; i++) {
-    projections[i % projections.length].projectedBytes += avgSegmentBytes;
+    assignGreedy(projections, avgSegmentBytes);
   }
 
   const poolAvailableBytes = repos.reduce(
@@ -134,7 +161,7 @@ function projectHlsStorage(repos, fileSize, options = {}) {
 
   if (!alreadyReserved) {
     for (let i = 0; i < segmentCount; i++) {
-      projections[i % projections.length].projectedBytes += avgSegmentBytes;
+      assignGreedy(projections, avgSegmentBytes);
     }
   }
 

@@ -54,6 +54,8 @@ function isTransientError(err) {
     'file does not match',
     'no storage repositories',
     'not enough storage',
+    'would exceed the',
+    'exceed the',
     'user not found',
     'encryption not initialized',
     'ffmpeg is required',
@@ -63,6 +65,7 @@ function isTransientError(err) {
     'upload session was removed',
     'already in progress on the server',
     'is not defined',
+    'all storage repositories are full',
   ];
   return !permanent.some((p) => msg.includes(p));
 }

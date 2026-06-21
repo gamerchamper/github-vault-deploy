@@ -657,6 +657,47 @@ function assertUploadCapacity(repos, fileSize, chunkSize, convertHls, mimeType, 
   return projection;
 }
 
+async function ensureUploadCapacity(userId, fileSize, chunkSize, convertHls, mimeType, fileName, uploadAccountIds) {
+  const reserveHls = shouldReserveHls(convertHls, mimeType, fileName);
+  const linkedAccountId = Array.isArray(uploadAccountIds) && uploadAccountIds.length === 1
+    ? uploadAccountIds[0]
+    : null;
+  const repoBatch = require('./repo-batch');
+  let repos = getActiveRepos(userId, { uploadAccountIds });
+  let projection = capacity.checkUploadFits(repos, fileSize, chunkSize, reserveHls);
+
+  if (projection.fits) return projection;
+
+  let created = 0;
+  const maxCreate = 20;
+  while (!projection.fits && created < maxCreate) {
+    let toCreate = 0;
+    if (projection.totalBytes > projection.poolAvailableBytes) {
+      toCreate = Math.min(
+        repoBatch.MAX_BATCH_SIZE,
+        Math.ceil(projection.insufficientBytes / capacity.REPO_CAPACITY_BYTES) || 1,
+      );
+    } else if (projection.repoOverflow.length > 0) {
+      const minSpread = Math.ceil(projection.totalBytes / (capacity.REPO_CAPACITY_BYTES * 0.85));
+      toCreate = Math.max(1, minSpread - repos.length);
+    } else {
+      break;
+    }
+
+    for (let i = 0; i < toCreate; i++) {
+      await repoBatch.createStorageRepo(userId, { linkedAccountId });
+      created++;
+    }
+    repos = getActiveRepos(userId, { uploadAccountIds });
+    projection = capacity.checkUploadFits(repos, fileSize, chunkSize, reserveHls);
+  }
+
+  if (!projection.fits) {
+    throw new Error(capacity.uploadFitsError(projection));
+  }
+  return projection;
+}
+
 function planUpload(fileSize, chunkSize, userId, options = {}) {
   const {
     convertHls = false,
@@ -1072,7 +1113,7 @@ async function initUploadSession(userId, params) {
       : 'No storage repositories configured.');
   }
 
-  assertUploadCapacity(repos, size, chunkSize, convertHls, mimeType, fileName);
+  await ensureUploadCapacity(userId, size, chunkSize, convertHls, mimeType, fileName, uploadAccountIds);
 
   const normalizedParent = normalizeParentPath(parentPath);
   ensureFolderHierarchy(userId, normalizedParent);
