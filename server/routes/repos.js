@@ -26,23 +26,43 @@ router.get('/available', async (req, res) => {
 
       const provider = storageProvider.normalizeProvider(account.provider || 'github');
       const mod = storageProvider.getModule(provider);
-      const client = mod.createClient(account.access_token);
-      const repos = await mod.getUserRepos(client, {
-        accountId: account.is_primary ? null : account.id,
-      });
-
-      for (const repo of repos.filter((r) => !r.fork)) {
-        available.push({
-          full_name: repo.full_name,
-          name: repo.name,
-          owner: repo.owner.login,
-          private: repo.private,
-          default_branch: repo.default_branch,
-          configured: configured.includes(repo.full_name),
-          linked_account_id: account.is_primary ? null : account.id,
-          account_username: account.username,
-          is_primary_account: !!account.is_primary,
+      if (typeof mod?.createClient !== 'function' || typeof mod?.getUserRepos !== 'function') {
+        console.warn('repos_available_skip_account', {
+          userId: req.user.id,
+          accountId: account.id,
           provider,
+          reason: 'storage module not loaded',
+        });
+        continue;
+      }
+
+      try {
+        const client = mod.createClient(account.access_token);
+        const repos = await mod.getUserRepos(client, {
+          accountId: account.is_primary ? null : account.id,
+        });
+
+        for (const repo of repos.filter((r) => !r.fork)) {
+          available.push({
+            full_name: repo.full_name,
+            name: repo.name,
+            owner: repo.owner.login,
+            private: repo.private,
+            default_branch: repo.default_branch,
+            configured: configured.includes(repo.full_name),
+            linked_account_id: account.is_primary ? null : account.id,
+            account_username: account.username,
+            is_primary_account: !!account.is_primary,
+            provider,
+          });
+        }
+      } catch (err) {
+        console.warn('repos_available_account_failed', {
+          userId: req.user.id,
+          accountId: account.id,
+          username: account.username,
+          provider,
+          error: err.message,
         });
       }
     }

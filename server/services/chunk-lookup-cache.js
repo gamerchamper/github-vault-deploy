@@ -3,7 +3,6 @@
  * Prevents repeated GitHub API/raw requests for known-missing chunks.
  */
 const crypto = require('crypto');
-const storageProvider = require('./storage-provider');
 
 const MISSING_TTL_MS = 30 * 60 * 1000;
 const CONFIRMED_MISSING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -190,11 +189,13 @@ function setRepoHealth(owner, repo, { reachable, branch }) {
 }
 
 function rawUrlFor(owner, repo, branch, path, provider = 'github') {
-  return storageProvider.rawUrl(
-    { full_name: `${owner}/${repo}`, provider },
-    branch || 'main',
-    path,
-  );
+  const normalized = String(provider || 'github').toLowerCase();
+  const encPath = String(path || '').split('/').map(encodeURIComponent).join('/');
+  if (normalized === 'bitbucket') {
+    const bitbucket = require('./bitbucket');
+    return bitbucket.rawUrlForRepo(`${owner}/${repo}`, branch || 'main', path);
+  }
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch || 'main'}/${encPath}`;
 }
 
 async function headBlob(owner, repo, path, branch, provider = 'github') {
