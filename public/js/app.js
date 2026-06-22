@@ -2891,30 +2891,66 @@ const App = {
     setText('setup-homepage-url', origin);
     setText('setup-callback-url', callback);
     setText('repo-setup-callback-url', callback);
+    setText('bitbucket-setup-callback-url', `${origin}/auth/bitbucket/callback`);
   },
 
   async updateLinkUrls() {
     const storageInput = document.getElementById('link-url-storage');
     const backupInput = document.getElementById('link-url-backup');
     const expiryEl = document.getElementById('link-url-expiry');
+    const bbStorageInput = document.getElementById('link-url-bitbucket-storage');
+    const bbBackupInput = document.getElementById('link-url-bitbucket-backup');
+    const bbExpiryEl = document.getElementById('bitbucket-link-url-expiry');
+    const bbPanel = document.getElementById('bitbucket-link-panel');
     if (!storageInput || !backupInput) return;
 
     storageInput.value = 'Generating one-time link…';
     backupInput.value = 'Generating one-time link…';
+    if (bbStorageInput) bbStorageInput.value = 'Generating one-time link…';
+    if (bbBackupInput) bbBackupInput.value = 'Generating one-time link…';
 
     try {
-      const [storage, backup] = await Promise.all([
-        API.accounts.createLinkToken('storage'),
-        API.accounts.createLinkToken('backup'),
-      ]);
+      const requests = [
+        API.accounts.createLinkToken('storage', 'github'),
+        API.accounts.createLinkToken('backup', 'github'),
+      ];
+      let providers = { bitbucket: { configured: false } };
+      try {
+        const providerInfo = await API.accounts.providers();
+        providers = Object.fromEntries((providerInfo.providers || []).map((p) => [p.id, p]));
+      } catch { /* optional */ }
+
+      if (providers.bitbucket?.configured) {
+        requests.push(
+          API.accounts.createLinkToken('storage', 'bitbucket'),
+          API.accounts.createLinkToken('backup', 'bitbucket'),
+        );
+        bbPanel?.classList.remove('hidden');
+      } else {
+        bbPanel?.classList.add('hidden');
+      }
+
+      const results = await Promise.all(requests);
+      const [storage, backup, bbStorage, bbBackup] = results;
+
       storageInput.value = storage.url;
       backupInput.value = backup.url;
       if (expiryEl) {
-        expiryEl.textContent = `Each link works once and expires in ${storage.expires_in_minutes} minutes.`;
+        expiryEl.textContent = `Each GitHub link works once and expires in ${storage.expires_in_minutes} minutes.`;
+      }
+
+      if (bbStorage && bbBackup && bbStorageInput && bbBackupInput) {
+        bbStorageInput.value = bbStorage.url;
+        bbBackupInput.value = bbBackup.url;
+        if (bbExpiryEl) {
+          bbExpiryEl.textContent = `Each Bitbucket link works once and expires in ${bbStorage.expires_in_minutes} minutes.`;
+        }
       }
     } catch (err) {
       storageInput.value = '';
       backupInput.value = '';
+      if (bbStorageInput) bbStorageInput.value = '';
+      if (bbBackupInput) bbBackupInput.value = '';
       this.toast(err.message, 'error');
     }
   },
@@ -2977,6 +3013,7 @@ const App = {
         const card = document.createElement('div');
         card.className = 'linked-account-card';
 
+        const providerLabel = account.provider === 'bitbucket' ? 'Bitbucket' : 'GitHub';
         const roleLabel = account.role === 'backup' ? 'Backup / redundancy' : 'Additional storage';
         const statusLabel = account.is_active ? 'Active' : 'Inactive';
 
@@ -2996,7 +3033,7 @@ const App = {
             <img class="linked-account-avatar" src="${account.avatar_url || ''}" alt="">
             <div>
               <span class="linked-account-name">@${account.username}</span>
-              <span class="linked-account-meta">${roleLabel} · ${statusLabel}</span>
+              <span class="linked-account-meta">${providerLabel} · ${roleLabel} · ${statusLabel}</span>
               ${quotaHtml}
             </div>
           </div>
@@ -3216,9 +3253,12 @@ const App = {
     const accountBadge = repo.account_username
       ? `<span class="repo-account-badge">@${repo.account_username}</span>`
       : '';
+    const providerBadge = repo.provider === 'bitbucket'
+      ? '<span class="repo-badge provider">Bitbucket</span>'
+      : '';
 
     info.innerHTML = `
-      <span class="repo-name">${repo.full_name || repo.name} ${accountBadge}</span>
+      <span class="repo-name">${repo.full_name || repo.name} ${providerBadge} ${accountBadge}</span>
       <span class="repo-meta">
         ${isConfigured
           ? `${repo.private === false || repo.is_public ? 'Public' : 'Private'} · ${repo.chunk_count || 0} chunks · ${formatSize(repo.vault_used || repo.total_bytes || 0)} vault data`

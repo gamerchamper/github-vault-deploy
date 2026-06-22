@@ -1,6 +1,7 @@
 const db = require('../db/database');
 const storage = require('./storage');
 const github = require('./github');
+const storageProvider = require('./storage-provider');
 const accounts = require('./accounts');
 const vaultOrg = require('./vault-org');
 const tasks = require('./tasks');
@@ -53,6 +54,8 @@ async function resolveCreateContext(userId, { linkedAccountId = null } = {}) {
   let linkId = null;
   let ownerLogin = user.username;
 
+  let provider = 'github';
+
   if (linkedAccountId) {
     const account = accounts.getLinkedAccount(userId, linkedAccountId);
     if (!account) throw new Error('Linked account not found');
@@ -63,17 +66,19 @@ async function resolveCreateContext(userId, { linkedAccountId = null } = {}) {
     ownerOrg = null;
     linkId = account.id;
     ownerLogin = account.username;
+    provider = account.provider || 'github';
   }
 
-  const octokit = github.createClient(token);
-  if (ownerOrg) await vaultOrg.assertOrgAdmin(octokit, ownerOrg);
+  const mod = storageProvider.getModule(provider);
+  const client = mod.createClient(token);
+  if (ownerOrg && provider === 'github') await vaultOrg.assertOrgAdmin(client, ownerOrg);
 
-  return { user, octokit, ownerOrg, linkId, ownerLogin };
+  return { user, client, mod, provider, ownerOrg, linkId, ownerLogin };
 }
 
 async function createStorageRepo(userId, { linkedAccountId = null, startSuffix = null } = {}) {
   const ctx = await resolveCreateContext(userId, { linkedAccountId });
-  const { octokit, ownerOrg, linkId, ownerLogin } = ctx;
+  const { client, mod, provider, ownerOrg, linkId, ownerLogin } = ctx;
 
   let suffix = startSuffix != null
     ? startSuffix
@@ -91,14 +96,14 @@ async function createStorageRepo(userId, { linkedAccountId = null, startSuffix =
 
     let info;
     try {
-      info = await github.getRepoInfo(octokit, owner, repoName);
+      info = await mod.getRepoInfo(client, owner, repoName);
     } catch {
       try {
-        info = ownerOrg
-          ? await github.createStorageRepo(octokit, repoName, ownerOrg)
-          : await github.createStorageRepo(octokit, repoName);
+        info = ownerOrg && provider === 'github'
+          ? await mod.createStorageRepo(client, repoName, ownerOrg)
+          : await mod.createStorageRepo(client, repoName);
       } catch (err) {
-        const msg = err.response?.data?.message || err.message || '';
+        const msg = err.response?.data?.message || err.response?.data?.error?.message || err.message || '';
         if (/already exists/i.test(msg)) continue;
         throw err;
       }
@@ -107,6 +112,7 @@ async function createStorageRepo(userId, { linkedAccountId = null, startSuffix =
     return storage.addRepo(userId, info.full_name, info.default_branch || 'main', {
       linkedAccountId: linkId,
       isPublic: !info.private,
+      provider,
     });
   }
 

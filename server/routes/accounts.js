@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const { ensureSetup } = require('../middleware/setup');
 const accounts = require('../services/accounts');
 const github = require('../services/github');
+const storageProvider = require('../services/storage-provider');
 
 const router = express.Router();
 
@@ -112,11 +113,22 @@ router.post('/backup-sync', async (req, res) => {
 router.post('/link-token', (req, res) => {
   try {
     const role = req.body.role === 'backup' ? 'backup' : 'storage';
-    const link = accounts.createLinkToken(req.user.id, role, req);
+    const provider = req.body.provider === 'bitbucket' ? 'bitbucket' : 'github';
+    const link = accounts.createLinkToken(req.user.id, role, req, provider);
     res.json({ success: true, ...link });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+router.get('/providers', (req, res) => {
+  const storageProvider = require('../services/storage-provider');
+  res.json({
+    providers: storageProvider.listProviders().map((p) => ({
+      ...p,
+      configured: storageProvider.isConfigured(p.id),
+    })),
+  });
 });
 
 router.post('/:id/redo-backup', async (req, res) => {
@@ -175,8 +187,10 @@ router.get('/:id/repos/available', async (req, res) => {
       return res.status(400).json({ error: 'Only storage accounts can add repositories' });
     }
 
-    const octokit = github.createClient(account.access_token);
-    const repos = await github.getUserRepos(octokit);
+    const accountProvider = storageProvider.normalizeProvider(account.provider);
+    const mod = storageProvider.getModule(accountProvider);
+    const client = mod.createClient(account.access_token);
+    const repos = await mod.getUserRepos(client, { accountId: account.id });
     const db = require('../db/database');
     const configured = db.prepare('SELECT full_name FROM storage_repos WHERE user_id = ?')
       .all(req.user.id).map((r) => r.full_name);
@@ -186,6 +200,7 @@ router.get('/:id/repos/available', async (req, res) => {
         id: account.id,
         username: account.username,
         role: account.role,
+        provider: accountProvider,
       },
       repos: repos.filter((r) => !r.fork).map((r) => ({
         full_name: r.full_name,
@@ -196,6 +211,7 @@ router.get('/:id/repos/available', async (req, res) => {
         configured: configured.includes(r.full_name),
         linked_account_id: account.id,
         account_username: account.username,
+        provider: accountProvider,
       })),
     });
   } catch (err) {

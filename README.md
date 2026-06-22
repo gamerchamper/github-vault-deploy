@@ -37,6 +37,12 @@ GITHUB_CLIENT_SECRET=your_client_secret
 SESSION_SECRET=some_random_secret_string
 SITE_ACCESS_KEY=123456
 APP_URL=http://localhost:3000
+
+# Optional: link Bitbucket accounts for additional storage (OAuth callback: {APP_URL}/auth/bitbucket/callback)
+BITBUCKET_CLIENT_ID=
+BITBUCKET_CLIENT_SECRET=
+# BITBUCKET_RATE_LIMIT_HOUR=1000
+# BITBUCKET_RAW_RATE_LIMIT_HOUR=5000
 ```
 
 ### 3. Install & Run
@@ -79,6 +85,10 @@ Metadata (file names, paths, chunk locations, SHAs) is stored locally in SQLite.
 | `LOCAL_AUTH` | true | Auto-login when visiting via localhost or server LAN IP (set `false` to require GitHub sign-in everywhere) |
 | `LOCAL_AUTH_USER_ID` | (first user) | Which vault user to use for local auto-login |
 | `SITE_ACCESS_KEY` | (unset) | Optional 6-digit key for login and share links; can also be set in **Quick access → Site access** in the vault UI |
+| `BITBUCKET_CLIENT_ID` | (unset) | Bitbucket OAuth client ID for linking Bitbucket storage accounts |
+| `BITBUCKET_CLIENT_SECRET` | (unset) | Bitbucket OAuth client secret |
+| `BITBUCKET_RATE_LIMIT_HOUR` | 1000 | Rolling API request limit per token (Bitbucket Cloud standard) |
+| `BITBUCKET_RAW_RATE_LIMIT_HOUR` | 5000 | Rolling raw file download limit per token |
 
 ## Docker
 

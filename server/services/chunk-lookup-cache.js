@@ -3,6 +3,7 @@
  * Prevents repeated GitHub API/raw requests for known-missing chunks.
  */
 const crypto = require('crypto');
+const storageProvider = require('./storage-provider');
 
 const MISSING_TTL_MS = 30 * 60 * 1000;
 const CONFIRMED_MISSING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -188,13 +189,21 @@ function setRepoHealth(owner, repo, { reachable, branch }) {
   repoHealthCache.set(key, { reachable, branch, at: Date.now() });
 }
 
-async function headBlob(owner, repo, path, branch) {
+function rawUrlFor(owner, repo, branch, path, provider = 'github') {
+  return storageProvider.rawUrl(
+    { full_name: `${owner}/${repo}`, provider },
+    branch || 'main',
+    path,
+  );
+}
+
+async function headBlob(owner, repo, path, branch, provider = 'github') {
   const key = blobKey(owner, repo, path, branch);
   if (await isBlobMissingAsync(key)) return { ok: false, status: 404, cached: true };
 
   return dedupe(`head:${key}`, async () => {
     if (isBlobMissing(key)) return { ok: false, status: 404, cached: true };
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch || 'main'}/${path}`;
+    const rawUrl = rawUrlFor(owner, repo, branch, path, provider);
     const resp = await fetch(rawUrl, { method: 'HEAD', timeout: 10000 });
     if (resp.status === 404) {
       markBlobMissing(key);
@@ -257,7 +266,7 @@ async function downloadBlob(octokit, owner, repo, path, branch, { subsystem = 'd
       throw err;
     }
 
-    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch || 'main'}/${path}`;
+    const rawUrl = rawUrlFor(owner, repo, branch, path, opts.provider || 'github');
     const resp = await fetch(rawUrl, { timeout: 60000 });
     if (resp.ok) {
       clearBlobMissing(key);

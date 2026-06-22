@@ -35,6 +35,7 @@ function createMemoryDb() {
       repo_role TEXT DEFAULT 'primary',
       mirrors_repo_id INTEGER,
       is_public INTEGER DEFAULT 0,
+      provider TEXT NOT NULL DEFAULT 'github',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
       UNIQUE(user_id, full_name)
@@ -105,9 +106,10 @@ function createMemoryDb() {
       access_token TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'storage',
       is_active INTEGER DEFAULT 1,
+      provider TEXT NOT NULL DEFAULT 'github',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
-      UNIQUE(user_id, github_id)
+      UNIQUE(user_id, provider, github_id)
     );
 
     CREATE TABLE IF NOT EXISTS link_tokens (
@@ -116,6 +118,7 @@ function createMemoryDb() {
       role TEXT NOT NULL,
       expires_at DATETIME NOT NULL,
       used_at DATETIME,
+      provider TEXT NOT NULL DEFAULT 'github',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );

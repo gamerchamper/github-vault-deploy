@@ -336,7 +336,8 @@ const API = {
     list: () => API.get('/api/accounts'),
     rateLimits: () => API.get('/api/accounts/rate-limits'),
     migrateToMysql: () => API.post('/api/accounts/migrate-mysql'),
-    createLinkToken: (role) => API.post('/api/accounts/link-token', { role }),
+    createLinkToken: (role, provider = 'github') => API.post('/api/accounts/link-token', { role, provider }),
+    providers: () => API.get('/api/accounts/providers'),
     views: () => API.get('/api/accounts/views'),
     backupStatus: () => API.get('/api/accounts/backup-status'),
     startBackupSync: (accountId, { force = false } = {}) => API.post('/api/accounts/backup-sync', {

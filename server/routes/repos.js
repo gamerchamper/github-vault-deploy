@@ -3,6 +3,7 @@ const { requireAuth } = require('../middleware/auth');
 const { ensureSetup } = require('../middleware/setup');
 const storage = require('../services/storage');
 const github = require('../services/github');
+const storageProvider = require('../services/storage-provider');
 const capacity = require('../services/capacity');
 const vaultOrg = require('../services/vault-org');
 const accounts = require('../services/accounts');
@@ -23,8 +24,12 @@ router.get('/available', async (req, res) => {
     for (const account of accounts.listAccountsWithTokens(req.user.id)) {
       if (!account.is_primary && account.role !== 'storage') continue;
 
-      const octokit = github.createClient(account.access_token);
-      const repos = await github.getUserRepos(octokit);
+      const provider = storageProvider.normalizeProvider(account.provider || 'github');
+      const mod = storageProvider.getModule(provider);
+      const client = mod.createClient(account.access_token);
+      const repos = await mod.getUserRepos(client, {
+        accountId: account.is_primary ? null : account.id,
+      });
 
       for (const repo of repos.filter((r) => !r.fork)) {
         available.push({
@@ -37,6 +42,7 @@ router.get('/available', async (req, res) => {
           linked_account_id: account.is_primary ? null : account.id,
           account_username: account.username,
           is_primary_account: !!account.is_primary,
+          provider,
         });
       }
     }
@@ -67,6 +73,7 @@ router.get('/configured', async (req, res) => {
         account_username: repo.linked_account_id
           ? accountMap[repo.linked_account_id]?.username
           : user.username,
+        provider: repo.provider || 'github',
       })),
       total: capacity.aggregateCapacity(withCapacity),
       repo_capacity_bytes: capacity.REPO_CAPACITY_BYTES,
@@ -104,6 +111,7 @@ router.post('/add', async (req, res) => {
     if (!full_name) return res.status(400).json({ error: 'full_name required' });
 
     let token;
+    let provider = 'github';
     if (linkedAccountId) {
       const account = accounts.getLinkedAccount(req.user.id, linkedAccountId);
       if (!account) return res.status(404).json({ error: 'Linked account not found' });
@@ -111,18 +119,21 @@ router.post('/add', async (req, res) => {
         return res.status(400).json({ error: 'Only storage-linked accounts can add repositories' });
       }
       token = account.access_token;
+      provider = account.provider || 'github';
     } else {
       const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
       token = user.access_token;
     }
 
-    const octokit = github.createClient(token);
+    const mod = storageProvider.getModule(provider);
+    const client = mod.createClient(token);
     const [owner, name] = full_name.split('/');
-    const info = await github.getRepoInfo(octokit, owner, name);
+    const info = await mod.getRepoInfo(client, owner, name);
 
     const repo = storage.addRepo(req.user.id, full_name, info.default_branch, {
       linkedAccountId: linkedAccountId || null,
       isPublic: !info.private,
+      provider,
     });
     res.json({ success: true, repo });
   } catch (err) {

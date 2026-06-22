@@ -213,4 +213,106 @@ router.post('/logout', (req, res) => {
   });
 });
 
+const bitbucketOauth = require('../services/bitbucket-oauth');
+const storageProvider = require('../services/storage-provider');
+
+router.get('/storage-providers', (req, res) => {
+  res.json({
+    providers: storageProvider.listProviders().map((p) => ({
+      ...p,
+      configured: storageProvider.isConfigured(p.id),
+    })),
+  });
+});
+
+router.get('/bitbucket/link', requireSiteAccessForAuth, (req, res) => {
+  if (!bitbucketOauth.isConfigured()) {
+    return res.status(503).send(linkErrorPage('Bitbucket OAuth is not configured on this server (BITBUCKET_CLIENT_ID / BITBUCKET_CLIENT_SECRET)'));
+  }
+
+  const startOAuth = () => {
+    const state = req.session.linkingToken || '';
+    res.redirect(bitbucketOauth.buildAuthorizeUrl(req, state));
+  };
+
+  if (req.query.token) {
+    try {
+      const row = accounts.peekLinkToken(req.query.token);
+      if (storageProvider.normalizeProvider(row.provider) !== 'bitbucket') {
+        return res.status(400).send(linkErrorPage('This link is for Bitbucket — generate a Bitbucket link from Storage Repositories'));
+      }
+      req.session.linkingForUserId = row.user_id;
+      req.session.linkingRole = row.role;
+      req.session.linkingToken = req.query.token;
+      req.session.linkingProvider = 'bitbucket';
+      return startOAuth();
+    } catch (err) {
+      return res.status(400).send(linkErrorPage(err.message));
+    }
+  }
+
+  if (!req.isAuthenticated || !req.isAuthenticated()) {
+    return res.status(401).json({
+      error: 'Not authenticated — open Storage Repositories and copy a one-time Bitbucket link',
+    });
+  }
+
+  req.session.linkingForUserId = req.user.id;
+  req.session.linkingRole = req.query.role === 'backup' ? 'backup' : 'storage';
+  req.session.linkingProvider = 'bitbucket';
+  startOAuth();
+});
+
+router.get('/bitbucket/callback', async (req, res) => {
+  const wasLinking = !!(req.session?.linkingForUserId || req.session?.linkingToken);
+  const code = req.query.code;
+  if (!code) {
+    const reason = encodeURIComponent(req.query.error_description || req.query.error || 'Missing authorization code');
+    return res.redirect(`/?error=link_failed&reason=${reason}`);
+  }
+
+  try {
+    const tokenData = await bitbucketOauth.exchangeCode(code, req);
+    const profile = await bitbucketOauth.fetchProfile(tokenData.access_token);
+    const linkToken = req.session.linkingToken;
+    let userId = req.session.linkingForUserId;
+    let role = req.session.linkingRole || 'storage';
+
+    if (linkToken) {
+      const row = accounts.consumeLinkToken(linkToken);
+      userId = row.user_id;
+      role = row.role;
+    }
+    if (!userId) throw new Error('Vault session expired — generate a fresh link');
+
+    await accounts.linkAccount(userId, profile, tokenData.access_token, role, 'bitbucket');
+
+    delete req.session.linkingForUserId;
+    delete req.session.linkingRole;
+    delete req.session.linkingToken;
+    delete req.session.linkingProvider;
+
+    const vaultUser = db.prepare(
+      'SELECT id, github_id, username, avatar_url FROM users WHERE id = ?'
+    ).get(userId);
+    if (!vaultUser) throw new Error('Vault user not found');
+
+    req.session.linkedSuccess = true;
+    req.session.linkedProvider = 'bitbucket';
+    req.logIn(vaultUser, (loginErr) => {
+      if (loginErr) return res.redirect('/?error=link_failed');
+      return res.redirect('/?linked=1&provider=bitbucket');
+    });
+  } catch (err) {
+    console.error('Bitbucket link callback error:', err);
+    delete req.session.linkingForUserId;
+    delete req.session.linkingRole;
+    delete req.session.linkingToken;
+    delete req.session.linkingProvider;
+    const reason = encodeURIComponent(err.message || 'Bitbucket link failed');
+    if (wasLinking) return res.redirect(`/?error=link_failed&reason=${reason}`);
+    return res.redirect(`/?error=auth_failed&reason=${reason}`);
+  }
+});
+
 module.exports = router;

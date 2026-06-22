@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const db = require('../db/database');
 const github = require('./github');
+const storageProvider = require('./storage-provider');
 const appUrl = require('./app-url');
 
 const VALID_ROLES = new Set(['storage', 'backup']);
@@ -12,31 +13,53 @@ function getUser(userId) {
 
 function listLinkedAccounts(userId) {
   return db.prepare(`
-    SELECT id, github_id, username, avatar_url, role, is_active, created_at
+    SELECT id, github_id, username, avatar_url, role, is_active, created_at, provider
     FROM linked_accounts WHERE user_id = ? ORDER BY created_at ASC
   `).all(userId);
+}
+
+function providerModuleForAccount(account) {
+  return storageProvider.getModule(account?.provider || 'github');
+}
+
+function providerModuleForRepo(repo) {
+  return storageProvider.getModule(repo?.provider || 'github');
+}
+
+function rateLimitForAccount(account) {
+  return storageProvider.getRateLimit(account?.provider || 'github');
+}
+
+function rateLimitForRepo(repo) {
+  return storageProvider.getRateLimitForRepo(repo);
 }
 
 function getLinkedAccount(userId, accountId) {
   return db.prepare('SELECT * FROM linked_accounts WHERE id = ? AND user_id = ?').get(accountId, userId);
 }
 
-function createLinkToken(userId, role, req = null) {
+function createLinkToken(userId, role, req = null, provider = 'github') {
   if (!VALID_ROLES.has(role)) throw new Error('Invalid account role');
+  const normalizedProvider = storageProvider.normalizeProvider(provider);
+  if (!storageProvider.isConfigured(normalizedProvider)) {
+    throw new Error(`${storageProvider.getProvider(normalizedProvider).label} OAuth is not configured on this server`);
+  }
 
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + LINK_TOKEN_TTL_MS).toISOString();
   db.prepare(`
-    INSERT INTO link_tokens (token, user_id, role, expires_at)
-    VALUES (?, ?, ?, ?)
-  `).run(token, userId, role, expiresAt);
+    INSERT INTO link_tokens (token, user_id, role, expires_at, provider)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(token, userId, role, expiresAt, normalizedProvider);
 
+  const authPath = storageProvider.getProvider(normalizedProvider).authPath;
   return {
     token,
     role,
+    provider: normalizedProvider,
     expires_at: expiresAt,
     expires_in_minutes: LINK_TOKEN_TTL_MS / 60000,
-    url: appUrl.publicUrl(req, `/auth/github/link?token=${token}`),
+    url: appUrl.publicUrl(req, `${authPath}?token=${token}`),
   };
 }
 
@@ -81,9 +104,9 @@ function listAccountsWithTokens(userId) {
 
   const linked = db.prepare(`
     SELECT * FROM linked_accounts WHERE user_id = ? AND is_active = 1 ORDER BY created_at ASC
-  `).all(userId).map((a) => ({ ...a, is_primary: false }));
+  `).all(userId).map((a) => ({ ...a, is_primary: false, provider: a.provider || 'github' }));
 
-  return [primary, ...linked];
+  return [{ ...primary, is_primary: true, provider: 'github' }, ...linked];
 }
 
 function getTokenForRepo(userId, repo) {
@@ -100,27 +123,33 @@ function getTokenForRepo(userId, repo) {
 function listActiveTokens(userId) {
   const user = getUser(userId);
   if (!user) return [];
-  const tokens = [{ token: user.access_token, label: 'primary', userId }];
+  const tokens = [{ token: user.access_token, label: 'primary', userId, provider: 'github' }];
   const linked = db.prepare(`
-    SELECT access_token, role, username FROM linked_accounts
+    SELECT access_token, role, username, provider FROM linked_accounts
     WHERE user_id = ? AND is_active = 1
   `).all(userId);
   for (const acct of linked) {
-    tokens.push({ token: acct.access_token, label: acct.username || acct.role, userId });
+    tokens.push({
+      token: acct.access_token,
+      label: acct.username || acct.role,
+      userId,
+      provider: acct.provider || 'github',
+    });
   }
   return tokens;
 }
 
 function pickBestToken(tokens, { minRemaining = 0 } = {}) {
-  const rateLimit = require('./github-rate-limit');
   let best = null;
   let bestRemaining = -1;
   for (const t of tokens) {
-    const key = rateLimit.keyForToken(t.token);
-    if (rateLimit.isPaused(key)) continue;
-    const quota = rateLimit.getQuotaStatus(key);
+    const rl = storageProvider.getRateLimit(t.provider || 'github');
+    const key = rl.keyForToken(t.token);
+    if (rl.isPaused(key)) continue;
+    const quota = rl.getQuotaStatus(key);
     if (quota?.exhausted) continue;
-    const remaining = quota?.remaining ?? 5000;
+    const defaultRem = storageProvider.getProvider(t.provider || 'github').defaultRateLimitHour;
+    const remaining = quota?.remaining ?? defaultRem;
     if (remaining < minRemaining) continue;
     if (remaining > bestRemaining) {
       bestRemaining = remaining;
@@ -132,37 +161,39 @@ function pickBestToken(tokens, { minRemaining = 0 } = {}) {
 }
 
 function createClientForRepo(userId, repo) {
+  const mod = providerModuleForRepo(repo);
   const repoToken = getTokenForRepo(userId, repo);
   if (repo?.linked_account_id) {
-    return github.createClient(repoToken);
+    return mod.createClient(repoToken);
   }
   const tokens = listActiveTokens(userId).map((t) => ({
     token: t.token,
     label: t.label,
+    provider: t.provider || 'github',
     isRepo: t.token === repoToken,
   }));
-  const rateLimit = require('./github-rate-limit');
-  const repoKey = rateLimit.keyForToken(repoToken);
-  const repoQuota = rateLimit.getQuotaStatus(repoKey);
-  const repoRemaining = repoQuota?.remaining ?? 5000;
+  const rl = rateLimitForRepo(repo);
+  const repoKey = rl.keyForToken(repoToken);
+  const repoQuota = rl.getQuotaStatus(repoKey);
+  const defaultRem = storageProvider.getProviderForRepo(repo).defaultRateLimitHour;
+  const repoRemaining = repoQuota?.remaining ?? defaultRem;
   const repoBlocked = repoQuota?.paused || repoQuota?.exhausted || repoRemaining <= 0;
 
   if (!repoBlocked && repoRemaining > 200) {
-    return github.createClient(repoToken);
+    return mod.createClient(repoToken);
   }
 
   const best = pickBestToken(tokens, { minRemaining: 50 });
   if (best?.token && best.token !== repoToken) {
-    return github.createClient(best.token);
+    return storageProvider.getModule(best.provider || 'github').createClient(best.token);
   }
-  return github.createClient(repoToken);
+  return mod.createClient(repoToken);
 }
 
 function createClientForUpload(userId, repo) {
+  const mod = providerModuleForRepo(repo);
   const repoToken = getTokenForRepo(userId, repo);
-  // Always use the token that owns this repo. Cross-account fallback returns 404
-  // for linked storage repos; rate limits are handled by github.createClient hooks.
-  return github.createClient(repoToken);
+  return mod.createClient(repoToken);
 }
 
 function getBackupReposForPrimary(userId, primaryRepoId, linkedAccountId = null) {
@@ -180,9 +211,10 @@ function getBackupReposForPrimary(userId, primaryRepoId, linkedAccountId = null)
   return db.prepare(sql).all(...params);
 }
 
-function registerBackupRepo(userId, linkedAccountId, primaryRepoId, info) {
+function registerBackupRepo(userId, linkedAccountId, primaryRepoId, info, provider = 'github') {
   const [owner, name] = info.full_name.split('/');
   const branch = info.default_branch || 'main';
+  const normalizedProvider = storageProvider.normalizeProvider(provider);
 
   const existing = db.prepare(
     'SELECT * FROM storage_repos WHERE user_id = ? AND full_name = ?'
@@ -192,24 +224,27 @@ function registerBackupRepo(userId, linkedAccountId, primaryRepoId, info) {
     db.prepare(`
       UPDATE storage_repos
       SET owner = ?, name = ?, default_branch = ?, linked_account_id = ?,
-          repo_role = 'backup', mirrors_repo_id = ?, is_active = 1
+          repo_role = 'backup', mirrors_repo_id = ?, is_active = 1, provider = ?
       WHERE id = ?
-    `).run(owner, name, branch, linkedAccountId, primaryRepoId, existing.id);
+    `).run(owner, name, branch, linkedAccountId, primaryRepoId, normalizedProvider, existing.id);
     return db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(existing.id);
   }
 
   const result = db.prepare(`
     INSERT INTO storage_repos (
       user_id, owner, name, full_name, default_branch, is_metadata,
-      linked_account_id, repo_role, mirrors_repo_id
-    ) VALUES (?, ?, ?, ?, ?, 0, ?, 'backup', ?)
-  `).run(userId, owner, name, info.full_name, branch, linkedAccountId, primaryRepoId);
+      linked_account_id, repo_role, mirrors_repo_id, provider
+    ) VALUES (?, ?, ?, ?, ?, 0, ?, 'backup', ?, ?)
+  `).run(userId, owner, name, info.full_name, branch, linkedAccountId, primaryRepoId, normalizedProvider);
   return db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(result.lastInsertRowid);
 }
 
 async function ensureBackupMirrorRepo(userId, linkedAccountId, primaryRepo) {
   const account = getLinkedAccount(userId, linkedAccountId);
   if (!account) throw new Error('Linked account not found');
+
+  const accountProvider = storageProvider.normalizeProvider(account.provider);
+  const mod = storageProvider.getModule(accountProvider);
 
   const existing = db.prepare(`
     SELECT * FROM storage_repos
@@ -218,44 +253,51 @@ async function ensureBackupMirrorRepo(userId, linkedAccountId, primaryRepo) {
   if (existing) return existing;
 
   const [primaryOwner, primaryName] = primaryRepo.full_name.split('/');
-  const backupOctokit = github.createClient(account.access_token);
+  const backupClient = mod.createClient(account.access_token);
 
   let info;
   let usedFork = false;
-  try {
-    const existingFork = await github.findFork(
-      backupOctokit, primaryOwner, primaryName, account.username
-    );
-    if (existingFork) {
-      info = existingFork;
-      usedFork = true;
-    } else {
-      info = await github.forkRepo(backupOctokit, primaryOwner, primaryName, account.username);
-      usedFork = true;
-    }
-  } catch (err) {
-    const msg = err.response?.data?.message || err.message || '';
-    const needsAccess = /not fork|cannot fork|access|permission|private/i.test(msg);
-    if (needsAccess) {
-      throw new Error(
-        `Cannot fork ${primaryRepo.full_name}: make it public or add @${account.username} as a collaborator`
-      );
-    }
+
+  if (accountProvider === 'github' && storageProvider.getProvider('github').supportsForkBackup) {
     try {
-      info = await github.getRepoInfo(backupOctokit, account.username, primaryName);
-      usedFork = true;
+      const existingFork = await mod.findFork(
+        backupClient, primaryOwner, primaryName, account.username
+      );
+      if (existingFork) {
+        info = existingFork;
+        usedFork = true;
+      } else {
+        info = await mod.forkRepo(backupClient, primaryOwner, primaryName, account.username);
+        usedFork = true;
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '';
+      const needsAccess = /not fork|cannot fork|access|permission|private/i.test(msg);
+      if (needsAccess) {
+        throw new Error(
+          `Cannot fork ${primaryRepo.full_name}: make it public or add @${account.username} as a collaborator`
+        );
+      }
+      usedFork = false;
+    }
+  }
+
+  if (!info) {
+    try {
+      info = await mod.getRepoInfo(backupClient, account.username, primaryName);
+      usedFork = accountProvider === 'github';
     } catch {
       const safeName = primaryRepo.name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 40);
       const repoName = `vault-backup-${safeName}`.slice(0, 100);
       try {
-        info = await github.getRepoInfo(backupOctokit, account.username, repoName);
+        info = await mod.getRepoInfo(backupClient, account.username, repoName);
       } catch (getErr) {
         try {
-          info = await github.createStorageRepo(backupOctokit, repoName);
+          info = await mod.createStorageRepo(backupClient, repoName);
         } catch (createErr) {
           const createMsg = createErr.response?.data?.message || createErr.message || '';
           if (/already exists/i.test(createMsg)) {
-            info = await github.getRepoInfo(backupOctokit, account.username, repoName);
+            info = await mod.getRepoInfo(backupClient, account.username, repoName);
           } else {
             throw createErr;
           }
@@ -264,8 +306,8 @@ async function ensureBackupMirrorRepo(userId, linkedAccountId, primaryRepo) {
     }
   }
 
-  const backupRepo = registerBackupRepo(userId, linkedAccountId, primaryRepo.id, info);
-  if (usedFork) {
+  const backupRepo = registerBackupRepo(userId, linkedAccountId, primaryRepo.id, info, accountProvider);
+  if (usedFork && accountProvider === 'github') {
     try {
       await reconcileChunkBackupsForRepo(userId, primaryRepo.id, backupRepo.id);
     } catch {
@@ -286,7 +328,8 @@ async function reconcileChunkBackupsForRepo(userId, primaryRepoId, backupRepoId,
   if (!backupRepo) return 0;
 
   const [owner, name] = backupRepo.full_name.split('/');
-  const octokit = createClientForRepo(userId, backupRepo);
+  const client = createClientForRepo(userId, backupRepo);
+  const mod = providerModuleForRepo(backupRepo);
   const { mapConcurrent } = require('./chunk-session');
   let totalReconciled = 0;
   const maxRounds = 6;
@@ -308,7 +351,9 @@ async function reconcileChunkBackupsForRepo(userId, primaryRepoId, backupRepoId,
     let reconciled = 0;
     await mapConcurrent(chunks, RECONCILE_CONCURRENCY, async (chunk) => {
       if (workloadGovernor.shouldDeferBackground(userId)) return;
-      const sha = await github.getFileSha(octokit, owner, name, chunk.repo_path, backupRepo.default_branch, { subsystem: 'reconcile' });
+      const sha = await mod.getFileSha(
+        client, owner, name, chunk.repo_path, backupRepo.default_branch, { subsystem: 'reconcile' }
+      );
       if (!sha) return;
 
       const existing = db.prepare(
@@ -367,6 +412,7 @@ async function syncForkBackups(userId, linkedAccountId, onProgress = null) {
 
   for (let i = 0; i < pairs.length; i++) {
     const pair = pairs[i];
+    if (storageProvider.normalizeProvider(account.provider) !== 'github') continue;
     const [owner, name] = pair.full_name.split('/');
 
     if (onProgress) {
@@ -451,41 +497,57 @@ async function redoBackupSetup(userId, linkedAccountId) {
   };
 }
 
-async function linkAccount(userId, profile, accessToken, role = 'storage') {
+async function linkAccount(userId, profile, accessToken, role = 'storage', provider = 'github') {
   if (!VALID_ROLES.has(role)) throw new Error('Invalid account role');
 
   const user = getUser(userId);
   if (!user) throw new Error('User not found');
 
-  const githubId = String(profile.id);
-  if (user.github_id === githubId) {
+  const normalizedProvider = storageProvider.normalizeProvider(provider);
+  const externalId = String(profile.id);
+  if (normalizedProvider === 'github' && user.github_id === externalId) {
     throw new Error('Cannot link your primary sign-in account');
   }
 
-  const existing = db.prepare('SELECT id FROM linked_accounts WHERE user_id = ? AND github_id = ?')
-    .get(userId, githubId);
+  const existing = db.prepare(
+    'SELECT id FROM linked_accounts WHERE user_id = ? AND provider = ? AND github_id = ?'
+  ).get(userId, normalizedProvider, externalId);
 
   let accountId;
   if (existing) {
     db.prepare(`
       UPDATE linked_accounts
-      SET access_token = ?, username = ?, avatar_url = ?, role = ?, is_active = 1
+      SET access_token = ?, username = ?, avatar_url = ?, role = ?, is_active = 1, provider = ?
       WHERE id = ?
-    `).run(accessToken, profile.username, profile.photos?.[0]?.value, role, existing.id);
+    `).run(
+      accessToken,
+      profile.username,
+      profile.photos?.[0]?.value,
+      role,
+      normalizedProvider,
+      existing.id,
+    );
     accountId = existing.id;
   } else {
     const result = db.prepare(`
-      INSERT INTO linked_accounts (user_id, github_id, username, avatar_url, access_token, role)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(userId, githubId, profile.username, profile.photos?.[0]?.value, accessToken, role);
+      INSERT INTO linked_accounts (user_id, github_id, username, avatar_url, access_token, role, provider)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      externalId,
+      profile.username,
+      profile.photos?.[0]?.value,
+      accessToken,
+      role,
+      normalizedProvider,
+    );
     accountId = result.lastInsertRowid;
   }
 
-  // Add as collaborator to all primary repos so this account can write when primary is rate-limited
   try {
     await ensureCollaboratorsForAccount(userId, accountId);
   } catch (err) {
-    console.warn(`Failed to add collaborator for linked account ${accountId}: ${err.message}`);
+    console.warn(`Failed to add permissions for linked account ${accountId}: ${err.message}`);
   }
 
   if (role === 'backup') {
@@ -512,7 +574,7 @@ function updateAccount(userId, accountId, { role, is_active: isActive }) {
   }
 
   return db.prepare(`
-    SELECT id, github_id, username, avatar_url, role, is_active, created_at
+    SELECT id, github_id, username, avatar_url, role, is_active, created_at, provider
     FROM linked_accounts WHERE id = ? AND user_id = ?
   `).get(accountId, userId);
 }
@@ -546,12 +608,12 @@ function unlinkAccount(userId, accountId) {
 }
 
 function isBackupRepoRateLimited(userId, repo) {
-  const rateLimit = require('./github-rate-limit');
   try {
+    const rl = rateLimitForRepo(repo);
     const token = getTokenForRepo(userId, repo);
-    const tokenKey = rateLimit.keyForToken(token);
-    const status = rateLimit.getQuotaStatus(tokenKey);
-    return status.paused || status.exhausted || rateLimit.isPaused(tokenKey);
+    const tokenKey = rl.keyForToken(token);
+    const status = rl.getQuotaStatus(tokenKey);
+    return status.paused || status.exhausted || rl.isPaused(tokenKey);
   } catch {
     return false;
   }
@@ -569,11 +631,11 @@ async function mirrorChunk(userId, chunkId, encrypted, repoPath, primaryRepoId, 
     if (existing) continue;
 
     const [owner, repoName] = repo.full_name.split('/');
-    const octokit = createClientForRepo(userId, repo);
+    const client = createClientForRepo(userId, repo);
+    const mod = providerModuleForRepo(repo);
 
-    // Chunk may already exist on backup GitHub without a DB row (interrupted sync, reconcile gap)
-    const remoteSha = await github.getFileSha(
-      octokit, owner, repoName, repoPath, repo.default_branch, { subsystem: 'backup-sync' }
+    const remoteSha = await mod.getFileSha(
+      client, owner, repoName, repoPath, repo.default_branch, { subsystem: 'backup-sync' }
     );
     if (remoteSha) {
       db.prepare('INSERT OR IGNORE INTO chunk_backups (chunk_id, repo_id, sha) VALUES (?, ?, ?)')
@@ -581,8 +643,8 @@ async function mirrorChunk(userId, chunkId, encrypted, repoPath, primaryRepoId, 
       continue;
     }
 
-    const sha = await github.uploadChunk(
-      octokit, owner, repoName, repoPath, encrypted, repo.default_branch
+    const sha = await mod.uploadChunk(
+      client, owner, repoName, repoPath, encrypted, repo.default_branch
     );
 
     db.prepare('INSERT INTO chunk_backups (chunk_id, repo_id, sha) VALUES (?, ?, ?)')
@@ -652,8 +714,9 @@ async function downloadChunkData(userId, chunk, repo, repoPath, branch) {
   if (cached) return cached;
 
   const [owner, repoName] = repo.full_name.split('/');
-  const octokit = createClientForRepo(userId, repo);
-  const data = await github.downloadChunk(octokit, owner, repoName, repoPath, branch, { subsystem: 'download' });
+  const client = createClientForRepo(userId, repo);
+  const mod = providerModuleForRepo(repo);
+  const data = await mod.downloadChunk(client, owner, repoName, repoPath, branch, { subsystem: 'download' });
   chunkCache.put(userId, chunk.id, data);
   return data;
 }
@@ -698,41 +761,50 @@ const ROLE_LABELS = {
 };
 
 async function getAccountRateLimits(userId) {
-  const rateLimit = require('./github-rate-limit');
   const accounts = listAccountsWithTokens(userId);
   const seen = new Set();
   const unique = [];
 
   for (const account of accounts) {
     if (!account.access_token || !account.is_active) continue;
-    const tokenKey = rateLimit.keyForToken(account.access_token);
-    if (seen.has(tokenKey)) continue;
-    seen.add(tokenKey);
-    unique.push({ account, tokenKey, token: account.access_token });
+    const provider = account.provider || 'github';
+    const rl = storageProvider.getRateLimit(provider);
+    const tokenKey = rl.keyForToken(account.access_token);
+    const dedupeKey = `${provider}:${tokenKey}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    unique.push({ account, tokenKey, token: account.access_token, provider, rl });
   }
 
-  for (const { tokenKey, token } of unique) {
-    await rateLimit.refreshQuotaIfNeeded(tokenKey, token);
+  for (const { tokenKey, token, provider, rl } of unique) {
+    if (provider === 'github') {
+      await rl.refreshQuotaIfNeeded(tokenKey, token);
+    } else {
+      await rl.refreshQuotaIfNeeded(tokenKey);
+    }
   }
 
-  return unique.map(({ account, tokenKey }) => {
-    const quota = rateLimit.getQuotaStatus(tokenKey);
+  return unique.map(({ account, tokenKey, provider, rl }) => {
+    const quota = rl.getQuotaStatus(tokenKey);
     const roleLabel = ROLE_LABELS[account.role] || account.role;
+    const providerLabel = storageProvider.getProvider(provider).label;
     return {
       id: account.id,
       username: account.username,
       role: account.role,
       role_label: roleLabel,
+      provider,
+      provider_label: providerLabel,
       label: account.role === 'primary'
-        ? `Primary (@${account.username})`
-        : `@${account.username} (${roleLabel})`,
+        ? `Primary (@${account.username}) · ${providerLabel}`
+        : `@${account.username} (${roleLabel}) · ${providerLabel}`,
       avatar_url: account.avatar_url || null,
       is_primary: !!account.is_primary,
       ...quota,
       thresholds: {
-        concurrency_full: 16,
-        concurrency_at_1000: 12,
-        concurrency_at_400: 8,
+        concurrency_full: provider === 'bitbucket' ? 8 : 16,
+        concurrency_at_1000: provider === 'bitbucket' ? 6 : 12,
+        concurrency_at_400: provider === 'bitbucket' ? 4 : 8,
         concurrency_at_150: 4,
         concurrency_at_50: 2,
         concurrency_exhausted: 1,
@@ -745,28 +817,36 @@ async function getAccountRateLimits(userId) {
 async function ensureCollaboratorsForAccount(userId, accountId) {
   const account = getLinkedAccount(userId, accountId);
   if (!account?.is_active) return;
-  const primaryOctokit = github.createClient(getUser(userId).access_token);
+
+  const accountProvider = storageProvider.normalizeProvider(account.provider);
+  const mod = storageProvider.getModule(accountProvider);
 
   const primaryRepos = db.prepare(`
-    SELECT full_name, owner, name FROM storage_repos
+    SELECT full_name, owner, name, provider FROM storage_repos
     WHERE user_id = ? AND is_active = 1 AND is_metadata = 0
       AND (linked_account_id IS NULL OR linked_account_id = ?)
   `).all(userId, accountId);
 
+  const primaryClient = accountProvider === 'github'
+    ? github.createClient(getUser(userId).access_token)
+    : null;
+
   for (const repo of primaryRepos) {
+    const repoProvider = storageProvider.normalizeProvider(repo.provider);
+    if (repoProvider !== accountProvider) continue;
     try {
-      await github.addCollaborator(primaryOctokit, repo.owner, repo.name, account.username, 'push');
-      console.log(`[collaborator] Added @${account.username} to ${repo.full_name}`);
+      const client = repoProvider === 'github'
+        ? primaryClient
+        : mod.createClient(getUser(userId).access_token);
+      await mod.addCollaborator(client, repo.owner, repo.name, account.username, 'push');
+      console.log(`[permissions] Added @${account.username} to ${repo.full_name} (${accountProvider})`);
     } catch (err) {
-      if (err.status === 409) {
-        // Already a collaborator
-        continue;
-      }
+      if (err.status === 409) continue;
       if (err.status === 404) {
-        console.warn(`[collaborator] Repo ${repo.full_name} not found, skipping`);
+        console.warn(`[permissions] Repo ${repo.full_name} not found, skipping`);
         continue;
       }
-      console.warn(`[collaborator] Failed to add @${account.username} to ${repo.full_name}: ${err.message}`);
+      console.warn(`[permissions] ${repo.full_name}: ${err.message}`);
     }
   }
 }

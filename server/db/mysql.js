@@ -227,6 +227,9 @@ async function createTables() {
     'ALTER TABLE users ADD COLUMN plex_sync_interval_minutes INT DEFAULT 30',
     'ALTER TABLE users ADD COLUMN plex_last_sync_at DATETIME NULL',
     'ALTER TABLE users ADD COLUMN plex_last_sync_error TEXT NULL',
+    "ALTER TABLE linked_accounts ADD COLUMN provider VARCHAR(32) NOT NULL DEFAULT 'github'",
+    "ALTER TABLE link_tokens ADD COLUMN provider VARCHAR(32) NOT NULL DEFAULT 'github'",
+    "ALTER TABLE storage_repos ADD COLUMN provider VARCHAR(32) NOT NULL DEFAULT 'github'",
   ]) {
     try {
       await pool.execute(stmt);

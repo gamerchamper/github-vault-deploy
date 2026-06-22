@@ -2,7 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
 const db = require('../db/database');
-const github = require('./github');
+const storageProvider = require('./storage-provider');
 const crypto = require('./crypto');
 const metadata = require('./metadata');
 const thumbnails = require('./thumbnails');
@@ -110,13 +110,25 @@ function repoToUploadAccountId(repo) {
   return repo.linked_account_id ? String(repo.linked_account_id) : 'primary';
 }
 
+function providerForRepo(repo) {
+  return storageProvider.getModule(repo?.provider || 'github');
+}
+
+function rateLimitForRepo(repo) {
+  return storageProvider.getRateLimitForRepo(repo);
+}
+
+function defaultRemainingForRepo(repo) {
+  return storageProvider.getProviderForRepo(repo).defaultRateLimitHour;
+}
+
 function isRepoRateLimited(userId, repo) {
-  const rateLimit = require('./github-rate-limit');
+  const rl = rateLimitForRepo(repo);
   const token = accounts.getTokenForRepo(userId, repo);
   if (!token) return true;
-  const key = rateLimit.keyForToken(token);
-  if (rateLimit.isPaused(key)) return true;
-  const quota = rateLimit.getQuotaStatus(key);
+  const key = rl.keyForToken(token);
+  if (rl.isPaused(key)) return true;
+  const quota = rl.getQuotaStatus(key);
   if (quota?.exhausted) return true;
   if (quota?.remaining != null && quota.remaining <= 0) return true;
   return false;
@@ -127,17 +139,18 @@ function filterReposByRateLimit(userId, repos) {
 }
 
 function sortReposByQuota(userId, repos) {
-  const rateLimit = require('./github-rate-limit');
   return [...repos].sort((a, b) => {
+    const rlA = rateLimitForRepo(a);
+    const rlB = rateLimitForRepo(b);
     const tokenA = accounts.getTokenForRepo(userId, a);
     const tokenB = accounts.getTokenForRepo(userId, b);
-    const keyA = rateLimit.keyForToken(tokenA);
-    const keyB = rateLimit.keyForToken(tokenB);
-    const pausedA = rateLimit.isPaused(keyA);
-    const pausedB = rateLimit.isPaused(keyB);
+    const keyA = rlA.keyForToken(tokenA);
+    const keyB = rlB.keyForToken(tokenB);
+    const pausedA = rlA.isPaused(keyA);
+    const pausedB = rlB.isPaused(keyB);
     if (pausedA !== pausedB) return pausedA ? 1 : -1;
-    const remA = rateLimit.getQuotaStatus(keyA)?.remaining ?? 5000;
-    const remB = rateLimit.getQuotaStatus(keyB)?.remaining ?? 5000;
+    const remA = rlA.getQuotaStatus(keyA)?.remaining ?? defaultRemainingForRepo(a);
+    const remB = rlB.getQuotaStatus(keyB)?.remaining ?? defaultRemainingForRepo(b);
     return remB - remA;
   });
 }
@@ -189,29 +202,32 @@ function getUploadReposForChunk(userId, fileId, taskContext) {
 }
 
 function hasAlternateHealthyUploadToken(userId, repos, excludeTokenKey) {
-  const rateLimit = require('./github-rate-limit');
   for (const repo of repos) {
     if (isRepoRateLimited(userId, repo)) continue;
-    const key = rateLimit.keyForToken(accounts.getTokenForRepo(userId, repo));
+    const rl = rateLimitForRepo(repo);
+    const key = rl.keyForToken(accounts.getTokenForRepo(userId, repo));
     if (key !== excludeTokenKey) return true;
   }
   return false;
 }
 
-function setupRateLimitTaskCallback(tokenKey, taskContext) {
+function setupRateLimitTaskCallback(tokenKey, taskContext, repo = null) {
   if (!taskContext?.taskId) return () => {};
-  const rateLimit = require('./github-rate-limit');
+  const rl = repo ? rateLimitForRepo(repo) : require('./github-rate-limit');
+  const providerLabel = repo
+    ? storageProvider.getProviderForRepo(repo).label
+    : 'GitHub';
   const tasks = require('./tasks');
-  return rateLimit.setWaitCallback(tokenKey, (info) => {
+  return rl.setWaitCallback?.(tokenKey, (info) => {
     const secs = Math.ceil(info.waitMs / 1000);
     const mins = Math.ceil(secs / 60);
     const waitLabel = mins >= 2 ? `${mins} min` : `${secs}s`;
     tasks.update(taskContext.taskId, taskContext.userId, {
       phase: 'rate-limit',
-      currentRepo: `GitHub rate limit — resuming in ${waitLabel}`,
-      lastLog: `Waiting for GitHub rate limit (${waitLabel})`,
+      currentRepo: `${providerLabel} rate limit — resuming in ${waitLabel}`,
+      lastLog: `Waiting for ${providerLabel} rate limit (${waitLabel})`,
     });
-  });
+  }) || (() => {});
 }
 
 function listUploadTargets(userId) {
@@ -374,16 +390,17 @@ async function resolveRepoForChunkUpload(userId, repos, chunkIdx) {
       continue;
     }
     const [owner, repoName] = repo.full_name.split('/');
-    const octokit = accounts.createClientForUpload(userId, repo);
+    const client = accounts.createClientForUpload(userId, repo);
+    const mod = providerForRepo(repo);
 
     try {
-      const info = await github.getRepoInfo(octokit, owner, repoName);
+      const info = await mod.getRepoInfo(client, owner, repoName);
       const branch = info.default_branch || 'main';
       if (branch !== repo.default_branch) {
         db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
         repo.default_branch = branch;
       }
-      return { repo, octokit, owner, repoName };
+      return { repo, octokit: client, owner, repoName };
     } catch (err) {
       tried.push(repo.full_name);
       if (isGitHubNotFound(err) || isGitHubAccessDenied(err)) {
@@ -407,54 +424,54 @@ async function resolveRepoForChunkUpload(userId, repos, chunkIdx) {
 }
 
 async function tryUploadToRepo(userId, repo, pool, repoPath, encrypted, existingSha, taskContext, { failFast = false } = {}) {
-  const rateLimit = require('./github-rate-limit');
+  const rl = rateLimitForRepo(repo);
+  const mod = providerForRepo(repo);
   const token = accounts.getTokenForRepo(userId, repo);
-  const tokenKey = rateLimit.keyForToken(token);
+  const tokenKey = rl.keyForToken(token);
   const [owner, repoName] = repo.full_name.split('/');
-  const octokit = failFast
-    ? github.createClient(token, { failFastRateLimit: true })
+  const client = failFast
+    ? mod.createClient(token, { failFastRateLimit: true })
     : accounts.createClientForUpload(userId, repo);
 
-  const info = await github.getRepoInfo(octokit, owner, repoName);
+  const info = await mod.getRepoInfo(client, owner, repoName);
   const branch = info.default_branch || 'main';
   if (branch !== repo.default_branch) {
     db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
     repo.default_branch = branch;
   }
 
-  const clearRateCb = failFast ? () => {} : setupRateLimitTaskCallback(tokenKey, taskContext);
+  const clearRateCb = failFast ? () => {} : setupRateLimitTaskCallback(tokenKey, taskContext, repo);
   try {
     let sha;
     try {
-      sha = await github.uploadChunk(
-        octokit, owner, repoName, repoPath, encrypted, branch, existingSha,
+      sha = await mod.uploadChunk(
+        client, owner, repoName, repoPath, encrypted, branch, existingSha,
       );
     } catch (uploadErr) {
-      if (failFast && (uploadErr.isRateLimitFailFast || rateLimit.isRateLimitError(uploadErr))) {
+      if (failFast && (uploadErr.isRateLimitFailFast || rl.isRateLimitError(uploadErr))) {
         throw uploadErr;
       }
       if (isGitHubNotFound(uploadErr)) {
-        const info2 = await github.getRepoInfo(octokit, owner, repoName);
+        const info2 = await mod.getRepoInfo(client, owner, repoName);
         const branch2 = info2.default_branch || 'main';
         if (branch2 !== repo.default_branch) {
           db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch2, repo.id);
           repo.default_branch = branch2;
         }
-        sha = await github.uploadChunk(
-          octokit, owner, repoName, repoPath, encrypted, branch2, existingSha,
+        sha = await mod.uploadChunk(
+          client, owner, repoName, repoPath, encrypted, branch2, existingSha,
         );
       } else {
         throw uploadErr;
       }
     }
-    return { repo, sha, octokit, owner, repoName };
+    return { repo, sha, octokit: client, owner, repoName };
   } finally {
     clearRateCb();
   }
 }
 
 async function tryUploadRepoPool(userId, fileId, pool, chunkIdx, repoPath, encrypted, existingSha, taskContext) {
-  const rateLimit = require('./github-rate-limit');
   const logger = require('../lib/logger');
   const tasks = taskContext?.taskId ? require('./tasks') : null;
   const triedTokenKeys = new Set();
@@ -462,8 +479,9 @@ async function tryUploadRepoPool(userId, fileId, pool, chunkIdx, repoPath, encry
 
   for (let offset = 0; offset < pool.length; offset++) {
     const repo = pool[(start + offset) % pool.length];
+    const rl = rateLimitForRepo(repo);
     const token = accounts.getTokenForRepo(userId, repo);
-    const tokenKey = rateLimit.keyForToken(token);
+    const tokenKey = rl.keyForToken(token);
     if (triedTokenKeys.has(tokenKey)) continue;
     if (isRepoRateLimited(userId, repo)) continue;
 
@@ -473,9 +491,9 @@ async function tryUploadRepoPool(userId, fileId, pool, chunkIdx, repoPath, encry
         userId, repo, pool, repoPath, encrypted, existingSha, taskContext, { failFast },
       );
     } catch (err) {
-      if (failFast && (err.isRateLimitFailFast || rateLimit.isRateLimitError(err))) {
+      if (failFast && (err.isRateLimitFailFast || rl.isRateLimitError(err))) {
         triedTokenKeys.add(tokenKey);
-        if (err.response?.headers) rateLimit.noteHeaders(tokenKey, err.response.headers);
+        if (err.response?.headers) rl.noteHeaders(tokenKey, err.response.headers);
         if (tasks) {
           const [owner] = repo.full_name.split('/');
           tasks.appendLog(
@@ -504,7 +522,6 @@ async function tryUploadRepoPool(userId, fileId, pool, chunkIdx, repoPath, encry
 async function uploadEncryptedChunkToGitHub(
   userId, fileId, repos, chunkIdx, repoPath, encrypted, existingSha, taskContext,
 ) {
-  const rateLimit = require('./github-rate-limit');
   const tasks = taskContext?.taskId ? require('./tasks') : null;
 
   for (let round = 0; round < 2; round++) {
@@ -545,27 +562,29 @@ async function uploadEncryptedChunkToGitHub(
   const { repo, octokit, owner, repoName } = await resolveRepoForChunkUpload(
     userId, fallbackRepos, chunkIdx,
   );
-  const tokenKey = rateLimit.keyForToken(accounts.getTokenForRepo(userId, repo));
-  const clearRateCb = setupRateLimitTaskCallback(tokenKey, taskContext);
+  const mod = providerForRepo(repo);
+  const rl = rateLimitForRepo(repo);
+  const tokenKey = rl.keyForToken(accounts.getTokenForRepo(userId, repo));
+  const clearRateCb = setupRateLimitTaskCallback(tokenKey, taskContext, repo);
   try {
     let sha;
     try {
-      sha = await github.uploadChunk(
+      sha = await mod.uploadChunk(
         octokit, owner, repoName, repoPath, encrypted, repo.default_branch, existingSha,
       );
     } catch (uploadErr) {
       if (isGitHubNotFound(uploadErr)) {
-        const info = await github.getRepoInfo(octokit, owner, repoName);
+        const info = await mod.getRepoInfo(octokit, owner, repoName);
         const branch = info.default_branch || 'main';
         if (branch !== repo.default_branch) {
           db.prepare('UPDATE storage_repos SET default_branch = ? WHERE id = ?').run(branch, repo.id);
           repo.default_branch = branch;
         }
-        sha = await github.uploadChunk(
+        sha = await mod.uploadChunk(
           octokit, owner, repoName, repoPath, encrypted, branch, existingSha,
         );
       } else {
-        throw new Error(formatUploadGitHubError(uploadErr, repo));
+        throw new Error(formatUploadProviderError(uploadErr, repo));
       }
     }
     return { repo, sha, octokit, owner, repoName };
@@ -574,12 +593,17 @@ async function uploadEncryptedChunkToGitHub(
   }
 }
 
-function formatUploadGitHubError(err, repo) {
-  const ghMsg = err?.response?.data?.message || err?.message || 'GitHub upload failed';
+function formatUploadProviderError(err, repo) {
+  const providerLabel = storageProvider.getProviderForRepo(repo).label;
+  const msg = err?.response?.data?.message || err?.response?.data?.error?.message || err?.message || `${providerLabel} upload failed`;
   const linked = repo.linked_account_id ? ' [linked storage account — re-link if token expired]' : '';
   return (
-    `GitHub rejected chunk upload to ${repo.full_name} (branch ${repo.default_branch})${linked}: ${ghMsg}`
+    `${providerLabel} rejected chunk upload to ${repo.full_name} (branch ${repo.default_branch})${linked}: ${msg}`
   );
+}
+
+function formatUploadGitHubError(err, repo) {
+  return formatUploadProviderError(err, repo);
 }
 
 function splitBuffer(buffer, chunkSize) {
@@ -854,9 +878,10 @@ async function uploadFile(userId, filePath, parentPath, buffer, mimeType, option
     const [owner, repoName] = repo.full_name.split('/');
     const repoPath = `.vault/chunks/${fileId}/${String(i).padStart(5, '0')}.bin`;
 
-    const octokit = accounts.createClientForUpload(userId, repo);
-    const sha = await github.uploadChunk(
-      octokit, owner, repoName, repoPath,
+    const client = accounts.createClientForUpload(userId, repo);
+    const mod = providerForRepo(repo);
+    const sha = await mod.uploadChunk(
+      client, owner, repoName, repoPath,
       part.data, repo.default_branch
     );
 
@@ -1665,8 +1690,11 @@ async function downloadFileVersion(userId, fileId, versionId, onProgress = null)
     if (!repo) throw new Error(`Storage repo missing for chunk ${chunk.chunk_index}`);
     const fullName = chunk.full_name || repo.full_name;
     const [owner, name] = fullName.split('/');
-    const octokit = accounts.createClientForUpload(userId, repo);
-    const enc = await github.downloadBlobBySha(octokit, owner, name, chunk.sha, { subsystem: 'download' });
+    const mod = providerForRepo(repo);
+    const client = accounts.createClientForUpload(userId, repo);
+    const enc = await mod.downloadChunk(
+      client, owner, name, chunk.repo_path, repo.default_branch, { subsystem: 'download' },
+    );
     const dec = crypto.decryptChunk(enc, fileKey, chunk.chunk_iv, chunk.chunk_tag);
     parts.push(dec);
     if (onProgress) onProgress(i + 1, sorted.length);
@@ -2276,10 +2304,12 @@ function setShareClientStreamEnabled(userId, enabled) {
   return { client_stream: !!enabled };
 }
 
-function githubRawUrl(fullName, branch, repoPath) {
-  const [owner, repo] = fullName.split('/');
-  const path = String(repoPath || '').split('/').map(encodeURIComponent).join('/');
-  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch || 'main'}/${path}`;
+function githubRawUrl(fullName, branch, repoPath, provider = 'github') {
+  return storageProvider.rawUrl(
+    { full_name: fullName, provider },
+    branch,
+    repoPath,
+  );
 }
 
 async function buildShareManifestForFile(file, token) {
@@ -2290,7 +2320,7 @@ async function buildShareManifestForFile(file, token) {
 
   const chunks = db.prepare(`
     SELECT c.chunk_index, c.plain_size, c.size, c.chunk_iv, c.chunk_tag,
-           c.repo_path, r.full_name, r.default_branch, r.is_public
+           c.repo_path, r.full_name, r.default_branch, r.is_public, r.provider
     FROM chunks c JOIN storage_repos r ON c.repo_id = r.id
     WHERE c.file_id = ? ORDER BY c.chunk_index
   `).all(file.id);
@@ -2305,7 +2335,12 @@ async function buildShareManifestForFile(file, token) {
   if (hlsAvailable) {
     const playlistRepo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(file.hls_playlist_repo_id);
     if (playlistRepo) {
-      hlsPlaylistUrl = githubRawUrl(playlistRepo.full_name, playlistRepo.default_branch, file.hls_playlist_path);
+      hlsPlaylistUrl = githubRawUrl(
+        playlistRepo.full_name,
+        playlistRepo.default_branch,
+        file.hls_playlist_path,
+        playlistRepo.provider || 'github',
+      );
     }
     const segCount = db.prepare('SELECT COUNT(*) as n FROM hls_segments WHERE file_id = ?').get(file.id);
     hlsSegmentCount = segCount?.n || 0;
@@ -2335,7 +2370,7 @@ async function buildShareManifestForFile(file, token) {
       tag: c.chunk_tag,
       repo: c.full_name,
       repo_path: c.repo_path,
-      raw_url: githubRawUrl(c.full_name, c.default_branch, c.repo_path),
+      raw_url: githubRawUrl(c.full_name, c.default_branch, c.repo_path, c.provider || 'github'),
     })),
   };
 }
@@ -2554,11 +2589,12 @@ async function deleteFile(userId, fileId) {
   for (const chunk of chunks) {
     const primaryRepo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(chunk.repo_id);
     if (chunk.sha && primaryRepo) {
-      const octokit = accounts.createClientForRepo(userId, primaryRepo);
+      const mod = providerForRepo(primaryRepo);
+      const client = accounts.createClientForRepo(userId, primaryRepo);
       const [owner, repoName] = chunk.full_name.split('/');
       try {
         await withTimeout(
-          github.deleteChunk(octokit, owner, repoName, chunk.repo_path, chunk.sha, chunk.default_branch),
+          mod.deleteChunk(client, owner, repoName, chunk.repo_path, chunk.sha, chunk.default_branch),
           15000, `delete chunk ${chunk.repo_path}`
         );
       } catch { /* gone or timeout - DB cleanup happens below */ }
@@ -2571,11 +2607,12 @@ async function deleteFile(userId, fileId) {
     `).all(chunk.id);
     for (const backup of backups) {
       if (backup.sha) {
-        const octokit = accounts.createClientForRepo(userId, backup);
+        const mod = providerForRepo(backup);
+        const client = accounts.createClientForRepo(userId, backup);
         const [owner, repoName] = backup.full_name.split('/');
         try {
           await withTimeout(
-            github.deleteChunk(octokit, owner, repoName, chunk.repo_path, backup.sha, backup.default_branch),
+            mod.deleteChunk(client, owner, repoName, chunk.repo_path, backup.sha, backup.default_branch),
             15000, `delete backup ${chunk.repo_path}`
           );
         } catch { /* gone or timeout */ }
@@ -2988,14 +3025,16 @@ async function getStorageStats(userId) {
 }
 
 function addRepo(userId, fullName, defaultBranch, options = {}) {
-  const { linkedAccountId = null, repoRole = 'primary', isPublic = null } = options;
+  const { linkedAccountId = null, repoRole = 'primary', isPublic = null, provider = 'github' } = options;
+  const normalizedProvider = storageProvider.normalizeProvider(provider);
   const [owner, name] = fullName.split('/');
   const result = db.prepare(`
-    INSERT INTO storage_repos (user_id, owner, name, full_name, default_branch, is_metadata, linked_account_id, repo_role, is_public)
-    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+    INSERT INTO storage_repos (user_id, owner, name, full_name, default_branch, is_metadata, linked_account_id, repo_role, is_public, provider)
+    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
   `).run(
     userId, owner, name, fullName, defaultBranch || 'main', linkedAccountId, repoRole,
-    isPublic == null ? 0 : (isPublic ? 1 : 0)
+    isPublic == null ? 0 : (isPublic ? 1 : 0),
+    normalizedProvider,
   );
   const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(result.lastInsertRowid);
   accounts.ensureBackupReposForAllAccounts(userId).catch(() => {});
@@ -3055,10 +3094,11 @@ function getExpectedPlainChunkSize(file, chunkIndex, chunkSize) {
 
 async function checkChunkPresentOnGitHub(userId, chunkRow, repo) {
   const [owner, repoName] = repo.full_name.split('/');
-  const octokit = accounts.createClientForRepo(userId, repo);
+  const mod = providerForRepo(repo);
+  const client = accounts.createClientForRepo(userId, repo);
   const branch = repo.default_branch || 'main';
-  const remoteSha = await github.getFileSha(
-    octokit, owner, repoName, chunkRow.repo_path, branch, { subsystem: 'verify-repair' }
+  const remoteSha = await mod.getFileSha(
+    client, owner, repoName, chunkRow.repo_path, branch, { subsystem: 'verify-repair' }
   );
   if (!remoteSha) return { present: false };
   if (!chunkRow.sha || chunkRow.sha === 'pending' || chunkRow.sha !== remoteSha) {
@@ -3142,9 +3182,10 @@ async function repairFileChunk(userId, fileId, chunkIndex, buffer, taskContext =
       repo = existingRepo;
       repoPath = existing.repo_path;
       const [owner, repoName] = repo.full_name.split('/');
-      const octokit = accounts.createClientForRepo(userId, repo);
-      const remoteSha = await github.getFileSha(
-        octokit, owner, repoName, repoPath, repo.default_branch,
+      const mod = providerForRepo(repo);
+      const client = accounts.createClientForRepo(userId, repo);
+      const remoteSha = await mod.getFileSha(
+        client, owner, repoName, repoPath, repo.default_branch,
         { subsystem: 'verify-repair', bypassMissing: true }
       );
       if (remoteSha) {

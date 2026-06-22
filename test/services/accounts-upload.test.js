@@ -38,14 +38,23 @@ describe('accounts upload client', function () {
     const mockGithub = {
       createClient: (token) => {
         lastClientToken = token;
-        return { token };
+        return { token, provider: 'github' };
       },
     };
 
     accounts = proxyquire('../../server/services/accounts', {
       '../db/database': db,
+      './storage-provider': {
+        normalizeProvider: (p) => p || 'github',
+        getModule: () => mockGithub,
+        getProvider: () => ({ defaultRateLimitHour: 5000 }),
+        getProviderForRepo: () => ({ defaultRateLimitHour: 5000 }),
+        getRateLimit: () => rateLimit,
+        getRateLimitForRepo: () => rateLimit,
+      },
       './github': mockGithub,
       './github-rate-limit': rateLimit,
+      './bitbucket-rate-limit': rateLimit,
     });
   });
 

@@ -324,6 +324,15 @@ try {
   `);
 } catch { /* exists */ }
 ensureColumn('storage_repos', 'reserved_bytes', 'INTEGER DEFAULT 0');
+ensureColumn('linked_accounts', 'provider', "TEXT NOT NULL DEFAULT 'github'");
+ensureColumn('link_tokens', 'provider', "TEXT NOT NULL DEFAULT 'github'");
+ensureColumn('storage_repos', 'provider', "TEXT NOT NULL DEFAULT 'github'");
+try {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_linked_accounts_user_provider_external
+    ON linked_accounts(user_id, provider, github_id);
+  `);
+} catch { /* exists or legacy duplicate rows */ }
 ensureColumn('files', 'hls_reserved', 'TEXT');
 ensureColumn('users', 'auto_repo_enabled', 'INTEGER DEFAULT 0');
 ensureColumn('users', 'auto_repo_interval_minutes', 'INTEGER DEFAULT 60');
