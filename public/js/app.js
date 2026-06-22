@@ -254,6 +254,9 @@ const App = {
     }
 
     this.updateSetupUrls();
+    this.fetchProviderConfig().then((config) => {
+      if (config) this.updateSetupUrls(config);
+    });
     this.bindEvents();
     Viewer.bindEvents();
     DownloadManager.bindEvents();
@@ -1632,6 +1635,9 @@ const App = {
       await explorer.navigate(explorer.currentPath);
       this.loadAccountViews();
     });
+    document.getElementById('btn-regenerate-bitbucket-links')?.addEventListener('click', () => {
+      this.updateBitbucketLinkUrls();
+    });
     document.querySelectorAll('[data-copy-target]').forEach((btn) => {
       btn.addEventListener('click', () => this.copyTextFromElement(btn.dataset.copyTarget));
     });
@@ -2881,18 +2887,27 @@ const App = {
     }
   },
 
-  updateSetupUrls(oauthCallbacks = null) {
+  updateSetupUrls(providerConfig = null) {
     const origin = window.location.origin;
-    const githubCallback = oauthCallbacks?.github || `${origin}/auth/github/callback`;
-    const bitbucketCallback = oauthCallbacks?.bitbucket || `${origin}/auth/bitbucket/callback`;
+    const callbacks = providerConfig?.oauth_callbacks || providerConfig || null;
+    const githubCallback = callbacks?.github || `${origin}/auth/github/callback`;
+    const bitbucketCallback = callbacks?.bitbucket || `${origin}/auth/bitbucket/callback`;
     const setText = (id, value) => {
       const el = document.getElementById(id);
       if (el) el.textContent = value;
     };
-    setText('setup-homepage-url', oauthCallbacks?.app_url || origin);
+    setText('setup-homepage-url', providerConfig?.app_url || origin);
     setText('setup-callback-url', githubCallback);
     setText('repo-setup-callback-url', githubCallback);
     setText('bitbucket-setup-callback-url', bitbucketCallback);
+  },
+
+  async fetchProviderConfig() {
+    try {
+      return await API.accounts.providers();
+    } catch {
+      return null;
+    }
   },
 
   setBitbucketLinkPanelState({ configured, message = '' }) {
@@ -2920,83 +2935,97 @@ const App = {
     }
   },
 
-  async updateLinkUrls() {
-    const storageInput = document.getElementById('link-url-storage');
-    const backupInput = document.getElementById('link-url-backup');
-    const expiryEl = document.getElementById('link-url-expiry');
+  async updateBitbucketLinkUrls(providerConfig = null) {
     const bbStorageInput = document.getElementById('link-url-bitbucket-storage');
     const bbBackupInput = document.getElementById('link-url-bitbucket-backup');
     const bbExpiryEl = document.getElementById('bitbucket-link-url-expiry');
-    if (!storageInput || !backupInput) return;
+    if (!bbStorageInput || !bbBackupInput) return;
 
-    storageInput.value = 'Generating one-time link…';
-    backupInput.value = 'Generating one-time link…';
-    if (bbStorageInput) {
-      bbStorageInput.value = 'Generating one-time link…';
-      bbStorageInput.placeholder = '';
-    }
-    if (bbBackupInput) {
-      bbBackupInput.value = 'Generating one-time link…';
-      bbBackupInput.placeholder = '';
-    }
+    bbStorageInput.value = 'Generating one-time link…';
+    bbBackupInput.value = 'Generating one-time link…';
+    bbStorageInput.placeholder = '';
+    bbBackupInput.placeholder = '';
 
     try {
-      let providers = { bitbucket: { configured: false } };
-      let oauthCallbacks = null;
-      try {
-        const providerInfo = await API.accounts.providers();
-        providers = Object.fromEntries((providerInfo.providers || []).map((p) => [p.id, p]));
-        oauthCallbacks = providerInfo.oauth_callbacks || null;
-        this.updateSetupUrls(oauthCallbacks);
-      } catch { /* optional */ }
+      const config = providerConfig || await this.fetchProviderConfig();
+      if (config) this.updateSetupUrls(config);
 
-      const requests = [
-        API.accounts.createLinkToken('storage', 'github'),
-        API.accounts.createLinkToken('backup', 'github'),
-      ];
-
+      const providers = Object.fromEntries((config?.providers || []).map((p) => [p.id, p]));
       const bitbucketConfigured = !!providers.bitbucket?.configured;
-      if (bitbucketConfigured) {
-        requests.push(
-          API.accounts.createLinkToken('storage', 'bitbucket'),
-          API.accounts.createLinkToken('backup', 'bitbucket'),
-        );
-      } else {
+
+      if (!bitbucketConfigured) {
         this.setBitbucketLinkPanelState({
           configured: false,
           message: 'Bitbucket OAuth is not configured on this server — add BITBUCKET_CLIENT_ID and BITBUCKET_CLIENT_SECRET to .env and restart.',
         });
+        return;
       }
 
-      const results = await Promise.all(requests);
-      const [storage, backup, bbStorage, bbBackup] = results;
+      const [bbStorage, bbBackup] = await Promise.all([
+        API.accounts.createLinkToken('storage', 'bitbucket'),
+        API.accounts.createLinkToken('backup', 'bitbucket'),
+      ]);
+
+      bbStorageInput.value = bbStorage.url || '';
+      bbBackupInput.value = bbBackup.url || '';
+      if (!bbStorage.url || !bbBackup.url) {
+        throw new Error('Bitbucket link response missing URL — check server logs');
+      }
+
+      this.setBitbucketLinkPanelState({
+        configured: true,
+        message: 'Copy a link below, open it in a private window, and approve Bitbucket access. Do not use the raw Bitbucket authorize URL.',
+      });
+      if (bbExpiryEl) {
+        bbExpiryEl.textContent = `Each Bitbucket link works once and expires in ${bbStorage.expires_in_minutes} minutes.`;
+      }
+    } catch (err) {
+      bbStorageInput.value = '';
+      bbBackupInput.value = '';
+      bbStorageInput.placeholder = err.message || 'Failed to generate Bitbucket link';
+      bbBackupInput.placeholder = err.message || 'Failed to generate Bitbucket link';
+      this.setBitbucketLinkPanelState({
+        configured: true,
+        message: `Could not generate Bitbucket links: ${err.message}`,
+      });
+      this.toast(err.message, 'error');
+    }
+  },
+
+  async updateLinkUrls() {
+    const storageInput = document.getElementById('link-url-storage');
+    const backupInput = document.getElementById('link-url-backup');
+    const expiryEl = document.getElementById('link-url-expiry');
+    if (!storageInput || !backupInput) {
+      await this.updateBitbucketLinkUrls();
+      return;
+    }
+
+    storageInput.value = 'Generating one-time link…';
+    backupInput.value = 'Generating one-time link…';
+
+    let providerConfig = null;
+    try {
+      providerConfig = await this.fetchProviderConfig();
+      if (providerConfig) this.updateSetupUrls(providerConfig);
+
+      const [storage, backup] = await Promise.all([
+        API.accounts.createLinkToken('storage', 'github'),
+        API.accounts.createLinkToken('backup', 'github'),
+      ]);
 
       storageInput.value = storage.url;
       backupInput.value = backup.url;
       if (expiryEl) {
         expiryEl.textContent = `Each GitHub link works once and expires in ${storage.expires_in_minutes} minutes.`;
       }
-
-      if (bitbucketConfigured && bbStorage && bbBackup && bbStorageInput && bbBackupInput) {
-        bbStorageInput.value = bbStorage.url;
-        bbBackupInput.value = bbBackup.url;
-        bbStorageInput.placeholder = '';
-        bbBackupInput.placeholder = '';
-        this.setBitbucketLinkPanelState({
-          configured: true,
-          message: 'Copy a link below, open it in a private window, and approve Bitbucket access. Do not use the raw Bitbucket authorize URL.',
-        });
-        if (bbExpiryEl) {
-          bbExpiryEl.textContent = `Each Bitbucket link works once and expires in ${bbStorage.expires_in_minutes} minutes.`;
-        }
-      }
     } catch (err) {
       storageInput.value = '';
       backupInput.value = '';
-      if (bbStorageInput) bbStorageInput.value = '';
-      if (bbBackupInput) bbBackupInput.value = '';
       this.toast(err.message, 'error');
     }
+
+    await this.updateBitbucketLinkUrls(providerConfig);
   },
 
   async copyText(text) {
@@ -3031,7 +3060,8 @@ const App = {
 
   async showRepoModal() {
     document.getElementById('repo-modal').classList.remove('hidden');
-    this.updateSetupUrls();
+    const providerConfig = await this.fetchProviderConfig();
+    this.updateSetupUrls(providerConfig);
     await Promise.all([
       this.updateLinkUrls(),
       this.loadRateLimits(),
