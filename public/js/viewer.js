@@ -341,6 +341,7 @@ const Viewer = {
     video.removeAttribute('src');
     audio.removeAttribute('src');
     frame.removeAttribute('src');
+    frame.removeAttribute('sandbox');
     textEl.textContent = '';
 
     this.resetMetrics();
@@ -372,13 +373,25 @@ const Viewer = {
         this.close();
       };
       img.src = this.fileViewUrl(file);
-    } else     if (type === 'video') {
+    } else if (type === 'video') {
       stats.classList.remove('hidden');
       if (!this.isHistoryFile(file)) {
         this.mountChunkBlocks(file);
         this.startStatusPoll(file);
       } else {
         document.getElementById('stat-chunks').textContent = file.chunk_count ? String(file.chunk_count) : '—';
+      }
+      video.removeAttribute('poster');
+      if (file.has_thumbnail && !ThumbCache.isFailed(file.id, file.thumbVersion)) {
+        const posterUrl = ThumbCache.resolveUrl(file.id, file.thumbVersion);
+        if (posterUrl) {
+          video.poster = posterUrl;
+          ThumbCache.prefetch(file.id, file.thumbVersion).then((url) => {
+            if (url && video.isConnected) video.poster = url;
+          }).catch(() => {
+            video.removeAttribute('poster');
+          });
+        }
       }
       this.playVideo(file, video, videoWrap, loading);
       const isMp4 = file.mime_type === 'video/mp4' || file.name.split('.').pop().toLowerCase() === 'mp4';
@@ -435,7 +448,7 @@ const Viewer = {
         App.toast('Failed to load document', 'error');
         this.close();
       };
-      frame.sandbox = 'allow-same-origin';
+      frame.removeAttribute('sandbox');
       frame.src = this.fileViewUrl(file);
     } else if (type === 'text') {
       this.loadTextPreview(file, textEl, loading);

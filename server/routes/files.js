@@ -139,30 +139,50 @@ const db = require('../db/database');
 router.get('/thumbnail/:id', async (req, res) => {
   try {
     const fileId = req.params.id;
-    const fileRec = db.prepare('SELECT id, user_id, has_thumbnail FROM files WHERE id = ?').get(fileId);
-    if (!fileRec) return res.status(404).end();
-    const userId = fileRec.user_id;
+    const file = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId);
+    if (!file) return res.status(404).end();
+
+    const userId = file.user_id;
     const thumbCache = require('../services/thumb-cache');
+    const thumbnails = require('../services/thumbnails');
 
     let thumb = thumbCache.get(userId, fileId);
     if (!thumb) {
-      const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
-      if (!file) return res.status(404).end();
       if (file.has_thumbnail) {
         thumb = await metadata.getThumbnail(userId, fileId);
-      } else {
+      }
+      if (!thumb) {
         thumb = await storage.getShareThumbnail(file);
       }
+      if (!thumb && (thumbnails.isVideo(file.mime_type, file.name) || thumbnails.isAudio(file.mime_type, file.name))) {
+        thumb = await thumbnails.generateFromLookup(file.mime_type, file.name);
+        if (thumb) {
+          try {
+            await metadata.saveThumbnail(userId, fileId, thumb, file.name);
+            db.prepare('UPDATE files SET has_thumbnail = 1 WHERE id = ?').run(fileId);
+          } catch {
+            // cache-only fallback is still useful
+            thumbCache.put(userId, fileId, thumb, file.name);
+          }
+        }
+      }
     }
-    if (!thumb) return res.status(404).end();
 
-    const etag = mediaCache.etagFromParts(fileId, fileRec.has_thumbnail, mediaCache.etagFromBuffer(thumb));
+    if (!thumb) {
+      if (file.has_thumbnail) {
+        db.prepare('UPDATE files SET has_thumbnail = 0 WHERE id = ?').run(fileId);
+      }
+      return res.status(404).end();
+    }
+
+    const etag = mediaCache.etagFromParts(fileId, file.has_thumbnail, mediaCache.etagFromBuffer(thumb));
     if (mediaCache.sendNotModifiedIfMatch(req, res, etag)) return;
 
     res.setHeader('Content-Type', 'image/jpeg');
     mediaCache.setMediaCacheHeaders(res, { scope: 'private' });
     res.send(thumb);
-  } catch {
+  } catch (err) {
+    logger.warn('thumbnail_failed', { fileId: req.params.id, error: err.message });
     res.status(404).end();
   }
 });

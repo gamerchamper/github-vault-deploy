@@ -3501,11 +3501,21 @@ document.getElementById('btn-migrate-mysql')?.addEventListener('click', async ()
     const previewType = !file.is_folder && getPreviewType(file.name, file.mime_type);
     if (file.has_thumbnail && previewType) {
       const src = ThumbCache.resolveUrl(file.id, file.thumbVersion);
-      iconEl.innerHTML = `<img class="details-thumb" src="${src}" alt="">`;
-      ThumbCache.prefetch(file.id, file.thumbVersion).then((url) => {
+      if (src) {
+        iconEl.innerHTML = `<img class="details-thumb" src="${src}" alt="">`;
         const img = iconEl.querySelector('img');
-        if (img && url) img.src = url;
-      }).catch(() => {});
+        img.onerror = () => {
+          file.has_thumbnail = false;
+          ThumbCache.markFailed(file.id, file.thumbVersion);
+          iconEl.textContent = file.is_folder ? '📁' : getFileIcon(file.name, false);
+        };
+        ThumbCache.prefetch(file.id, file.thumbVersion).then((url) => {
+          if (img && url) img.src = url;
+          else if (img) img.onerror?.(new Event('error'));
+        }).catch(() => {});
+      } else {
+        iconEl.textContent = file.is_folder ? '📁' : getFileIcon(file.name, false);
+      }
     } else {
       iconEl.textContent = file.is_folder ? '📁' : getFileIcon(file.name, false);
     }

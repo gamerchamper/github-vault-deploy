@@ -11,8 +11,30 @@ const Playlists = {
   pendingAddFileIds: null,
 
   thumbUrl(fileId) {
+    if (typeof ThumbCache !== 'undefined' && ThumbCache.isFailed(fileId)) return '';
     if (typeof ThumbCache !== 'undefined') return ThumbCache.resolveUrl(fileId);
     return `/api/files/thumbnail/${fileId}`;
+  },
+
+  bindThumbImages(root) {
+    if (!root || typeof ThumbCache === 'undefined') return;
+    root.querySelectorAll('img[src*="/api/files/thumbnail/"]').forEach((img) => {
+      const match = img.getAttribute('src')?.match(/\/api\/files\/thumbnail\/([^/?]+)/);
+      if (!match) return;
+      const fileId = match[1];
+      img.onerror = () => {
+        ThumbCache.markFailed(fileId);
+        const art = img.closest('.media-card-art, .curated-hero-art');
+        img.remove();
+        if (art && !art.querySelector('img') && !art.querySelector('.curated-hero-fallback')) {
+          art.textContent = art.closest('.discover-card') ? '▶' : (art.closest('.curated-hero') ? '📋' : '📋');
+        }
+      };
+      ThumbCache.prefetch(fileId).then((url) => {
+        if (url && img.isConnected) img.src = url;
+        else if (!url && img.isConnected) img.onerror?.(new Event('error'));
+      }).catch(() => {});
+    });
   },
 
   async loadPlaylistsView() {
@@ -337,6 +359,7 @@ const Playlists = {
         explorer.navigate('/', { viewMode: 'playlist-detail', playlistId: el.dataset.openPlaylist, collectionId: null });
       });
     });
+    this.bindThumbImages(container);
   },
 
   renderDiscoverSection(title, items, type) {
@@ -345,7 +368,7 @@ const Playlists = {
       if (type === 'continue') {
         return `
           <button type="button" class="media-card discover-card" data-playlist-id="${item.playlist_id}" data-file-id="${item.file_id}">
-            <div class="media-card-art">${item.has_thumbnail ? `<img src="${this.thumbUrl(item.file_id)}" alt="">` : '▶'}</div>
+            <div class="media-card-art">${item.has_thumbnail && this.thumbUrl(item.file_id) ? `<img src="${this.thumbUrl(item.file_id)}" alt="">` : '▶'}</div>
             <div class="media-card-body">
               <span class="media-card-title">${item.file_name}</span>
               <span class="media-card-meta">${item.playlist_title} · ${Math.round(item.progress_pct || 0)}%</span>
@@ -411,6 +434,7 @@ const Playlists = {
       </div>
     `;
     fileView.prepend(hero);
+    this.bindThumbImages(hero);
     hero.querySelector('#btn-collection-share')?.addEventListener('click', () => this.shareCollection(col.id));
     hero.querySelector('#btn-collection-manage')?.addEventListener('click', () => this.openCollectionBuilder(col));
     hero.querySelector('#btn-collection-edit')?.addEventListener('click', () => this.openCollectionModal(col));
@@ -459,6 +483,7 @@ const Playlists = {
       </div>
     `;
     fileView.prepend(hero);
+    this.bindThumbImages(hero);
     hero.querySelector('#btn-playlist-play')?.addEventListener('click', () => this.playPlaylist(pl.id));
     hero.querySelector('#btn-playlist-reorder')?.addEventListener('click', () => this.openBuilder(pl));
     hero.querySelector('#btn-playlist-smart-sort')?.addEventListener('click', () => this.smartSortPlaylist(pl.id));
@@ -558,6 +583,7 @@ const Playlists = {
       grid.innerHTML = `<p class="curated-empty">${mode === 'collections' ? 'No collections yet' : 'No playlists yet'}</p>`;
     }
     container.appendChild(grid);
+    this.bindThumbImages(container);
   },
 
   async playPlaylist(playlistId, startFileId) {

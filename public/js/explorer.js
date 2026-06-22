@@ -485,12 +485,13 @@ class Explorer {
     }
     const isPending = !!file.pending;
     const isTrash = !!file._trash;
-    const thumbSrc = file.has_thumbnail
+    const canShowThumb = !isPending && file.has_thumbnail && !ThumbCache.isFailed(file.id, file.thumbVersion);
+    const thumbSrc = canShowThumb
       ? ThumbCache.resolveUrl(file.id, file.thumbVersion)
       : '';
     const hasHls = !isPending && !file.is_folder && (file.has_hls || (file.hls_segment_count > 0));
     const hlsOverlay = hasHls ? this.hlsFileOverlay(file) : '';
-    const iconHtml = !isPending && file.has_thumbnail
+    const iconHtml = canShowThumb && thumbSrc
       ? `<div class="file-icon-wrap"><img class="file-thumb" src="${thumbSrc}" alt="" loading="lazy" decoding="async">${hlsOverlay}</div>`
       : `<div class="file-icon-wrap"><div class="file-icon">${isPending ? '⏳' : getFileIcon(file.name, file.is_folder)}</div>${hlsOverlay}${file.is_favorite ? '<span class="favorite-badge" title="Favorite">★</span>' : ''}</div>`;
 
@@ -612,8 +613,14 @@ class Explorer {
 
     const img = el.querySelector('img.file-thumb');
     if (img && file.has_thumbnail) {
+      img.onerror = () => {
+        file.has_thumbnail = false;
+        ThumbCache.markFailed(file.id, file.thumbVersion);
+        fallbackThumbImage(img, file.name, file.is_folder);
+      };
       ThumbCache.prefetch(file.id, file.thumbVersion).then((url) => {
         if (url && img.isConnected) img.src = url;
+        else if (!url && img.isConnected) img.onerror?.(new Event('error'));
       }).catch(() => {});
     }
   }

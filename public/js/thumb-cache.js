@@ -6,6 +6,7 @@ const ThumbCache = {
   maxSize: 100,
   map: new Map(),
   pending: new Map(),
+  failed: new Set(),
 
   key(id, version) {
     return `${id}:${version || 0}`;
@@ -24,6 +25,7 @@ const ThumbCache = {
   set(id, version, data) {
     const k = this.key(id, version);
     if (this.map.has(k)) this.map.delete(k);
+    this.failed.delete(k);
     this.map.set(k, { data, ts: Date.now() });
     while (this.map.size > this.maxSize) {
       const oldest = this.map.keys().next().value;
@@ -35,7 +37,18 @@ const ThumbCache = {
     }
   },
 
+  markFailed(id, version) {
+    const k = this.key(id, version);
+    this.failed.add(k);
+    this.pending.delete(k);
+  },
+
+  isFailed(id, version) {
+    return this.failed.has(this.key(id, version));
+  },
+
   resolveUrl(id, version) {
+    if (this.isFailed(id, version)) return '';
     const cached = this.get(id, version);
     if (cached) return cached;
     return `/api/files/thumbnail/${id}${version ? `?v=${version}` : ''}`;
@@ -43,6 +56,7 @@ const ThumbCache = {
 
   async prefetch(id, version) {
     const k = this.key(id, version);
+    if (this.isFailed(id, version)) return null;
     if (this.get(id, version) || this.pending.has(k)) {
       return this.pending.get(k) || this.get(id, version);
     }
@@ -59,8 +73,9 @@ const ThumbCache = {
         return objUrl;
       })
       .catch(() => {
+        this.markFailed(id, version);
         this.pending.delete(k);
-        return url;
+        return null;
       });
     this.pending.set(k, promise);
     return promise;
@@ -70,7 +85,7 @@ const ThumbCache = {
     if (!items?.length) return;
     const slice = items.slice(0, 40);
     for (const file of slice) {
-      if (file.has_thumbnail && !file.is_folder && !file.pending) {
+      if (file.has_thumbnail && !file.is_folder && !file.pending && !this.isFailed(file.id, file.thumbVersion)) {
         this.prefetch(file.id, file.thumbVersion).catch(() => {});
       }
     }
@@ -84,5 +99,19 @@ const ThumbCache = {
     }
     this.map.clear();
     this.pending.clear();
+    this.failed.clear();
   },
 };
+
+/** Replace a broken thumbnail img with the standard file icon. */
+function fallbackThumbImage(img, fileName, isFolder = false) {
+  if (!img) return;
+  const wrap = img.closest('.file-icon-wrap');
+  if (!wrap) return;
+  img.remove();
+  if (wrap.querySelector('.file-icon')) return;
+  const icon = document.createElement('div');
+  icon.className = 'file-icon';
+  icon.textContent = typeof getFileIcon === 'function' ? getFileIcon(fileName, isFolder) : '📄';
+  wrap.prepend(icon);
+}

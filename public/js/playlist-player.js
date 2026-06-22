@@ -91,9 +91,23 @@ const PlaylistPlayer = {
       `${playlist.items?.length || 0} items`;
     const coverId = playlist.cover_thumbnail_id || playlist.items?.[0]?.id;
     const cover = document.getElementById('viewer-playlist-cover');
-    if (cover && coverId) {
-      cover.src = API.files.thumbnail(coverId, null);
-      cover.classList.remove('hidden');
+    if (cover && coverId && (typeof ThumbCache === 'undefined' || !ThumbCache.isFailed(coverId))) {
+      const src = typeof ThumbCache !== 'undefined'
+        ? ThumbCache.resolveUrl(coverId)
+        : API.files.thumbnail(coverId, null);
+      if (src) {
+        cover.onerror = () => {
+          ThumbCache?.markFailed?.(coverId);
+          cover.classList.add('hidden');
+        };
+        cover.src = src;
+        cover.classList.remove('hidden');
+        ThumbCache?.prefetch?.(coverId)?.then((url) => {
+          if (url && cover.isConnected) cover.src = url;
+        }).catch(() => {});
+      } else {
+        cover.classList.add('hidden');
+      }
     } else if (cover) {
       cover.classList.add('hidden');
     }

@@ -383,12 +383,29 @@ async function warmSingleThumbnail(userId, file) {
   const thumbCache = require('./thumb-cache');
   if (thumbCache.has(userId, file.id)) return;
 
+  const thumbnails = require('./thumbnails');
+
   if (file.has_thumbnail) {
-    await getThumbnail(userId, file.id);
+    const thumb = await getThumbnail(userId, file.id);
+    if (!thumb) {
+      db.prepare('UPDATE files SET has_thumbnail = 0 WHERE id = ? AND user_id = ?').run(file.id, userId);
+      if (thumbnails.isAudio(file.mime_type, file.name)
+        || thumbnails.isVideo(file.mime_type, file.name)) {
+        const replacement = await thumbnails.generateFromLookup(file.mime_type, file.name);
+        if (replacement?.length) {
+          try {
+            await saveThumbnail(userId, file.id, replacement, file.name);
+            db.prepare('UPDATE files SET has_thumbnail = 1 WHERE id = ? AND user_id = ?').run(file.id, userId);
+            thumbCache.put(userId, file.id, replacement, file.name);
+          } catch {
+            thumbCache.put(userId, file.id, replacement, file.name);
+          }
+        }
+      }
+    }
     return;
   }
 
-  const thumbnails = require('./thumbnails');
   if (!thumbnails.isAudio(file.mime_type, file.name)
     && !thumbnails.isVideo(file.mime_type, file.name)) {
     return;

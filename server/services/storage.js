@@ -1426,7 +1426,13 @@ async function finalizeUpload(userId, fileId, previewBuffer, onProgress, uploadM
     thumbBuffer = await thumbnails.generateFromLookup(file.mime_type, file.name);
   }
   if (thumbBuffer) {
-    db.prepare('UPDATE files SET has_thumbnail = 1 WHERE id = ?').run(fileId);
+    try {
+      await metadata.saveThumbnail(userId, fileId, thumbBuffer, file.name);
+      db.prepare('UPDATE files SET has_thumbnail = 1 WHERE id = ?').run(fileId);
+    } catch (err) {
+      console.warn(`[upload] Thumbnail save failed for ${fileId}: ${err.message}`);
+      thumbBuffer = null;
+    }
   }
 
   reportProgress(onProgress, { phase: 'metadata', percent: 96, chunksDone, chunksTotal: file.chunk_count });
