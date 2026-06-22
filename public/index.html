@@ -591,10 +591,12 @@
           <p class="org-setup-desc">Link Bitbucket Cloud accounts the same way — copy a one-time link and authorize in a private window. Bitbucket repos use the same chunk layout (<code>.vault/chunks/</code>) and share your vault quota settings.</p>
           <p class="org-setup-desc">Bitbucket API limits: <strong>1,000 requests/hour</strong> per account (standard), <strong>5,000 raw downloads/hour</strong>. Backup accounts mirror chunks via upload (no GitHub-style forks).</p>
           <p class="org-setup-desc oauth-setup-hint">
-            Requires <code>BITBUCKET_CLIENT_ID</code> / <code>BITBUCKET_CLIENT_SECRET</code> on the server.
-            OAuth callback: <code id="bitbucket-setup-callback-url">(your app URL)/auth/bitbucket/callback</code>
+            Requires <code>BITBUCKET_CLIENT_ID</code> / <code>BITBUCKET_CLIENT_SECRET</code> in the server <code>.env</code> (project root), then restart the vault.
+            OAuth callback (register this exactly in your Bitbucket OAuth consumer):
+            <code id="bitbucket-setup-callback-url">(your app URL)/auth/bitbucket/callback</code>
             (<button type="button" class="btn-setup-copy-inline" data-copy-target="bitbucket-setup-callback-url">copy</button>)
           </p>
+          <p id="bitbucket-link-status" class="org-setup-desc link-url-expiry hidden"></p>
           <p id="bitbucket-link-url-expiry" class="org-setup-desc link-url-expiry"></p>
           <div class="link-url-row">
             <label for="link-url-bitbucket-storage">Link for storage</label>

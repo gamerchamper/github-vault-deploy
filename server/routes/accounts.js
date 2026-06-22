@@ -122,8 +122,13 @@ router.post('/link-token', (req, res) => {
 });
 
 router.get('/providers', (req, res) => {
-  const storageProvider = require('../services/storage-provider');
+  const appUrl = require('../services/app-url');
   res.json({
+    app_url: appUrl.getAppUrl(req),
+    oauth_callbacks: {
+      github: appUrl.publicUrl(req, '/auth/github/callback'),
+      bitbucket: appUrl.publicUrl(req, '/auth/bitbucket/callback'),
+    },
     providers: storageProvider.listProviders().map((p) => ({
       ...p,
       configured: storageProvider.isConfigured(p.id),

@@ -2881,17 +2881,43 @@ const App = {
     }
   },
 
-  updateSetupUrls() {
+  updateSetupUrls(oauthCallbacks = null) {
     const origin = window.location.origin;
-    const callback = `${origin}/auth/github/callback`;
+    const githubCallback = oauthCallbacks?.github || `${origin}/auth/github/callback`;
+    const bitbucketCallback = oauthCallbacks?.bitbucket || `${origin}/auth/bitbucket/callback`;
     const setText = (id, value) => {
       const el = document.getElementById(id);
       if (el) el.textContent = value;
     };
-    setText('setup-homepage-url', origin);
-    setText('setup-callback-url', callback);
-    setText('repo-setup-callback-url', callback);
-    setText('bitbucket-setup-callback-url', `${origin}/auth/bitbucket/callback`);
+    setText('setup-homepage-url', oauthCallbacks?.app_url || origin);
+    setText('setup-callback-url', githubCallback);
+    setText('repo-setup-callback-url', githubCallback);
+    setText('bitbucket-setup-callback-url', bitbucketCallback);
+  },
+
+  setBitbucketLinkPanelState({ configured, message = '' }) {
+    const bbPanel = document.getElementById('bitbucket-link-panel');
+    const bbStorageInput = document.getElementById('link-url-bitbucket-storage');
+    const bbBackupInput = document.getElementById('link-url-bitbucket-backup');
+    const bbExpiryEl = document.getElementById('bitbucket-link-url-expiry');
+    const bbStatusEl = document.getElementById('bitbucket-link-status');
+    bbPanel?.classList.remove('hidden');
+    if (bbStatusEl) {
+      bbStatusEl.textContent = message;
+      bbStatusEl.classList.toggle('hidden', !message);
+    }
+    if (!configured) {
+      const hint = message || 'Set BITBUCKET_CLIENT_ID and BITBUCKET_CLIENT_SECRET in the server .env, then restart the vault.';
+      if (bbStorageInput) {
+        bbStorageInput.value = '';
+        bbStorageInput.placeholder = hint;
+      }
+      if (bbBackupInput) {
+        bbBackupInput.value = '';
+        bbBackupInput.placeholder = hint;
+      }
+      if (bbExpiryEl) bbExpiryEl.textContent = '';
+    }
   },
 
   async updateLinkUrls() {
@@ -2901,33 +2927,45 @@ const App = {
     const bbStorageInput = document.getElementById('link-url-bitbucket-storage');
     const bbBackupInput = document.getElementById('link-url-bitbucket-backup');
     const bbExpiryEl = document.getElementById('bitbucket-link-url-expiry');
-    const bbPanel = document.getElementById('bitbucket-link-panel');
     if (!storageInput || !backupInput) return;
 
     storageInput.value = 'Generating one-time link…';
     backupInput.value = 'Generating one-time link…';
-    if (bbStorageInput) bbStorageInput.value = 'Generating one-time link…';
-    if (bbBackupInput) bbBackupInput.value = 'Generating one-time link…';
+    if (bbStorageInput) {
+      bbStorageInput.value = 'Generating one-time link…';
+      bbStorageInput.placeholder = '';
+    }
+    if (bbBackupInput) {
+      bbBackupInput.value = 'Generating one-time link…';
+      bbBackupInput.placeholder = '';
+    }
 
     try {
+      let providers = { bitbucket: { configured: false } };
+      let oauthCallbacks = null;
+      try {
+        const providerInfo = await API.accounts.providers();
+        providers = Object.fromEntries((providerInfo.providers || []).map((p) => [p.id, p]));
+        oauthCallbacks = providerInfo.oauth_callbacks || null;
+        this.updateSetupUrls(oauthCallbacks);
+      } catch { /* optional */ }
+
       const requests = [
         API.accounts.createLinkToken('storage', 'github'),
         API.accounts.createLinkToken('backup', 'github'),
       ];
-      let providers = { bitbucket: { configured: false } };
-      try {
-        const providerInfo = await API.accounts.providers();
-        providers = Object.fromEntries((providerInfo.providers || []).map((p) => [p.id, p]));
-      } catch { /* optional */ }
 
-      if (providers.bitbucket?.configured) {
+      const bitbucketConfigured = !!providers.bitbucket?.configured;
+      if (bitbucketConfigured) {
         requests.push(
           API.accounts.createLinkToken('storage', 'bitbucket'),
           API.accounts.createLinkToken('backup', 'bitbucket'),
         );
-        bbPanel?.classList.remove('hidden');
       } else {
-        bbPanel?.classList.add('hidden');
+        this.setBitbucketLinkPanelState({
+          configured: false,
+          message: 'Bitbucket OAuth is not configured on this server — add BITBUCKET_CLIENT_ID and BITBUCKET_CLIENT_SECRET to .env and restart.',
+        });
       }
 
       const results = await Promise.all(requests);
@@ -2939,9 +2977,15 @@ const App = {
         expiryEl.textContent = `Each GitHub link works once and expires in ${storage.expires_in_minutes} minutes.`;
       }
 
-      if (bbStorage && bbBackup && bbStorageInput && bbBackupInput) {
+      if (bitbucketConfigured && bbStorage && bbBackup && bbStorageInput && bbBackupInput) {
         bbStorageInput.value = bbStorage.url;
         bbBackupInput.value = bbBackup.url;
+        bbStorageInput.placeholder = '';
+        bbBackupInput.placeholder = '';
+        this.setBitbucketLinkPanelState({
+          configured: true,
+          message: 'Copy a link below, open it in a private window, and approve Bitbucket access. Do not use the raw Bitbucket authorize URL.',
+        });
         if (bbExpiryEl) {
           bbExpiryEl.textContent = `Each Bitbucket link works once and expires in ${bbStorage.expires_in_minutes} minutes.`;
         }
