@@ -97,7 +97,8 @@ const SharePlaylist = {
     if (window.__shareBootPrefetch) {
       payload = await window.__shareBootPrefetch;
       window.__shareBootPrefetch = null;
-    } else {
+    }
+    if (!payload || payload.skip || (!payload.ok && (payload.status === 403 || payload.data?.code === 'SITE_ACCESS_REQUIRED'))) {
       const res = await fetch(this.apiBase());
       const data = res.ok
         ? await res.json()

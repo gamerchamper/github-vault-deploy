@@ -1128,6 +1128,55 @@ body.share-stage-resizing-active[data-share-resize-axis="se"] * {
   flex-direction: column;
 }
 
+body.share-text-active .share-cinema-layout {
+  min-height: 0;
+}
+
+body.share-text-active .share-cinema-stage {
+  height: auto;
+  min-height: 0;
+  flex: 0 1 auto;
+  background: transparent;
+}
+
+body.share-text-active .share-viewer-stage,
+body.share-text-active #share-viewer {
+  min-height: 0;
+  height: auto;
+  flex: 1 1 auto;
+}
+
+body.share-text-active .share-stage-controls {
+  display: none !important;
+}
+
+.share-text-preview {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  min-height: min(72vh, 720px);
+  max-height: none;
+  margin: 0;
+  padding: var(--space-lg, 1.25rem);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  box-sizing: border-box;
+}
+
+.share-text-loading {
+  align-self: center;
+  margin: auto;
+  color: var(--text-secondary);
+}
+
 body.share-cinema-active .share-viewer-stage {
   flex: 1 1 auto;
   min-height: 0;

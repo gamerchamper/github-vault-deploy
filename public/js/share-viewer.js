@@ -392,7 +392,7 @@ const ShareViewer = {
     if (dockStats) dockStats.innerHTML = '';
     if (typeof ShareStageLayout !== 'undefined') ShareStageLayout.onClose();
     this.resetCinemaStage();
-    document.body.classList.remove('share-cinema-active', 'share-player-fullscreen');
+    document.body.classList.remove('share-cinema-active', 'share-player-fullscreen', 'share-text-active');
   },
 
   setCinemaMode(active) {
@@ -925,9 +925,23 @@ const ShareViewer = {
       return;
     }
     if (previewType === 'text') {
+      this.setCinemaMode(false);
+      document.body.classList.add('share-text-active');
+      document.getElementById('share-stage-controls')?.classList.add('hidden');
+      const loading = document.createElement('div');
+      loading.className = 'viewer-loading share-text-loading';
+      loading.textContent = 'Loading preview…';
+      viewer.appendChild(loading);
       fetch(this.downloadUrl(token, info.id))
-        .then((r) => r.text())
+        .then(async (r) => {
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.error || `Preview failed (${r.status})`);
+          }
+          return r.text();
+        })
         .then((text) => {
+          loading.remove();
           const pre = document.createElement('pre');
           pre.className = 'viewer-text share-text-preview vault-scroll';
           pre.textContent = text.slice(0, 512000);

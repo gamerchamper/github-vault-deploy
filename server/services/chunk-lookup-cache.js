@@ -255,7 +255,7 @@ async function getFileSha(octokit, owner, repo, path, branch, { subsystem = 'loo
   });
 }
 
-async function downloadBlob(octokit, owner, repo, path, branch, { subsystem = 'download' } = {}) {
+async function downloadBlob(octokit, owner, repo, path, branch, { subsystem = 'download', provider = 'github' } = {}) {
   const rateLimit = require('./github-rate-limit');
   const key = blobKey(owner, repo, path, branch);
   if (await isBlobMissingAsync(key)) {
@@ -271,7 +271,7 @@ async function downloadBlob(octokit, owner, repo, path, branch, { subsystem = 'd
       throw err;
     }
 
-    const rawUrl = rawUrlFor(owner, repo, branch, path, opts.provider || 'github');
+    const rawUrl = rawUrlFor(owner, repo, branch, path, provider);
     const resp = await fetch(rawUrl, { timeout: 60000 });
     if (resp.ok) {
       clearBlobMissing(key);

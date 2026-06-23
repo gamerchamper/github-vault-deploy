@@ -35,6 +35,7 @@ const SiteAccess = {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Invalid access key');
     this.status = { required: true, unlocked: true };
+    if (typeof window !== 'undefined') window.__shareBootPrefetch = null;
     return data;
   },
 
@@ -177,6 +178,7 @@ const SiteAccess = {
         onUnlocked: async () => {
           modal.classList.add('hidden');
           this.setModalOpen(false);
+          if (typeof window !== 'undefined') window.__shareBootPrefetch = null;
           await onUnlocked();
         },
       });
