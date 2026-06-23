@@ -389,8 +389,7 @@ async function warmSingleThumbnail(userId, file) {
     const thumb = await getThumbnail(userId, file.id);
     if (!thumb) {
       db.prepare('UPDATE files SET has_thumbnail = 0 WHERE id = ? AND user_id = ?').run(file.id, userId);
-      if (thumbnails.isAudio(file.mime_type, file.name)
-        || thumbnails.isVideo(file.mime_type, file.name)) {
+      if (thumbnails.supportsOnDemandThumbnail(file.mime_type, file.name)) {
         const replacement = await thumbnails.generateFromLookup(file.mime_type, file.name);
         if (replacement?.length) {
           try {
@@ -406,13 +405,22 @@ async function warmSingleThumbnail(userId, file) {
     return;
   }
 
-  if (!thumbnails.isAudio(file.mime_type, file.name)
-    && !thumbnails.isVideo(file.mime_type, file.name)) {
+  if (!thumbnails.supportsOnDemandThumbnail(file.mime_type, file.name)) {
     return;
   }
 
   const thumb = await thumbnails.generateFromLookup(file.mime_type, file.name);
-  if (thumb?.length) thumbCache.put(userId, file.id, thumb, file.name);
+  if (!thumb?.length) return;
+
+  thumbCache.put(userId, file.id, thumb, file.name);
+  if (thumbnails.isJar(file.mime_type, file.name) && getMetadataRepo(userId)) {
+    try {
+      await saveThumbnail(userId, file.id, thumb, file.name);
+      db.prepare('UPDATE files SET has_thumbnail = 1 WHERE id = ? AND user_id = ?').run(file.id, userId);
+    } catch {
+      // cache-only fallback is still useful
+    }
+  }
 }
 
 function warmThumbnailsBackground(userId, files) {
@@ -422,8 +430,7 @@ function warmThumbnailsBackground(userId, files) {
   const pending = (files || [])
     .filter((f) => !f.is_folder && !thumbCache.has(userId, f.id) && (
       f.has_thumbnail
-      || thumbnails.isAudio(f.mime_type, f.name)
-      || thumbnails.isVideo(f.mime_type, f.name)
+      || thumbnails.supportsOnDemandThumbnail(f.mime_type, f.name)
     ))
     .slice(0, 6);
   if (!pending.length) return;

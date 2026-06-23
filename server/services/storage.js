@@ -1447,7 +1447,7 @@ async function finalizeUpload(userId, fileId, previewBuffer, onProgress, uploadM
   if (previewBuffer?.length) {
     thumbBuffer = await thumbnails.generate(previewBuffer, file.mime_type, file.name);
   }
-  if (!thumbBuffer && (thumbnails.isAudio(file.mime_type, file.name) || thumbnails.isVideo(file.mime_type, file.name))) {
+  if (!thumbBuffer && thumbnails.supportsOnDemandThumbnail(file.mime_type, file.name)) {
     thumbBuffer = await thumbnails.generateFromLookup(file.mime_type, file.name);
   }
   if (thumbBuffer) {
@@ -2507,8 +2507,7 @@ async function shareThumbnailAvailable(file) {
   const manifest = await metadata.getFileManifest(file.user_id, file.id);
   if (manifest?.thumbnail) return true;
 
-  return thumbnails.isAudio(file.mime_type, file.name)
-    || thumbnails.isVideo(file.mime_type, file.name);
+  return thumbnails.supportsOnDemandThumbnail(file.mime_type, file.name);
 }
 
 async function getShareThumbnail(file) {
@@ -2531,8 +2530,7 @@ async function getShareThumbnail(file) {
 
   if (!metadata.getMetadataRepo(file.user_id)) return null;
 
-  if (thumbnails.isAudio(file.mime_type, file.name)
-    || thumbnails.isVideo(file.mime_type, file.name)) {
+  if (thumbnails.supportsOnDemandThumbnail(file.mime_type, file.name)) {
     try {
       let thumbBuffer = await thumbnails.generateFromLookup(file.mime_type, file.name);
       if (!thumbBuffer) {
@@ -2688,6 +2686,7 @@ function listFiles(userId, parentPath, view = null, opts = {}) {
   if (!view || view.type === 'primary') {
     const files = page.map((file) => ({
       ...file,
+      has_thumbnail: !!file.has_thumbnail || thumbnails.isJar(file.mime_type, file.name),
       view_status: file.is_folder ? 'folder' : 'synced',
       view_chunks_available: file.chunk_count,
       view_chunks_total: file.chunk_count,

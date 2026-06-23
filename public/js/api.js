@@ -553,7 +553,7 @@ function getFileIcon(name, isFolder) {
     zip: '📦', rar: '📦', '7z': '📦', tar: '📦', gz: '📦',
     js: '💛', ts: '💙', py: '🐍', html: '🌐', css: '🎨',
     json: '📋', xml: '📋', csv: '📊',
-    exe: '⚙️', dmg: '💿', iso: '💿',
+    exe: '⚙️', dmg: '💿', iso: '💿', jar: '☕',
   };
   return icons[ext] || '📄';
 }

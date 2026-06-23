@@ -154,7 +154,7 @@ router.get('/thumbnail/:id', async (req, res) => {
       if (!thumb) {
         thumb = await storage.getShareThumbnail(file);
       }
-      if (!thumb && (thumbnails.isVideo(file.mime_type, file.name) || thumbnails.isAudio(file.mime_type, file.name))) {
+      if (!thumb && thumbnails.supportsOnDemandThumbnail(file.mime_type, file.name)) {
         thumb = await thumbnails.generateFromLookup(file.mime_type, file.name);
         if (thumb) {
           try {

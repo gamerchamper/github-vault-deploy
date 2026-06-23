@@ -5,6 +5,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { v4: uuidv4 } = require('uuid');
 const coverArt = require('./cover-art');
+const typeThumbnails = require('./type-thumbnails');
 
 const execFileAsync = promisify(execFile);
 
@@ -36,6 +37,16 @@ function isVideo(mimeType, fileName) {
   if (mimeType?.startsWith('video/')) return true;
   const ext = fileName?.split('.').pop()?.toLowerCase();
   return VIDEO_EXT.has(ext);
+}
+
+function isJar(mimeType, fileName) {
+  return typeThumbnails.isJar(mimeType, fileName);
+}
+
+function supportsOnDemandThumbnail(mimeType, fileName) {
+  return isAudio(mimeType, fileName)
+    || isVideo(mimeType, fileName)
+    || isJar(mimeType, fileName);
 }
 
 async function toThumbJpeg(buffer) {
@@ -118,6 +129,10 @@ async function generateFromLookup(mimeType, fileName) {
     }
   }
 
+  if (isJar(mimeType, fileName)) {
+    return typeThumbnails.renderJarThumbnail(sharp, THUMB_SIZE);
+  }
+
   return null;
 }
 
@@ -162,6 +177,10 @@ async function generate(buffer, mimeType, fileName = '') {
     return fromVideoFrame(buffer);
   }
 
+  if (isJar(mimeType, fileName)) {
+    return typeThumbnails.renderJarThumbnail(sharp, THUMB_SIZE);
+  }
+
   return null;
 }
 
@@ -181,5 +200,7 @@ module.exports = {
   previewByteLimit,
   isAudio,
   isVideo,
+  isJar,
+  supportsOnDemandThumbnail,
   THUMB_SIZE,
 };
