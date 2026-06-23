@@ -221,6 +221,12 @@ const ShareViewer = {
 
   async playWithHlsUrl(info, token, video, videoWrap, loading) {
     this.destroyHls();
+    const playlistUrl = info.hls_playlist_url || this._hlsPlaylistUrl;
+    if (!playlistUrl) {
+      this.playDirectStream(info, token, video, videoWrap, loading);
+      return;
+    }
+
     try {
       await ShareLazyLibs.loadHls();
     } catch {
@@ -231,32 +237,62 @@ const ShareViewer = {
       this.playDirectStream(info, token, video, videoWrap, loading);
       return;
     }
-    const playlistUrl = this._hlsPlaylistUrl || info.hls_playlist_url;
-    if (!playlistUrl) {
-      this.playDirectStream(info, token, video, videoWrap, loading);
-      return;
-    }
-    this.hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+
+    let networkRetries = 0;
+    this.hlsFallbackTimer = setTimeout(() => {
+      if (!this.mediaReady) {
+        this.destroyHls();
+        this.setStat('share-stat-stage', 'Direct fallback');
+        this.playDirectStream(info, token, video, videoWrap, loading);
+      }
+    }, 18000);
+
+    this.hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      backBufferLength: 90,
+      manifestLoadingMaxRetry: 6,
+      manifestLoadingRetryDelay: 1000,
+      fragLoadingMaxRetry: 4,
+      fragLoadingRetryDelay: 1000,
+    });
+
     this.hls.loadSource(playlistUrl);
     this.hls.attachMedia(video);
     this.applyVideoPoster(video, info, token);
     this.bindHlsSegmentTracking(info);
 
+    const revealPlayback = () => {
+      clearTimeout(this.hlsFallbackTimer);
+      videoWrap.classList.remove('hidden');
+      this.onMediaReady(video, videoWrap, loading);
+    };
+
+    video.oncanplay = () => revealPlayback();
+
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      void this.initVideoPlyr(video);
       this.syncDurationStat(video);
       video.play().catch(() => {});
     });
+    this.hls.on(Hls.Events.FRAG_LOADED, () => {
+      videoWrap.classList.remove('hidden');
+    });
     this.hls.on(Hls.Events.FRAG_BUFFERED, () => {
-      if (video.buffered.length > 0) {
-        videoWrap.classList.remove('hidden');
-        this.onMediaReady(video, videoWrap, loading);
-      }
+      if (video.buffered.length > 0) revealPlayback();
     });
     this.hls.on(Hls.Events.ERROR, (event, data) => {
       if (!data.fatal) return;
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) { this.hls.startLoad(); return; }
-      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { this.hls.recoverMediaError(); return; }
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        networkRetries += 1;
+        if (networkRetries <= 3) {
+          this.hls.startLoad();
+          return;
+        }
+      }
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR && this.hls.recoverMediaError()) {
+        return;
+      }
+      clearTimeout(this.hlsFallbackTimer);
       this.destroyHls();
       this.playDirectStream(info, token, video, videoWrap, loading);
     });
@@ -304,18 +340,13 @@ const ShareViewer = {
 
     this.hls = new Hls({
       enableWorker: true,
-      lowLatencyMode: true,
+      lowLatencyMode: false,
       backBufferLength: 90,
       manifestLoadingMaxRetry: 12,
       manifestLoadingRetryDelay: 1000,
     });
 
-    const typeParam = new URL(location.href).searchParams.get('type');
-    const useGithub = typeParam === 'github';
-    const hasUploadedHls = !!(info.hls_available && info.hls_playlist_url);
-    const playlistUrl = (useGithub || hasUploadedHls) && info.hls_playlist_url
-      ? info.hls_playlist_url
-      : this.hlsPlaylistUrl(token, info.id);
+    const playlistUrl = info.hls_playlist_url || this._hlsPlaylistUrl || this.hlsPlaylistUrl(token, info.id);
 
     this.hls.loadSource(playlistUrl);
     this.hls.attachMedia(video);
