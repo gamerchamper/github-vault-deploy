@@ -26,7 +26,7 @@ describe('uploaded HLS serve helpers', function () {
   });
 });
 
-describe('GET /api/public/share/:token/hls (uploaded proxy)', function () {
+describe('GET /api/public/share/:token/hls redirect', function () {
   let app;
   let request;
   let db;
@@ -59,16 +59,6 @@ describe('GET /api/public/share/:token/hls (uploaded proxy)', function () {
       wrapKeyForShare: () => ({ wrapped: 'mock' }),
     };
 
-    const mockHlsConvert = {
-      buildUploadedPlaylistForProxy: async (_userId, _file, segmentUrlForIndex) => [
-        '#EXTM3U',
-        '#EXTINF:6.000,',
-        segmentUrlForIndex(0),
-        '#EXT-X-ENDLIST',
-      ].join('\n'),
-      fetchUploadedSegment: async () => Buffer.from('segment-bytes'),
-    };
-
     const storageService = proxyquire('../../server/services/storage', {
       '../db/database': db,
       '../services/crypto': mockCrypto,
@@ -77,7 +67,6 @@ describe('GET /api/public/share/:token/hls (uploaded proxy)', function () {
     const publicRoutes = proxyquire('../../server/routes/public', {
       '../db/database': db,
       '../services/storage': storageService,
-      '../services/hls-convert': mockHlsConvert,
     });
 
     const express = require('express');
@@ -86,26 +75,14 @@ describe('GET /api/public/share/:token/hls (uploaded proxy)', function () {
     request = require('supertest');
   });
 
-  it('returns rewritten playlist with stored-segment proxy URLs', async function () {
+  it('redirects to the GitHub raw playlist URL', async function () {
     const res = await request(app)
       .get(`/api/public/share/${TOKEN}/hls`)
       .query({ file: file.id });
 
-    expect(res.status).to.equal(200);
-    expect(res.headers['content-type']).to.include('mpegurl');
-    expect(res.text).to.include('#EXTM3U');
-    expect(res.text).to.include(`/api/public/share/${TOKEN}/hls/stored-segment/00000.ts`);
-    expect(res.text).to.not.include('raw.githubusercontent.com');
-  });
-
-  it('serves stored HLS segment bytes', async function () {
-    const res = await request(app)
-      .get(`/api/public/share/${TOKEN}/hls/stored-segment/00000.ts`)
-      .query({ file: file.id });
-
-    expect(res.status).to.equal(200);
-    expect(res.headers['content-type']).to.include('video/mp2t');
-    const body = Buffer.isBuffer(res.body) ? res.body.toString() : res.text;
-    expect(body).to.equal('segment-bytes');
+    expect(res.status).to.equal(302);
+    expect(res.headers.location).to.include('raw.githubusercontent.com');
+    expect(res.headers.location).to.include('linked/private-share-hls');
+    expect(res.headers.location).to.include('playlist.m3u8');
   });
 });

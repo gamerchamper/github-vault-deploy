@@ -255,12 +255,13 @@ router.get('/hls/:id/uploaded/playlist.m3u8', async (req, res) => {
       return res.status(404).send('#EXTM3U\n# HLS not available for this file\n');
     }
     const baseName = (fileRec.name || 'media').replace(/\.[^.]+$/, '');
-    const segmentBase = `/api/files/hls/${req.params.id}/uploaded/segment`;
-    const body = await hlsConvert.buildUploadedPlaylistForProxy(
-      fileRec.user_id,
-      fileRec,
-      (index) => `${segmentBase}/${String(index).padStart(5, '0')}.ts`,
-    );
+    const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(fileRec.hls_playlist_repo_id);
+    if (!repo) return res.status(404).send('#EXTM3U\n# Playlist repo not found\n');
+    const { githubRawUrl } = require('../services/storage');
+    const playlistUrl = githubRawUrl(repo.full_name, repo.default_branch, fileRec.hls_playlist_path, repo.provider || 'github');
+    const resp = await fetch(playlistUrl);
+    if (!resp.ok) return res.status(502).send('#EXTM3U\n# Failed to fetch uploaded playlist\n');
+    const body = await resp.text();
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(baseName)}.m3u8"`);
     res.send(Buffer.from(body, 'utf8'));
@@ -268,26 +269,6 @@ router.get('/hls/:id/uploaded/playlist.m3u8', async (req, res) => {
   } catch (err) {
     console.error('[uploaded playlist]', err.message, err.stack?.split('\n').slice(1, 4).join(' '));
     if (!res.headersSent) res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/hls/:id/uploaded/segment/:index.ts', async (req, res) => {
-  try {
-    const fileRec = db.prepare('SELECT id, user_id FROM files WHERE id = ?').get(req.params.id);
-    if (!fileRec) return res.status(404).send('File not found');
-    const index = parseInt(req.params.index, 10);
-    if (!Number.isFinite(index) || index < 0) {
-      return res.status(400).json({ error: 'Invalid segment index' });
-    }
-    const buffer = await hlsConvert.fetchUploadedSegment(fileRec.user_id, fileRec.id, index);
-    res.setHeader('Content-Type', 'video/mp2t');
-    res.setHeader('Content-Length', buffer.length);
-    mediaCache.setMediaCacheHeaders(res, { scope: 'private' });
-    res.send(buffer);
-    recordBytes(fileRec.user_id, req.params.id, buffer.length, 'stream');
-  } catch (err) {
-    const code = err.message === 'HLS segment not found' ? 404 : 500;
-    if (!res.headersSent) res.status(code).json({ error: err.message });
   }
 });
 

@@ -236,9 +236,8 @@ const ShareViewer = {
       this.playDirectStream(info, token, video, videoWrap, loading);
       return;
     }
-    const proxyUrl = this.hlsPlaylistUrl(token, info.id);
     this.hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-    this.hls.loadSource(proxyUrl);
+    this.hls.loadSource(playlistUrl);
     this.hls.attachMedia(video);
     this.applyVideoPoster(video, info, token);
     this.bindHlsSegmentTracking(info);
@@ -313,7 +312,8 @@ const ShareViewer = {
 
     const typeParam = new URL(location.href).searchParams.get('type');
     const useGithub = typeParam === 'github';
-    const playlistUrl = useGithub && info.hls_playlist_url
+    const hasUploadedHls = !!(info.hls_available && info.hls_playlist_url);
+    const playlistUrl = (useGithub || hasUploadedHls) && info.hls_playlist_url
       ? info.hls_playlist_url
       : this.hlsPlaylistUrl(token, info.id);
 
@@ -796,7 +796,8 @@ const ShareViewer = {
       }
       const useHls = hasHls && typeParam !== 'direct' && typeParam !== 'github';
       const useGithub = hasHls && typeParam === 'github';
-      const showHlsBlocks = hasHls && (useHls || useGithub);
+      const useUploadedHls = hasHls && (useHls || useGithub);
+      const showHlsBlocks = useUploadedHls;
       const hlsToggleHtml = hasHls ? `
         <div class="share-hls-toggle">
           <span class="hls-badge">m3u8</span>
@@ -849,10 +850,8 @@ const ShareViewer = {
       this._hlsSegmentsTotal = showHlsBlocks ? (info.hls_segment_count || 0) : 0;
       this.syncChunksStatLabel();
 
-      if (hasHls && useHls) {
+      if (useUploadedHls) {
         void this.playWithHlsUrl(info, token, video, videoWrap, loading);
-      } else if (hasHls && useGithub) {
-        void this.playWithHls(info, token, video, videoWrap, loading);
       } else {
         this.startStatusPoll(token, info);
         this.playDirectStream(info, token, video, videoWrap, loading);
