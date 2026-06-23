@@ -100,7 +100,6 @@ router.post('/backup-sync', async (req, res) => {
         });
       }
     } else if (force) {
-      const accounts = require('../services/accounts');
       const linked = accounts.listLinkedAccounts(req.user.id)
         .filter((a) => accounts.isBackupRole(a.role) && a.is_active);
       for (const account of linked) {
