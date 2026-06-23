@@ -59,6 +59,7 @@ function createMemoryDb() {
       share_token TEXT,
       encryption_mode TEXT DEFAULT 'chunk',
       upload_status TEXT DEFAULT 'ready',
+      backup_skip INTEGER DEFAULT 0,
       hls_reserved TEXT,
       share_key_meta TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

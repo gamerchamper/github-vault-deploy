@@ -495,7 +495,7 @@ async function ensureBackupRepo(userId, linkedAccountId) {
 async function redoBackupSetup(userId, linkedAccountId) {
   const account = getLinkedAccount(userId, linkedAccountId);
   if (!account) throw new Error('Linked account not found');
-  if (account.role !== 'backup' && account.role !== 'both') throw new Error('Only backup accounts support re-fork');
+  if (!accounts.isBackupRole(account.role)) throw new Error('Only backup accounts support re-fork');
 
   const backupRepoIds = db.prepare(`
     SELECT id FROM storage_repos WHERE user_id = ? AND linked_account_id = ? AND repo_role = 'backup'

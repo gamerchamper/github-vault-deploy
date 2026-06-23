@@ -1109,6 +1109,12 @@ body::before {
   margin-top: 4px;
 }
 
+.linked-account-backup-status {
+  font-size: 10px;
+  color: var(--accent);
+  margin-top: 4px;
+}
+
 .storage-info {
   padding: 4px 16px;
   font-size: 11px;
@@ -2363,6 +2369,41 @@ body::before {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+}
+
+.linked-account-role-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.linked-account-role-group .role-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.linked-account-role-btn {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.linked-account-role-btn.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+  color: var(--text);
+  font-weight: 600;
+}
+
+.linked-account-role-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .linked-account-role {

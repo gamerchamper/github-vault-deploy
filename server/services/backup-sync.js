@@ -173,6 +173,45 @@ function parseAccountId(payloadJson) {
   }
 }
 
+function isStuckBackupTask(row) {
+  if (!row) return false;
+  try {
+    const payload = row.payload ? JSON.parse(row.payload) : {};
+    const isStuck = row.phase === 'stuck' && row.status === 'error';
+    const isNonResumable = row.status === 'error' && !payload.resumable;
+    return isStuck || isNonResumable;
+  } catch {
+    return row.phase === 'stuck' && row.status === 'error';
+  }
+}
+
+function getRecentStuckBackupTask(userId, accountId) {
+  const rows = db.prepare(`
+    SELECT id, phase, status, payload FROM tasks
+    WHERE user_id = ? AND type = 'backup-sync'
+    ORDER BY updated_at DESC
+  `).all(userId);
+
+  for (const row of rows) {
+    if (parseAccountId(row.payload) !== Number(accountId)) continue;
+    if (isStuckBackupTask(row)) return row;
+    break;
+  }
+  return null;
+}
+
+function clearStuckBackupTasks(userId, linkedAccountId) {
+  const rows = db.prepare(`
+    SELECT id, payload FROM tasks
+    WHERE user_id = ? AND type = 'backup-sync'
+      AND (phase = 'stuck' OR (status = 'error' AND phase != 'done'))
+  `).all(userId);
+  for (const row of rows) {
+    if (parseAccountId(row.payload) !== Number(linkedAccountId)) continue;
+    db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(row.id, userId);
+  }
+}
+
 function getActiveTask(userId, accountId) {
   const rows = db.prepare(`
     SELECT id, phase, percent, payload, status, updated_at
@@ -365,15 +404,7 @@ function forceBackupSync(userId, linkedAccountId) {
   dedupeAllBackupTasks(userId);
   chunkLookup.clearSyncFailuresForAccount(linkedAccountId);
 
-  // Remove stuck/non-resumable tasks so a fresh sync can start
-  const stuck = db.prepare(`
-    SELECT id FROM tasks
-    WHERE user_id = ? AND type = 'backup-sync'
-      AND (phase = 'stuck' OR (status = 'error' AND phase != 'done'))
-  `).all(userId);
-  for (const row of stuck) {
-    db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(row.id, userId);
-  }
+  clearStuckBackupTasks(userId, linkedAccountId);
 
   const key = syncKey(userId, linkedAccountId);
   const entry = activeSyncs.get(key);
@@ -412,18 +443,7 @@ function maybeResumeSync(userId) {
     const key = syncKey(userId, id);
     if (isSyncActive(key)) continue;
 
-    // Don't restart if the most recent backup-sync ended stuck for this account
-    const recentBackupTask = db.prepare(`
-      SELECT id, phase, status, payload FROM tasks
-      WHERE user_id = ? AND type = 'backup-sync'
-      ORDER BY updated_at DESC LIMIT 1
-    `).get(userId);
-    if (recentBackupTask) {
-      const payload = recentBackupTask.payload ? JSON.parse(recentBackupTask.payload) : {};
-      const isStuck = recentBackupTask.phase === 'stuck' && recentBackupTask.status === 'error';
-      const isNonResumable = recentBackupTask.status === 'error' && !payload.resumable;
-      if ((isStuck || isNonResumable) && parseAccountId(recentBackupTask.payload) === Number(id)) continue;
-    }
+    if (getRecentStuckBackupTask(userId, id)) continue;
 
     const pausedTask = getBackupTask(userId, id);
     const fastResume = shouldFastResume(userId, id)
@@ -484,7 +504,7 @@ async function runBackupSync(userId, linkedAccountId, { fastResume = false, forc
 
   entry.promise = workloadGovernor.runBackground(userId, async () => {
     const account = accounts.getLinkedAccount(userId, linkedAccountId);
-    if (!account || account.role !== 'backup' || !account.is_active) return;
+    if (!account || !accounts.isBackupRole(account.role) || !account.is_active) return;
 
     if (hasActiveUpload(userId)) {
       const existingTask = getBackupTask(userId, linkedAccountId);

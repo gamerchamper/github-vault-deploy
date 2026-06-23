@@ -87,6 +87,11 @@ router.post('/backup-sync', async (req, res) => {
     const accountId = parseInt(req.body.account_id, 10);
     const force = !!req.body.force;
     if (Number.isFinite(accountId)) {
+      const account = accounts.getLinkedAccount(req.user.id, accountId);
+      if (!account) return res.status(404).json({ error: 'Linked account not found' });
+      if (!accounts.isBackupRole(account.role)) {
+        return res.status(400).json({ error: 'Account is not configured for backup' });
+      }
       if (force) {
         backupSync.forceBackupSync(req.user.id, accountId);
       } else {
@@ -156,7 +161,8 @@ router.patch('/:id', async (req, res) => {
       role,
       is_active: isActive,
     });
-    if (accounts.isBackupRole(role)) {
+    if (accounts.isBackupRole(updated.role) && updated.is_active
+      && (role !== undefined || isActive === true)) {
       await accounts.ensureBackupReposForAccount(req.user.id, updated.id);
       const backupSync = require('../services/backup-sync');
       backupSync.runBackupSync(req.user.id, updated.id);

@@ -405,8 +405,10 @@ const App = {
       return;
     }
 
+    const multiAccount = backupSync.length > 1;
     const syncing = backupSync.some((s) => s.syncing);
     const pending = backupSync.filter((s) => !s.up_to_date);
+    const upToDateCount = backupSync.filter((s) => s.up_to_date).length;
     const totalMissing = pending.reduce((sum, s) => sum + s.missing_chunks, 0);
     const totalChunks = backupSync.reduce((sum, s) => sum + s.total_chunks, 0) || 1;
     const synced = totalChunks - totalMissing;
@@ -421,11 +423,13 @@ const App = {
     if (paused) {
       widget.classList.add('paused');
       const active = backupSync.find((s) => s.paused);
-      label.textContent = active?.pause_reason || 'Paused';
+      const who = multiAccount && active?.username ? `@${active.username}: ` : '';
+      label.textContent = `${who}${active?.pause_reason || 'Paused'}`;
       pct.textContent = `${percent}%`;
     } else if (syncing) {
       widget.classList.add('syncing');
       const active = backupSync.find((s) => s.syncing) || backupSync.find((s) => !s.up_to_date);
+      const who = multiAccount && active?.username ? `@${active.username} · ` : '';
       const phase = active?.phase === 'rate-limit'
         ? (active.rate_limit_seconds
           ? `Rate limited (${active.rate_limit_seconds}s)`
@@ -436,39 +440,72 @@ const App = {
             : active?.phase === 'reconcile' ? 'Reconciling'
               : active?.phase === 'chunk-fallback' ? 'Syncing chunks'
                 : 'Syncing backup';
-      label.textContent = phase;
+      label.textContent = `${who}${phase}`;
       if (active?.phase === 'rate-limit') widget.classList.add('rate-limited');
       pct.textContent = `${percent}%`;
     } else if (totalMissing > 0) {
-      label.textContent = `${totalMissing} chunk${totalMissing === 1 ? '' : 's'} pending`;
+      label.textContent = multiAccount
+        ? `${pending.length} backup account${pending.length === 1 ? '' : 's'} pending`
+        : `${totalMissing} chunk${totalMissing === 1 ? '' : 's'} pending`;
       pct.textContent = `${percent}%`;
     } else {
       widget.classList.add('done');
-      label.textContent = 'Backup up to date';
+      label.textContent = multiAccount
+        ? `${upToDateCount}/${backupSync.length} backups up to date`
+        : 'Backup up to date';
       pct.textContent = '100%';
     }
 
     const statsEl = document.getElementById('backup-sync-stats');
-    const active = backupSync.find((s) => s.syncing || !s.up_to_date) || backupSync[0];
-    if (statsEl && active?.queue) {
-      const q = active.queue;
-      statsEl.classList.remove('hidden');
-      statsEl.innerHTML = `
-        <span>Done ${q.synced}</span>
-        <span>Proc ${q.processing}</span>
-        <span>Backoff ${q.backoff}</span>
-        <span>Failed ${q.failed}</span>
-      `;
-    } else if (statsEl) {
-      statsEl.classList.add('hidden');
-      statsEl.innerHTML = '';
+    if (statsEl) {
+      if (multiAccount) {
+        statsEl.classList.remove('hidden');
+        statsEl.innerHTML = backupSync.map((entry) => {
+          const status = entry.up_to_date
+            ? 'Up to date'
+            : entry.syncing
+              ? `Syncing ${entry.percent || 0}%`
+              : entry.paused
+                ? (entry.pause_reason || 'Paused')
+                : `${entry.missing_chunks} pending`;
+          return `<span title="${entry.missing_chunks} chunk(s) remaining">@${entry.username} · ${status}</span>`;
+        }).join('');
+      } else {
+        const active = backupSync.find((s) => s.syncing || !s.up_to_date) || backupSync[0];
+        if (active?.queue) {
+          const q = active.queue;
+          statsEl.classList.remove('hidden');
+          statsEl.innerHTML = `
+            <span>Done ${q.synced}</span>
+            <span>Proc ${q.processing}</span>
+            <span>Backoff ${q.backoff}</span>
+            <span>Failed ${q.failed}</span>
+          `;
+        } else {
+          statsEl.classList.add('hidden');
+          statsEl.innerHTML = '';
+        }
+      }
     }
+  },
+
+  formatLinkedAccountBackupStatus(accountId) {
+    const entry = this.lastBackupSync?.find((s) => s.account_id === accountId);
+    if (!entry) return '';
+    if (entry.up_to_date) return 'Backup up to date';
+    if (entry.syncing) return `Backup syncing · ${entry.percent || 0}%`;
+    if (entry.paused) return entry.pause_reason || 'Backup paused';
+    if (entry.missing_chunks > 0) return `${entry.missing_chunks} chunk${entry.missing_chunks === 1 ? '' : 's'} pending backup`;
+    return 'Backup pending';
   },
 
   async forceBackupSync(accountId = null) {
     try {
       await API.accounts.startBackupSync(accountId, { force: true });
-      App.toast('Backup sync force-started', 'success');
+      const message = accountId
+        ? 'Backup sync force-started'
+        : 'Backup sync force-started for all backup accounts';
+      App.toast(message, 'success');
       await this.pollBackupStatus();
       TaskPanel.ensurePoll();
     } catch (err) {
@@ -1671,7 +1708,8 @@ const App = {
     document.getElementById('backup-sync-force')?.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const accountId = this.lastBackupSync?.find((s) => !s.up_to_date || s.paused)?.account_id || null;
+      const pending = this.lastBackupSync?.filter((s) => !s.up_to_date || s.paused) || [];
+      const accountId = pending.length === 1 ? pending[0].account_id : null;
       await App.withButton(e.currentTarget, () => App.forceBackupSync(accountId));
     });
 
@@ -3306,6 +3344,7 @@ const App = {
       this.updateLinkUrls(),
       this.loadRateLimits(),
       this.loadLinkedAccounts(),
+      this.loadAccountViews(),
       this.loadOrgPanel(),
       this.loadRepos(),
     ]);
@@ -3341,6 +3380,12 @@ const App = {
             <span>${quota.remaining} left${quota.paused ? ` · paused ${this.formatDuration(quota.pause_seconds_left)}` : ''}</span>
           </div>
         ` : '';
+        const backupStatus = isBackupAccountRole(account.role)
+          ? this.formatLinkedAccountBackupStatus(account.id)
+          : '';
+        const backupHtml = backupStatus ? `
+          <div class="linked-account-backup-status">${backupStatus}</div>
+        ` : '';
 
         card.innerHTML = `
           <div class="linked-account-info">
@@ -3348,6 +3393,7 @@ const App = {
             <div>
               <span class="linked-account-name">@${account.username}</span>
               <span class="linked-account-meta">${providerLabel} · ${roleLabel} · ${statusLabel}</span>
+              ${backupHtml}
               ${quotaHtml}
             </div>
           </div>
@@ -3356,25 +3402,48 @@ const App = {
         const actions = document.createElement('div');
         actions.className = 'linked-account-actions';
 
-        const roleSelect = document.createElement('select');
-        roleSelect.className = 'linked-account-role';
-        roleSelect.innerHTML = `
-          <option value="storage"${account.role === 'storage' ? ' selected' : ''}>Storage</option>
-          <option value="backup"${account.role === 'backup' ? ' selected' : ''}>Backup</option>
-          <option value="both"${account.role === 'both' ? ' selected' : ''}>Storage + Backup</option>
-        `;
-        roleSelect.addEventListener('change', async () => {
-          try {
-            await API.accounts.update(account.id, { role: roleSelect.value });
-            this.toast(`@${account.username} set to ${roleSelect.value}`, 'success');
-            await this.loadLinkedAccounts();
-            await this.loadRepos();
-          } catch (err) {
-            this.toast(err.message, 'error');
-            roleSelect.value = account.role;
+        const roleGroup = document.createElement('div');
+        roleGroup.className = 'linked-account-role-group';
+        roleGroup.innerHTML = '<span class="role-label">Role</span>';
+
+        const roleOptions = [
+          { value: 'storage', label: 'Storage' },
+          { value: 'backup', label: 'Backup' },
+          { value: 'both', label: 'Storage + Backup' },
+        ];
+
+        const setRoleButtons = (activeRole) => {
+          for (const btn of roleGroup.querySelectorAll('.linked-account-role-btn')) {
+            btn.classList.toggle('active', btn.dataset.role === activeRole);
           }
-        });
-        actions.appendChild(roleSelect);
+        };
+
+        for (const option of roleOptions) {
+          const roleBtn = document.createElement('button');
+          roleBtn.type = 'button';
+          roleBtn.className = 'linked-account-role-btn';
+          roleBtn.dataset.role = option.value;
+          roleBtn.textContent = option.label;
+          roleBtn.classList.toggle('active', account.role === option.value);
+          roleBtn.addEventListener('click', async () => {
+            if (roleBtn.classList.contains('active') || roleBtn.disabled) return;
+            roleGroup.querySelectorAll('.linked-account-role-btn').forEach((b) => { b.disabled = true; });
+            try {
+              await API.accounts.update(account.id, { role: option.value });
+              account.role = option.value;
+              setRoleButtons(option.value);
+              this.toast(`@${account.username} set to ${option.label}`, 'success');
+              await this.loadLinkedAccounts();
+              await this.loadRepos();
+            } catch (err) {
+              this.toast(err.message, 'error');
+            } finally {
+              roleGroup.querySelectorAll('.linked-account-role-btn').forEach((b) => { b.disabled = false; });
+            }
+          });
+          roleGroup.appendChild(roleBtn);
+        }
+        actions.appendChild(roleGroup);
 
         const toggleBtn = document.createElement('button');
         toggleBtn.className = 'btn-secondary';
@@ -3391,6 +3460,17 @@ const App = {
         actions.appendChild(toggleBtn);
 
         if (isBackupAccountRole(account.role)) {
+          const syncBtn = document.createElement('button');
+          syncBtn.className = 'btn-secondary';
+          syncBtn.textContent = 'Sync backup';
+          syncBtn.title = `Force backup sync for @${account.username}`;
+          syncBtn.addEventListener('click', async () => {
+            await App.withButton(syncBtn, () => App.forceBackupSync(account.id));
+            await this.loadAccountViews();
+            await this.loadLinkedAccounts();
+          });
+          actions.appendChild(syncBtn);
+
           const redoBtn = document.createElement('button');
           redoBtn.className = 'btn-primary';
           redoBtn.textContent = 'Re-fork repos';
