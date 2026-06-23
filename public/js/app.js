@@ -1532,6 +1532,15 @@ const App = {
     document.getElementById('btn-move').addEventListener('click', () => {
       explorer.showMoveDialog([...explorer.selected]);
     });
+    document.getElementById('btn-share')?.addEventListener('click', () => {
+      const id = [...explorer.selected][0];
+      if (!id) return;
+      const file = explorer.files.find((f) => f.id === id)
+        || explorer.contextTarget
+        || explorer.treeFoldersById?.get(id);
+      if (!file) return;
+      App.shareFile(file);
+    });
     document.getElementById('btn-confirm-move').addEventListener('click', () => explorer.confirmMove());
     document.getElementById('btn-delete').addEventListener('click', () => explorer.deleteSelected());
     document.getElementById('btn-selection-actions')?.addEventListener('click', (e) => {
@@ -3768,6 +3777,7 @@ document.getElementById('btn-migrate-mysql')?.addEventListener('click', async ()
     dp.onclick = () => { if (!file.is_folder) Viewer.open(file); };
     dd.style.display = file.is_folder ? 'none' : '';
     dp.style.display = file.is_folder ? 'none' : '';
+    ds.style.display = '';
     const divider = document.getElementById('panel-divider');
     if (divider) divider.classList.remove('hidden');
     DetailsPreview?.show?.(file);

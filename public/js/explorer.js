@@ -26,6 +26,7 @@ class Explorer {
     this._boundInfiniteScroll = false;
     this.trashCollapsed = new Set();
     this.treeExpanded = new Set();
+    this.treeFoldersById = new Map();
     this.displayFiles = [];
     this._navGen = 0;
     this._loadingDepth = 0;
@@ -33,6 +34,17 @@ class Explorer {
 
   isCuratedBrowseView() {
     return ['playlists', 'collections', 'discover', 'playlist-detail', 'collection-detail'].includes(this.viewMode);
+  }
+
+  isFolderEntry(file) {
+    return !!(file?.is_folder === true || file?.is_folder === 1 || file?.is_folder === '1');
+  }
+
+  canShareEntry(file) {
+    if (!file?.id || file.pending || file._trashGroupHeader || this.isTrashView()) return false;
+    if (this.viewMode === 'playlist-detail' && file._inPlaylist) return false;
+    if (this.isCuratedBrowseView()) return false;
+    return this.selected.size <= 1;
   }
 
   clearCuratedChrome() {
@@ -1203,6 +1215,19 @@ class Explorer {
 
     const openItem = document.querySelector('[data-action="open"]');
     if (openItem) openItem.style.display = singleFolder ? '' : 'none';
+
+    const shareBtn = document.getElementById('btn-share');
+    if (shareBtn) {
+      let shareTarget = null;
+      if (this.selected.size === 1) {
+        const id = [...this.selected][0];
+        shareTarget = this.files.find((f) => f.id === id)
+          || this.contextTarget
+          || this.treeFoldersById?.get(id)
+          || null;
+      }
+      shareBtn.disabled = !shareTarget || !this.canShareEntry(shareTarget) || trash || playlistDetail || collectionDetail;
+    }
   }
 
   async downloadFile(file) {
@@ -1452,7 +1477,10 @@ class Explorer {
       historyItem.style.display = showHistory ? '' : 'none';
       historyItem.textContent = isFolder ? 'View folder history' : 'View history';
     }
-    shareItem.style.display = '';
+    if (shareItem) {
+      shareItem.style.display = this.canShareEntry(file) ? '' : 'none';
+      shareItem.textContent = this.isFolderEntry(file) ? 'Share folder' : 'Share';
+    }
     const actionTargets = this.getActionTargets(file);
     const fileTargets = actionTargets.filter((f) => !f.is_folder);
     const hlsTargets = actionTargets.filter((f) => this.isHlsEligible(f));
@@ -1503,7 +1531,7 @@ class Explorer {
       dlItem.style.display = 'none';
       detailsItem.style.display = 'none';
       if (historyItem) historyItem.style.display = 'none';
-      shareItem.style.display = 'none';
+    if (shareItem) shareItem.style.display = 'none';
       if (thumbItem) thumbItem.style.display = 'none';
       if (uploadThumbItem) uploadThumbItem.style.display = 'none';
       if (verifyItem) verifyItem.style.display = 'none';
@@ -1709,11 +1737,20 @@ class Explorer {
     const tree = document.getElementById('folder-tree');
     if (!tree) return;
     tree.innerHTML = '';
+    this.treeFoldersById = new Map();
 
     try {
       const allFolders = await this.getAllFolders('/');
+      this.indexTreeFolders(allFolders);
       this.renderTree(tree, allFolders, '/');
     } catch { /* optional */ }
+  }
+
+  indexTreeFolders(folders) {
+    for (const folder of folders) {
+      if (folder?.id) this.treeFoldersById.set(folder.id, folder);
+      if (folder.children?.length) this.indexTreeFolders(folder.children);
+    }
   }
 
   async getAllFolders(path, depth = 0) {
@@ -1754,6 +1791,10 @@ class Explorer {
         if (e.target.closest('[data-tree-toggle]')) return;
         this.pushHistory(folder.path);
         this.navigate(folder.path, { viewMode: 'files', type: this.filterType });
+      });
+      el.addEventListener('contextmenu', (e) => {
+        if (this.isTrashView() || this.isCuratedBrowseView()) return;
+        this.showContextMenu(e, { ...folder, is_folder: true });
       });
       container.appendChild(el);
       if (hasChildren && expanded) {
