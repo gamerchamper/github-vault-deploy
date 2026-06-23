@@ -271,7 +271,7 @@ function pruneDuplicateBackupTasks(userId, linkedAccountId, keepId = null) {
 function dedupeAllBackupTasks(userId) {
   const backupAccounts = db.prepare(`
     SELECT id FROM linked_accounts
-    WHERE user_id = ? AND role = 'backup' AND is_active = 1
+    WHERE user_id = ? AND role IN ('backup', 'both') AND is_active = 1
   `).all(userId);
   for (const { id } of backupAccounts) {
     pruneDuplicateBackupTasks(userId, id);
@@ -281,7 +281,7 @@ function dedupeAllBackupTasks(userId) {
 function getSyncStatus(userId) {
   const backupAccounts = db.prepare(`
     SELECT id, username FROM linked_accounts
-    WHERE user_id = ? AND role = 'backup' AND is_active = 1
+    WHERE user_id = ? AND role IN ('backup', 'both') AND is_active = 1
   `).all(userId);
 
   const totalChunks = db.prepare(`
@@ -401,7 +401,7 @@ function maybeResumeSync(userId) {
 
   const backupAccounts = db.prepare(`
     SELECT id FROM linked_accounts
-    WHERE user_id = ? AND role = 'backup' AND is_active = 1
+    WHERE user_id = ? AND role IN ('backup', 'both') AND is_active = 1
   `).all(userId);
 
   for (const { id } of backupAccounts) {
@@ -745,7 +745,7 @@ async function runBackupSync(userId, linkedAccountId, { fastResume = false, forc
 function startAllBackupSyncs(userId) {
   dedupeAllBackupTasks(userId);
   const linked = db.prepare(`
-    SELECT id FROM linked_accounts WHERE user_id = ? AND role = 'backup' AND is_active = 1
+    SELECT id FROM linked_accounts WHERE user_id = ? AND role IN ('backup', 'both') AND is_active = 1
   `).all(userId);
   for (const { id } of linked) {
     runBackupSync(userId, id, { fastResume: shouldFastResume(userId, id) });
@@ -754,7 +754,7 @@ function startAllBackupSyncs(userId) {
 
 function startBackupSyncsForAllUsers() {
   const users = db.prepare(`
-    SELECT DISTINCT user_id FROM linked_accounts WHERE role = 'backup' AND is_active = 1
+    SELECT DISTINCT user_id FROM linked_accounts WHERE role IN ('backup', 'both') AND is_active = 1
   `).all();
   for (const { user_id: userId } of users) {
     if (hasActiveUpload(userId)) {

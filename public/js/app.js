@@ -13,6 +13,20 @@
   }
 })();
 
+function isStorageAccountRole(role) {
+  return role === 'storage' || role === 'both';
+}
+
+function isBackupAccountRole(role) {
+  return role === 'backup' || role === 'both';
+}
+
+function linkedAccountRoleLabel(role) {
+  if (role === 'both') return 'Storage + backup';
+  if (role === 'backup') return 'Backup / redundancy';
+  return 'Additional storage';
+}
+
 const explorer = new Explorer();
 let toastTimer = null;
 
@@ -757,7 +771,7 @@ const App = {
         : `Primary (@${username})`;
 
       const storageAccounts = (accountsRes.accounts || []).filter(
-        (a) => a.role === 'storage' && a.is_active,
+        (a) => isStorageAccountRole(a.role) && a.is_active,
       );
 
       select.innerHTML = '';
@@ -1036,7 +1050,7 @@ const App = {
         : `Primary (@${username})`;
 
       const storageAccounts = (accountsRes.accounts || []).filter(
-        (a) => a.role === 'storage' && a.is_active,
+        (a) => isStorageAccountRole(a.role) && a.is_active,
       );
 
       select.innerHTML = '';
@@ -3213,6 +3227,7 @@ const App = {
   async updateLinkUrls() {
     const storageInput = document.getElementById('link-url-storage');
     const backupInput = document.getElementById('link-url-backup');
+    const bothInput = document.getElementById('link-url-both');
     const expiryEl = document.getElementById('link-url-expiry');
     if (!storageInput || !backupInput) {
       await Promise.all([this.updateBitbucketLinkUrls(), this.updateCodebergLinkUrls(), this.updatePastebinLinkUrls()]);
@@ -3221,25 +3236,30 @@ const App = {
 
     storageInput.value = 'Generating one-time link…';
     backupInput.value = 'Generating one-time link…';
+    if (bothInput) bothInput.value = 'Generating one-time link…';
 
     let providerConfig = null;
     try {
       providerConfig = await this.fetchProviderConfig();
       if (providerConfig) this.updateSetupUrls(providerConfig);
 
-      const [storage, backup] = await Promise.all([
+      const requests = [
         API.accounts.createLinkToken('storage', 'github'),
         API.accounts.createLinkToken('backup', 'github'),
-      ]);
+      ];
+      if (bothInput) requests.push(API.accounts.createLinkToken('both', 'github'));
+      const links = await Promise.all(requests);
 
-      storageInput.value = storage.url;
-      backupInput.value = backup.url;
+      storageInput.value = links[0].url;
+      backupInput.value = links[1].url;
+      if (bothInput) bothInput.value = links[2]?.url || '';
       if (expiryEl) {
-        expiryEl.textContent = `Each GitHub link works once and expires in ${storage.expires_in_minutes} minutes.`;
+        expiryEl.textContent = `Each GitHub link works once and expires in ${links[0].expires_in_minutes} minutes.`;
       }
     } catch (err) {
       storageInput.value = '';
       backupInput.value = '';
+      if (bothInput) bothInput.value = '';
       this.toast(err.message, 'error');
     }
 
@@ -3308,7 +3328,7 @@ const App = {
         card.className = 'linked-account-card';
 
         const providerLabel = providerLabelFor(account.provider);
-        const roleLabel = account.role === 'backup' ? 'Backup / redundancy' : 'Additional storage';
+        const roleLabel = linkedAccountRoleLabel(account.role);
         const statusLabel = account.is_active ? 'Active' : 'Inactive';
 
         const quota = this.lastRateLimits?.find(
@@ -3341,6 +3361,7 @@ const App = {
         roleSelect.innerHTML = `
           <option value="storage"${account.role === 'storage' ? ' selected' : ''}>Storage</option>
           <option value="backup"${account.role === 'backup' ? ' selected' : ''}>Backup</option>
+          <option value="both"${account.role === 'both' ? ' selected' : ''}>Storage + Backup</option>
         `;
         roleSelect.addEventListener('change', async () => {
           try {
@@ -3369,7 +3390,7 @@ const App = {
         });
         actions.appendChild(toggleBtn);
 
-        if (account.role === 'backup') {
+        if (isBackupAccountRole(account.role)) {
           const redoBtn = document.createElement('button');
           redoBtn.className = 'btn-primary';
           redoBtn.textContent = 'Re-fork repos';

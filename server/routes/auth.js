@@ -69,7 +69,7 @@ router.get('/github/link', requireSiteAccessForAuth, (req, res, next) => {
     });
   }
 
-  const role = req.query.role === 'backup' ? 'backup' : 'storage';
+  const role = accounts.parseLinkRole(req.query.role);
   req.session.linkingForUserId = req.user.id;
   req.session.linkingRole = role;
   startOAuth();
@@ -259,7 +259,7 @@ router.get('/bitbucket/link', requireSiteAccessForAuth, (req, res) => {
   }
 
   req.session.linkingForUserId = req.user.id;
-  req.session.linkingRole = req.query.role === 'backup' ? 'backup' : 'storage';
+  req.session.linkingRole = accounts.parseLinkRole(req.query.role);
   req.session.linkingProvider = 'bitbucket';
   startOAuth();
 });
@@ -349,7 +349,7 @@ router.get('/codeberg/link', requireSiteAccessForAuth, (req, res) => {
   }
 
   req.session.linkingForUserId = req.user.id;
-  req.session.linkingRole = req.query.role === 'backup' ? 'backup' : 'storage';
+  req.session.linkingRole = accounts.parseLinkRole(req.query.role);
   req.session.linkingProvider = 'codeberg';
   startOAuth();
 });
@@ -412,7 +412,7 @@ function pastebinLinkPage({ token, role, error = null }) {
   const safeError = error
     ? String(error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     : '';
-  const roleLabel = role === 'backup' ? 'backup / redundancy' : 'storage';
+  const roleLabel = accounts.linkRoleLabel(role);
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Link Pastebin — GitHub Vault</title>
 <link rel="stylesheet" href="/css/tokens.css">
@@ -476,7 +476,7 @@ function beginPastebinLink(req, res, { token = null, role = 'storage' } = {}) {
 router.get('/pastebin/link', requireSiteAccessForAuth, (req, res) => {
   beginPastebinLink(req, res, {
     token: req.query.token || null,
-    role: req.query.role === 'backup' ? 'backup' : 'storage',
+    role: accounts.parseLinkRole(req.query.role),
   });
 });
 

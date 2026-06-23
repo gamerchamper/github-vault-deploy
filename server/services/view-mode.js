@@ -1,4 +1,5 @@
 const db = require('../db/database');
+const accounts = require('./accounts');
 
 function parseViewParam(viewStr) {
   if (!viewStr || viewStr === 'primary') return { type: 'primary' };
@@ -25,14 +26,15 @@ function listViews(userId) {
 
   for (const account of linked) {
     if (!account.is_active) continue;
-    if (account.role === 'backup') {
+    if (accounts.isBackupRole(account.role)) {
       views.push({
         id: `backup:${account.id}`,
         type: 'backup',
         accountId: account.id,
         label: `Backup (@${account.username})`,
       });
-    } else if (account.role === 'storage') {
+    }
+    if (accounts.isStorageRole(account.role)) {
       views.push({
         id: `storage:${account.id}`,
         type: 'storage',

@@ -97,7 +97,7 @@ router.post('/backup-sync', async (req, res) => {
     } else if (force) {
       const accounts = require('../services/accounts');
       const linked = accounts.listLinkedAccounts(req.user.id)
-        .filter((a) => a.role === 'backup' && a.is_active);
+        .filter((a) => accounts.isBackupRole(a.role) && a.is_active);
       for (const account of linked) {
         backupSync.forceBackupSync(req.user.id, account.id);
       }
@@ -112,7 +112,7 @@ router.post('/backup-sync', async (req, res) => {
 
 router.post('/link-token', (req, res) => {
   try {
-    const role = req.body.role === 'backup' ? 'backup' : 'storage';
+    const role = accounts.parseLinkRole(req.body.role);
     const providerRaw = String(req.body.provider || 'github').toLowerCase();
     const provider = ['bitbucket', 'codeberg', 'pastebin'].includes(providerRaw) ? providerRaw : 'github';
     const link = accounts.createLinkToken(req.user.id, role, req, provider);
@@ -156,7 +156,7 @@ router.patch('/:id', async (req, res) => {
       role,
       is_active: isActive,
     });
-    if (role === 'backup') {
+    if (accounts.isBackupRole(role)) {
       await accounts.ensureBackupReposForAccount(req.user.id, updated.id);
       const backupSync = require('../services/backup-sync');
       backupSync.runBackupSync(req.user.id, updated.id);
@@ -191,7 +191,7 @@ router.get('/:id/repos/available', async (req, res) => {
   try {
     const account = accounts.getLinkedAccount(req.user.id, parseInt(req.params.id, 10));
     if (!account) return res.status(404).json({ error: 'Linked account not found' });
-    if (account.role !== 'storage') {
+    if (!accounts.isStorageRole(account.role)) {
       return res.status(400).json({ error: 'Only storage accounts can add repositories' });
     }
 

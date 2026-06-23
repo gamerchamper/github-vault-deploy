@@ -138,7 +138,7 @@ function filterReposByRateLimit(userId, repos) {
   return repos.filter((repo) => !isRepoRateLimited(userId, repo));
 }
 
-function sortReposByQuota(userId, repos) {
+function sortReposForUpload(userId, repos) {
   return [...repos].sort((a, b) => {
     const rlA = rateLimitForRepo(a);
     const rlB = rateLimitForRepo(b);
@@ -149,9 +149,38 @@ function sortReposByQuota(userId, repos) {
     const pausedA = rlA.isPaused(keyA);
     const pausedB = rlB.isPaused(keyB);
     if (pausedA !== pausedB) return pausedA ? 1 : -1;
+
     const remA = rlA.getQuotaStatus(keyA)?.remaining ?? defaultRemainingForRepo(a);
     const remB = rlB.getQuotaStatus(keyB)?.remaining ?? defaultRemainingForRepo(b);
-    return remB - remA;
+    if (remB !== remA) return remB - remA;
+
+    const aPrimary = !a.linked_account_id;
+    const bPrimary = !b.linked_account_id;
+    if (aPrimary !== bPrimary) return aPrimary ? 1 : -1;
+
+    const aCreated = a.linked_created_at || '';
+    const bCreated = b.linked_created_at || '';
+    if (aCreated !== bCreated) {
+      if (!aCreated) return 1;
+      if (!bCreated) return -1;
+      return bCreated.localeCompare(aCreated);
+    }
+
+    return (a.chunk_count || 0) - (b.chunk_count || 0);
+  });
+}
+
+function sortUploadAccountIdsNewestFirst(userId, ids) {
+  const rows = db.prepare(`
+    SELECT id, created_at FROM linked_accounts WHERE user_id = ?
+  `).all(userId);
+  const createdById = new Map(rows.map((row) => [String(row.id), row.created_at || '']));
+  return [...ids].sort((a, b) => {
+    if (a === 'primary') return 1;
+    if (b === 'primary') return -1;
+    const aCreated = createdById.get(String(a)) || '';
+    const bCreated = createdById.get(String(b)) || '';
+    return bCreated.localeCompare(aCreated);
   });
 }
 
@@ -160,7 +189,10 @@ function expandUploadAccountsForFile(userId, fileId, taskContext) {
   const healthy = filterReposByRateLimit(userId, allRepos);
   if (!healthy.length) return false;
 
-  const newIds = [...new Set(healthy.map(repoToUploadAccountId))];
+  const newIds = sortUploadAccountIdsNewestFirst(
+    userId,
+    [...new Set(healthy.map(repoToUploadAccountId))],
+  );
   const current = getUploadAccountIdsForFile(fileId);
   if (current?.length === newIds.length && current.every((id) => newIds.includes(id))) {
     return false;
@@ -198,7 +230,7 @@ function getUploadReposForChunk(userId, fileId, taskContext) {
   }
 
   const pool = healthy.length ? healthy : repos;
-  return { repos: sortReposByQuota(userId, pool), replanned };
+  return { repos: sortReposForUpload(userId, pool), replanned };
 }
 
 function hasAlternateHealthyUploadToken(userId, repos, excludeTokenKey) {
@@ -239,21 +271,13 @@ function listUploadTargets(userId) {
     LEFT JOIN linked_accounts la ON r.linked_account_id = la.id
     WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
       AND (r.repo_role IS NULL OR r.repo_role = 'primary')
-      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
+      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role IN ('storage', 'both')))
       AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
-    ORDER BY r.linked_account_id IS NOT NULL, la.username, r.full_name
+    ORDER BY r.linked_account_id IS NOT NULL, la.created_at DESC, r.full_name
   `).all(userId, REPO_CAPACITY_BYTES);
 
   const targets = [];
   const primaryRepos = allRepos.filter((r) => !r.linked_account_id);
-  if (primaryRepos.length) {
-    targets.push({
-      id: 'primary',
-      type: 'primary',
-      label: `Primary (@${user?.username || 'you'})`,
-      repoCount: primaryRepos.length,
-    });
-  }
 
   const byLinked = new Map();
   for (const repo of allRepos) {
@@ -271,18 +295,30 @@ function listUploadTargets(userId) {
     byLinked.get(key).repoCount += 1;
   }
   targets.push(...byLinked.values());
+
+  if (primaryRepos.length) {
+    targets.push({
+      id: 'primary',
+      type: 'primary',
+      label: `Primary (@${user?.username || 'you'})`,
+      repoCount: primaryRepos.length,
+    });
+  }
   return targets;
 }
 
 function getActiveRepos(userId, options = {}) {
   const repos = db.prepare(`
-    SELECT r.* FROM storage_repos r
+    SELECT r.*, la.created_at AS linked_created_at FROM storage_repos r
     LEFT JOIN linked_accounts la ON r.linked_account_id = la.id
     WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
       AND (r.repo_role IS NULL OR r.repo_role = 'primary')
-      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
+      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role IN ('storage', 'both')))
       AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
-    ORDER BY r.chunk_count ASC
+    ORDER BY
+      CASE WHEN r.linked_account_id IS NULL THEN 1 ELSE 0 END,
+      la.created_at DESC,
+      r.chunk_count ASC
   `).all(userId, REPO_CAPACITY_BYTES);
   return filterReposByUploadAccounts(repos, options.uploadAccountIds);
 }
@@ -528,7 +564,7 @@ async function uploadEncryptedChunkToGitHub(
     const { repos: pool, replanned } = fileId != null
       ? getUploadReposForChunk(userId, fileId, taskContext)
       : {
-        repos: sortReposByQuota(
+        repos: sortReposForUpload(
           userId,
           filterReposByRateLimit(userId, repos).length
             ? filterReposByRateLimit(userId, repos)
@@ -733,7 +769,7 @@ function planUpload(fileSize, chunkSize, userId, options = {}) {
   const normalizedChunkSize = normalizeChunkSize(chunkSize);
   let repos = getActiveRepos(userId, { uploadAccountIds });
   const healthyRepos = filterReposByRateLimit(userId, repos);
-  if (healthyRepos.length) repos = sortReposByQuota(userId, healthyRepos);
+  if (healthyRepos.length) repos = sortReposForUpload(userId, healthyRepos);
   const repoCount = Math.max(repos.length, 1);
   const reserveHls = shouldReserveHls(convertHls, mimeType, fileName);
 

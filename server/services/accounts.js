@@ -4,8 +4,30 @@ const github = require('./github');
 const storageProvider = require('./storage-provider');
 const appUrl = require('./app-url');
 
-const VALID_ROLES = new Set(['storage', 'backup']);
+const VALID_ROLES = new Set(['storage', 'backup', 'both']);
+const LINKED_STORAGE_ROLES_SQL = "('storage', 'both')";
+const LINKED_BACKUP_ROLES_SQL = "('backup', 'both')";
 const LINK_TOKEN_TTL_MS = 30 * 60 * 1000;
+
+function isStorageRole(role) {
+  return role === 'storage' || role === 'both';
+}
+
+function isBackupRole(role) {
+  return role === 'backup' || role === 'both';
+}
+
+function parseLinkRole(raw) {
+  if (raw === 'backup') return 'backup';
+  if (raw === 'both') return 'both';
+  return 'storage';
+}
+
+function linkRoleLabel(role) {
+  if (role === 'backup') return 'backup / redundancy';
+  if (role === 'both') return 'storage + backup';
+  return 'storage';
+}
 
 function getUser(userId) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
@@ -201,7 +223,7 @@ function getBackupReposForPrimary(userId, primaryRepoId, linkedAccountId = null)
     SELECT r.* FROM storage_repos r
     JOIN linked_accounts la ON r.linked_account_id = la.id
     WHERE r.user_id = ? AND r.repo_role = 'backup' AND r.mirrors_repo_id = ?
-      AND r.is_active = 1 AND la.is_active = 1 AND la.role = 'backup'
+      AND r.is_active = 1 AND la.is_active = 1 AND la.role IN ('backup', 'both')
   `;
   const params = [userId, primaryRepoId];
   if (linkedAccountId) {
@@ -459,7 +481,7 @@ async function ensureBackupReposForAccount(userId, linkedAccountId) {
 
 async function ensureBackupReposForAllAccounts(userId) {
   const backupAccounts = db.prepare(`
-    SELECT id FROM linked_accounts WHERE user_id = ? AND role = 'backup' AND is_active = 1
+    SELECT id FROM linked_accounts WHERE user_id = ? AND role IN ('backup', 'both') AND is_active = 1
   `).all(userId);
   for (const { id } of backupAccounts) {
     await ensureBackupReposForAccount(userId, id);
@@ -473,7 +495,7 @@ async function ensureBackupRepo(userId, linkedAccountId) {
 async function redoBackupSetup(userId, linkedAccountId) {
   const account = getLinkedAccount(userId, linkedAccountId);
   if (!account) throw new Error('Linked account not found');
-  if (account.role !== 'backup') throw new Error('Only backup accounts support re-fork');
+  if (account.role !== 'backup' && account.role !== 'both') throw new Error('Only backup accounts support re-fork');
 
   const backupRepoIds = db.prepare(`
     SELECT id FROM storage_repos WHERE user_id = ? AND linked_account_id = ? AND repo_role = 'backup'
@@ -550,7 +572,7 @@ async function linkAccount(userId, profile, accessToken, role = 'storage', provi
     console.warn(`Failed to add permissions for linked account ${accountId}: ${err.message}`);
   }
 
-  if (role === 'backup') {
+  if (isBackupRole(role)) {
     await ensureBackupReposForAccount(userId, accountId);
     const backupSync = require('./backup-sync');
     backupSync.runBackupSync(userId, accountId);
@@ -761,6 +783,7 @@ const ROLE_LABELS = {
   primary: 'Primary',
   storage: 'Storage',
   backup: 'Backup',
+  both: 'Storage + Backup',
 };
 
 async function getAccountRateLimits(userId) {
@@ -892,4 +915,10 @@ module.exports = {
   redoBackupSetup,
   ensureCollaboratorsForAccount,
   VALID_ROLES,
+  isStorageRole,
+  isBackupRole,
+  parseLinkRole,
+  linkRoleLabel,
+  LINKED_STORAGE_ROLES_SQL,
+  LINKED_BACKUP_ROLES_SQL,
 };

@@ -457,7 +457,7 @@ function getHlsRepos(userId) {
     LEFT JOIN linked_accounts la ON r.linked_account_id = la.id
     WHERE r.user_id = ? AND r.is_active = 1 AND r.is_metadata = 0
       AND (r.repo_role IS NULL OR r.repo_role = 'primary')
-      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role = 'storage'))
+      AND (r.linked_account_id IS NULL OR (la.is_active = 1 AND la.role IN ('storage', 'both')))
       AND (COALESCE(r.total_bytes, 0) + COALESCE(r.reserved_bytes, 0) < ?)
     ORDER BY r.chunk_count ASC
   `).all(userId, REPO_CAPACITY_BYTES);

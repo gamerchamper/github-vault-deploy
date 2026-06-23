@@ -15,8 +15,8 @@ describe('upload account targeting', function () {
     });
 
     db.prepare(`
-      INSERT INTO linked_accounts (user_id, github_id, username, access_token, role, is_active)
-      VALUES (?, 'linked-gh', 'storageuser', 'linked-token', 'storage', 1)
+      INSERT INTO linked_accounts (user_id, github_id, username, access_token, role, is_active, created_at)
+      VALUES (?, 'linked-gh', 'storageuser', 'linked-token', 'storage', 1, '2024-06-01T00:00:00.000Z')
     `).run(user.id);
     const linkedId = db.prepare('SELECT id FROM linked_accounts WHERE user_id = ?').get(user.id).id;
 
@@ -69,5 +69,34 @@ describe('upload account targeting', function () {
     expect(planAll.repoCount).to.equal(2);
     const planStorage = storage.planUpload(1000, 921600, userId, { uploadAccountIds: [String(linkedId)] });
     expect(planStorage.repoCount).to.equal(1);
+  });
+
+  it('prefers newer linked account repos before primary for uploads', function () {
+    const userId = db.prepare('SELECT id FROM users LIMIT 1').get().id;
+
+    db.prepare(`
+      INSERT INTO linked_accounts (user_id, github_id, username, access_token, role, is_active, created_at)
+      VALUES (?, 'older-gh', 'olderacct', 'older-token', 'storage', 1, '2024-01-01T00:00:00.000Z')
+    `).run(userId);
+    const olderId = db.prepare("SELECT id FROM linked_accounts WHERE username = 'olderacct'").get().id;
+
+    db.prepare(`
+      INSERT INTO linked_accounts (user_id, github_id, username, access_token, role, is_active, created_at)
+      VALUES (?, 'newer-gh', 'neweracct', 'newer-token', 'storage', 1, '2030-01-01T00:00:00.000Z')
+    `).run(userId);
+    const newerId = db.prepare("SELECT id FROM linked_accounts WHERE username = 'neweracct'").get().id;
+
+    db.prepare(`
+      INSERT INTO storage_repos (user_id, owner, name, full_name, default_branch, linked_account_id, repo_role, is_active, is_metadata)
+      VALUES (?, 'olderacct', 'vault-storage-1', 'olderacct/vault-storage-1', 'main', ?, 'primary', 1, 0)
+    `).run(userId, olderId);
+    db.prepare(`
+      INSERT INTO storage_repos (user_id, owner, name, full_name, default_branch, linked_account_id, repo_role, is_active, is_metadata)
+      VALUES (?, 'neweracct', 'vault-storage-1', 'neweracct/vault-storage-1', 'main', ?, 'primary', 1, 0)
+    `).run(userId, newerId);
+
+    const plan = storage.planUpload(1000, 921600, userId, {});
+    expect(plan.repoCount).to.equal(4);
+    expect(plan.distribution[0].repo).to.equal('neweracct/vault-storage-1');
   });
 });
