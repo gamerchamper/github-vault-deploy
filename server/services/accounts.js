@@ -805,9 +805,9 @@ async function getAccountRateLimits(userId) {
       is_primary: !!account.is_primary,
       ...quota,
       thresholds: {
-        concurrency_full: provider === 'pastebin' ? 4 : provider === 'bitbucket' ? 8 : 16,
-        concurrency_at_1000: provider === 'pastebin' ? 3 : provider === 'bitbucket' ? 6 : 12,
-        concurrency_at_400: provider === 'pastebin' ? 2 : provider === 'bitbucket' ? 4 : 8,
+        concurrency_full: provider === 'pastebin' ? 4 : provider === 'bitbucket' ? 8 : provider === 'codeberg' ? 6 : 16,
+        concurrency_at_1000: provider === 'pastebin' ? 3 : provider === 'bitbucket' ? 6 : provider === 'codeberg' ? 5 : 12,
+        concurrency_at_400: provider === 'pastebin' ? 2 : provider === 'bitbucket' ? 4 : provider === 'codeberg' ? 3 : 8,
         concurrency_at_150: 4,
         concurrency_at_50: 2,
         concurrency_exhausted: 1,

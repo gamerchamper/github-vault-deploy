@@ -19,6 +19,7 @@ let toastTimer = null;
 const PROVIDER_LABELS = {
   github: 'GitHub',
   bitbucket: 'Bitbucket',
+  codeberg: 'Codeberg',
   pastebin: 'Pastebin',
 };
 
@@ -1672,6 +1673,9 @@ const App = {
     document.getElementById('btn-regenerate-bitbucket-links')?.addEventListener('click', () => {
       this.updateBitbucketLinkUrls();
     });
+    document.getElementById('btn-regenerate-codeberg-links')?.addEventListener('click', () => {
+      this.updateCodebergLinkUrls();
+    });
     document.getElementById('btn-regenerate-pastebin-links')?.addEventListener('click', () => {
       this.updatePastebinLinkUrls();
     });
@@ -2938,6 +2942,7 @@ const App = {
     const callbacks = providerConfig?.oauth_callbacks || providerConfig || null;
     const githubCallback = callbacks?.github || `${origin}/auth/github/callback`;
     const bitbucketCallback = callbacks?.bitbucket || `${origin}/auth/bitbucket/callback`;
+    const codebergCallback = callbacks?.codeberg || `${origin}/auth/codeberg/callback`;
     const pastebinLink = callbacks?.pastebin || `${origin}/auth/pastebin/link`;
     const setText = (id, value) => {
       const el = document.getElementById(id);
@@ -2947,6 +2952,7 @@ const App = {
     setText('setup-callback-url', githubCallback);
     setText('repo-setup-callback-url', githubCallback);
     setText('bitbucket-setup-callback-url', bitbucketCallback);
+    setText('codeberg-setup-callback-url', codebergCallback);
     setText('pastebin-setup-link-url', pastebinLink);
   },
 
@@ -3040,6 +3046,88 @@ const App = {
     }
   },
 
+  setCodebergLinkPanelState({ configured, message = '' }) {
+    const panel = document.getElementById('codeberg-link-panel');
+    const storageInput = document.getElementById('link-url-codeberg-storage');
+    const backupInput = document.getElementById('link-url-codeberg-backup');
+    const expiryEl = document.getElementById('codeberg-link-url-expiry');
+    const statusEl = document.getElementById('codeberg-link-status');
+    panel?.classList.remove('hidden');
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.classList.toggle('hidden', !message);
+    }
+    if (!configured) {
+      const hint = message || 'Set CODEBERG_CLIENT_ID and CODEBERG_CLIENT_SECRET in the server .env, then restart the vault.';
+      if (storageInput) {
+        storageInput.value = '';
+        storageInput.placeholder = hint;
+      }
+      if (backupInput) {
+        backupInput.value = '';
+        backupInput.placeholder = hint;
+      }
+      if (expiryEl) expiryEl.textContent = '';
+    }
+  },
+
+  async updateCodebergLinkUrls(providerConfig = null) {
+    const storageInput = document.getElementById('link-url-codeberg-storage');
+    const backupInput = document.getElementById('link-url-codeberg-backup');
+    const expiryEl = document.getElementById('codeberg-link-url-expiry');
+    if (!storageInput || !backupInput) return;
+
+    storageInput.value = 'Generating one-time link…';
+    backupInput.value = 'Generating one-time link…';
+    storageInput.placeholder = '';
+    backupInput.placeholder = '';
+
+    try {
+      const config = providerConfig || await this.fetchProviderConfig();
+      if (config) this.updateSetupUrls(config);
+
+      const providers = Object.fromEntries((config?.providers || []).map((p) => [p.id, p]));
+      const codebergConfigured = !!providers.codeberg?.configured;
+
+      if (!codebergConfigured) {
+        this.setCodebergLinkPanelState({
+          configured: false,
+          message: 'Codeberg OAuth is not configured on this server — add CODEBERG_CLIENT_ID and CODEBERG_CLIENT_SECRET to .env and restart.',
+        });
+        return;
+      }
+
+      const [cbStorage, cbBackup] = await Promise.all([
+        API.accounts.createLinkToken('storage', 'codeberg'),
+        API.accounts.createLinkToken('backup', 'codeberg'),
+      ]);
+
+      storageInput.value = cbStorage.url || '';
+      backupInput.value = cbBackup.url || '';
+      if (!cbStorage.url || !cbBackup.url) {
+        throw new Error('Codeberg link response missing URL — check server logs');
+      }
+
+      this.setCodebergLinkPanelState({
+        configured: true,
+        message: 'Copy a link below, open it in a private window, and approve Codeberg access.',
+      });
+      if (expiryEl) {
+        expiryEl.textContent = `Each Codeberg link works once and expires in ${cbStorage.expires_in_minutes} minutes.`;
+      }
+    } catch (err) {
+      storageInput.value = '';
+      backupInput.value = '';
+      storageInput.placeholder = err.message || 'Failed to generate Codeberg link';
+      backupInput.placeholder = err.message || 'Failed to generate Codeberg link';
+      this.setCodebergLinkPanelState({
+        configured: true,
+        message: `Could not generate Codeberg links: ${err.message}`,
+      });
+      this.toast(err.message, 'error');
+    }
+  },
+
   setPastebinLinkPanelState({ configured, message = '' }) {
     const panel = document.getElementById('pastebin-link-panel');
     const storageInput = document.getElementById('link-url-pastebin-storage');
@@ -3127,7 +3215,7 @@ const App = {
     const backupInput = document.getElementById('link-url-backup');
     const expiryEl = document.getElementById('link-url-expiry');
     if (!storageInput || !backupInput) {
-      await Promise.all([this.updateBitbucketLinkUrls(), this.updatePastebinLinkUrls()]);
+      await Promise.all([this.updateBitbucketLinkUrls(), this.updateCodebergLinkUrls(), this.updatePastebinLinkUrls()]);
       return;
     }
 
@@ -3156,6 +3244,7 @@ const App = {
     }
 
     await this.updateBitbucketLinkUrls(providerConfig);
+    await this.updateCodebergLinkUrls(providerConfig);
     await this.updatePastebinLinkUrls(providerConfig);
   },
 

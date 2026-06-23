@@ -6,7 +6,7 @@ const bitbucketRateLimit = require('../../server/services/bitbucket-rate-limit')
 describe('storage-provider', () => {
   it('lists github and bitbucket providers', () => {
     const providers = storageProvider.listProviders();
-    expect(providers.map((p) => p.id)).to.include.members(['github', 'bitbucket', 'pastebin']);
+    expect(providers.map((p) => p.id)).to.include.members(['github', 'bitbucket', 'codeberg', 'pastebin']);
   });
 
   it('builds raw URLs per provider', () => {

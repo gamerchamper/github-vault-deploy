@@ -676,6 +676,65 @@ async function fetchRawText(url) {
   return resp.text();
 }
 
+async function downloadHlsBlob(userId, repo, repoPath) {
+  if (!repo) throw new Error('Storage repo not found');
+  const url = hlsRawUrl(repo, repoPath);
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+    if (resp.ok) return Buffer.from(await resp.arrayBuffer());
+  } catch {
+    // Fall back to authenticated provider download (private / linked-account repos).
+  }
+
+  const storageProvider = require('./storage-provider');
+  const [owner, repoName] = repo.full_name.split('/');
+  const client = accounts.createClientForRepo(userId, repo);
+  const mod = storageProvider.getProvider(repo.provider || 'github');
+  return mod.downloadChunk(client, owner, repoName, repoPath, repo.default_branch, {
+    subsystem: 'download',
+  });
+}
+
+function rewriteUploadedPlaylist(content, segmentUrlForIndex) {
+  const lines = content.split(/\r?\n/);
+  const out = [];
+  let segIndex = 0;
+  for (const line of lines) {
+    if (!line.trim() || line.startsWith('#')) {
+      out.push(line);
+      continue;
+    }
+    out.push(segmentUrlForIndex(segIndex));
+    segIndex += 1;
+  }
+  return out.join('\n');
+}
+
+async function fetchUploadedPlaylistText(userId, file) {
+  if (!file?.hls_playlist_repo_id || !file?.hls_playlist_path) {
+    throw new Error('HLS playlist not available');
+  }
+  const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(file.hls_playlist_repo_id);
+  const buf = await downloadHlsBlob(userId, repo, file.hls_playlist_path);
+  return buf.toString('utf8');
+}
+
+async function buildUploadedPlaylistForProxy(userId, file, segmentUrlForIndex) {
+  const playlist = await fetchUploadedPlaylistText(userId, file);
+  return rewriteUploadedPlaylist(playlist, segmentUrlForIndex);
+}
+
+async function fetchUploadedSegment(userId, fileId, segmentIndex) {
+  const seg = db.prepare(`
+    SELECT s.segment_index, s.repo_id, s.repo_path
+    FROM hls_segments s
+    WHERE s.file_id = ? AND s.segment_index = ?
+  `).get(fileId, segmentIndex);
+  if (!seg) throw new Error('HLS segment not found');
+  const repo = db.prepare('SELECT * FROM storage_repos WHERE id = ?').get(seg.repo_id);
+  return downloadHlsBlob(userId, repo, seg.repo_path);
+}
+
 function hlsRawUrl(repo, repoPath) {
   return storage.githubRawUrl(repo.full_name, repo.default_branch, repoPath);
 }
@@ -861,4 +920,9 @@ module.exports = {
   isFfmpegAvailable,
   resumeInterruptedConversions,
   buildHlsConvertArgs,
+  downloadHlsBlob,
+  rewriteUploadedPlaylist,
+  fetchUploadedPlaylistText,
+  buildUploadedPlaylistForProxy,
+  fetchUploadedSegment,
 };

@@ -214,6 +214,7 @@ router.post('/logout', (req, res) => {
 });
 
 const bitbucketOauth = require('../services/bitbucket-oauth');
+const codebergOauth = require('../services/codeberg-oauth');
 const storageProvider = require('../services/storage-provider');
 
 router.get('/storage-providers', (req, res) => {
@@ -310,6 +311,96 @@ router.get('/bitbucket/callback', async (req, res) => {
     delete req.session.linkingToken;
     delete req.session.linkingProvider;
     const reason = encodeURIComponent(err.message || 'Bitbucket link failed');
+    if (wasLinking) return res.redirect(`/?error=link_failed&reason=${reason}`);
+    return res.redirect(`/?error=auth_failed&reason=${reason}`);
+  }
+});
+
+router.get('/codeberg/link', requireSiteAccessForAuth, (req, res) => {
+  if (!codebergOauth.isConfigured()) {
+    return res.status(503).send(linkErrorPage('Codeberg OAuth is not configured on this server (CODEBERG_CLIENT_ID / CODEBERG_CLIENT_SECRET)'));
+  }
+
+  const startOAuth = () => {
+    const state = req.session.linkingToken || '';
+    res.redirect(codebergOauth.buildAuthorizeUrl(req, state));
+  };
+
+  if (req.query.token) {
+    try {
+      const row = accounts.peekLinkToken(req.query.token);
+      if (storageProvider.normalizeProvider(row.provider) !== 'codeberg') {
+        return res.status(400).send(linkErrorPage('This link is for Codeberg — generate a Codeberg link from Storage Repositories'));
+      }
+      req.session.linkingForUserId = row.user_id;
+      req.session.linkingRole = row.role;
+      req.session.linkingToken = req.query.token;
+      req.session.linkingProvider = 'codeberg';
+      return startOAuth();
+    } catch (err) {
+      return res.status(400).send(linkErrorPage(err.message));
+    }
+  }
+
+  if (!req.isAuthenticated || !req.isAuthenticated()) {
+    return res.status(401).json({
+      error: 'Not authenticated — open Storage Repositories and copy a one-time Codeberg link',
+    });
+  }
+
+  req.session.linkingForUserId = req.user.id;
+  req.session.linkingRole = req.query.role === 'backup' ? 'backup' : 'storage';
+  req.session.linkingProvider = 'codeberg';
+  startOAuth();
+});
+
+router.get('/codeberg/callback', async (req, res) => {
+  const wasLinking = !!(req.session?.linkingForUserId || req.session?.linkingToken);
+  const code = req.query.code;
+  if (!code) {
+    const reason = encodeURIComponent(req.query.error_description || req.query.error || 'Missing authorization code');
+    return res.redirect(`/?error=link_failed&reason=${reason}`);
+  }
+
+  try {
+    const tokenData = await codebergOauth.exchangeCode(code, req);
+    const profile = await codebergOauth.fetchProfile(tokenData.access_token);
+    const linkToken = req.session.linkingToken;
+    let userId = req.session.linkingForUserId;
+    let role = req.session.linkingRole || 'storage';
+
+    if (linkToken) {
+      const row = accounts.consumeLinkToken(linkToken);
+      userId = row.user_id;
+      role = row.role;
+    }
+    if (!userId) throw new Error('Vault session expired — generate a fresh link');
+
+    await accounts.linkAccount(userId, profile, tokenData.access_token, role, 'codeberg');
+
+    delete req.session.linkingForUserId;
+    delete req.session.linkingRole;
+    delete req.session.linkingToken;
+    delete req.session.linkingProvider;
+
+    const vaultUser = db.prepare(
+      'SELECT id, github_id, username, avatar_url FROM users WHERE id = ?'
+    ).get(userId);
+    if (!vaultUser) throw new Error('Vault user not found');
+
+    req.session.linkedSuccess = true;
+    req.session.linkedProvider = 'codeberg';
+    req.logIn(vaultUser, (loginErr) => {
+      if (loginErr) return res.redirect('/?error=link_failed');
+      return res.redirect('/?linked=1&provider=codeberg');
+    });
+  } catch (err) {
+    console.error('Codeberg link callback error:', err);
+    delete req.session.linkingForUserId;
+    delete req.session.linkingRole;
+    delete req.session.linkingToken;
+    delete req.session.linkingProvider;
+    const reason = encodeURIComponent(err.message || 'Codeberg link failed');
     if (wasLinking) return res.redirect(`/?error=link_failed&reason=${reason}`);
     return res.redirect(`/?error=auth_failed&reason=${reason}`);
   }

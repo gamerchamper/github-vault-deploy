@@ -114,7 +114,7 @@ router.post('/link-token', (req, res) => {
   try {
     const role = req.body.role === 'backup' ? 'backup' : 'storage';
     const providerRaw = String(req.body.provider || 'github').toLowerCase();
-    const provider = ['bitbucket', 'pastebin'].includes(providerRaw) ? providerRaw : 'github';
+    const provider = ['bitbucket', 'codeberg', 'pastebin'].includes(providerRaw) ? providerRaw : 'github';
     const link = accounts.createLinkToken(req.user.id, role, req, provider);
     res.json({ success: true, ...link });
   } catch (err) {
@@ -129,6 +129,7 @@ router.get('/providers', (req, res) => {
     oauth_callbacks: {
       github: appUrl.publicUrl(req, '/auth/github/callback'),
       bitbucket: appUrl.publicUrl(req, '/auth/bitbucket/callback'),
+      codeberg: appUrl.publicUrl(req, '/auth/codeberg/callback'),
       pastebin: appUrl.publicUrl(req, '/auth/pastebin/link'),
     },
     providers: storageProvider.listProviders().map((p) => ({

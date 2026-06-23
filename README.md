@@ -43,6 +43,14 @@ BITBUCKET_CLIENT_ID=
 BITBUCKET_CLIENT_SECRET=
 # BITBUCKET_RATE_LIMIT_HOUR=1000
 # BITBUCKET_RAW_RATE_LIMIT_HOUR=5000
+
+# Optional: link Codeberg accounts (OAuth callback: {APP_URL}/auth/codeberg/callback)
+# Register OAuth2 app at https://codeberg.org/user/settings/applications
+CODEBERG_CLIENT_ID=
+CODEBERG_CLIENT_SECRET=
+# CODEBERG_BASE_URL=https://codeberg.org
+# CODEBERG_RATE_LIMIT_MINUTE=60
+# CODEBERG_RATE_LIMIT_HOUR=3600
 ```
 
 ### 3. Install & Run

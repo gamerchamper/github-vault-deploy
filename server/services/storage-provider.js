@@ -1,11 +1,13 @@
 /**
- * Storage provider registry — GitHub, Bitbucket, and future backends.
+ * Storage provider registry — GitHub, Bitbucket, Codeberg, Pastebin, and future backends.
  */
 const github = require('./github');
 const bitbucket = require('./bitbucket');
+const codeberg = require('./codeberg');
 const pastebin = require('./pastebin');
 const githubRateLimit = require('./github-rate-limit');
 const bitbucketRateLimit = require('./bitbucket-rate-limit');
+const codebergRateLimit = require('./codeberg-rate-limit');
 const pastebinRateLimit = require('./pastebin-rate-limit');
 
 const PROVIDERS = Object.freeze({
@@ -34,6 +36,20 @@ const PROVIDERS = Object.freeze({
     authPath: '/auth/bitbucket/link',
     authType: 'oauth',
     scopes: ['repository', 'repository:write', 'account'],
+  },
+  codeberg: {
+    id: 'codeberg',
+    label: 'Codeberg',
+    module: codeberg,
+    rateLimit: codebergRateLimit,
+    supportsForkBackup: false,
+    supportsOrgRepos: true,
+    maxBlobBytes: codeberg.MAX_BLOB_BYTES,
+    defaultRateLimitHour: codebergRateLimit.DEFAULT_LIMIT,
+    defaultRateLimitMinute: codebergRateLimit.DEFAULT_LIMIT_MINUTE,
+    authPath: '/auth/codeberg/link',
+    authType: 'oauth',
+    scopes: ['read:user', 'read:repository', 'write:repository', 'read:organization'],
   },
   pastebin: {
     id: 'pastebin',
@@ -84,6 +100,9 @@ function rawUrl(repo, branch, repoPath) {
   if (provider.id === 'bitbucket') {
     return bitbucket.rawUrlForRepo(repo.full_name, branch, repoPath);
   }
+  if (provider.id === 'codeberg') {
+    return codeberg.rawUrlForRepo(repo.full_name, branch, repoPath);
+  }
   if (provider.id === 'pastebin') {
     return pastebin.rawUrlForRepo(repo.full_name, branch, repoPath);
   }
@@ -101,6 +120,7 @@ function listProviders() {
     max_blob_mb: Math.floor(p.maxBlobBytes / (1024 * 1024)),
     max_paste_kb: p.id === 'pastebin' ? Math.floor(p.maxBlobBytes / 1024) : undefined,
     default_rate_limit_hour: p.defaultRateLimitHour,
+    default_rate_limit_minute: p.defaultRateLimitMinute,
     auth_type: p.authType || 'oauth',
     max_unlisted_pastes_free: p.maxUnlistedPastesFree,
     max_private_pastes_free: p.maxPrivatePastesFree,
@@ -114,6 +134,9 @@ function isConfigured(providerId) {
   }
   if (providerId === 'bitbucket') {
     return !!(process.env.BITBUCKET_CLIENT_ID && process.env.BITBUCKET_CLIENT_SECRET);
+  }
+  if (providerId === 'codeberg') {
+    return !!(process.env.CODEBERG_CLIENT_ID && process.env.CODEBERG_CLIENT_SECRET);
   }
   if (providerId === 'github') {
     return !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);

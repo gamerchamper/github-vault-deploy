@@ -3,6 +3,7 @@ const storage = require('../services/storage');
 const streaming = require('../services/streaming');
 const { recordBytes } = require('../services/bandwidth');
 const hlsStream = require('../services/hls-stream');
+const hlsConvert = require('../services/hls-convert');
 const sharePresence = require('../services/share-presence');
 const geoip = require('../services/geoip');
 const appUrl = require('../services/app-url');
@@ -169,26 +170,48 @@ router.get('/share/:token/manifest', async (req, res) => {
 router.get('/share/:token/hls', async (req, res) => {
   try {
     const fileId = req.query.file || null;
-    const manifest = await storage.getShareManifest(req.params.token, fileId);
-    if (!manifest) {
+    const file = storage.resolveSharedFile(req.params.token, fileId);
+    if (!file) {
       return res.status(404).json({ error: 'Share not found' });
     }
-    if (!manifest.hls_available || !manifest.hls_playlist_url) {
+    if (!file.has_hls || !file.hls_playlist_repo_id || !file.hls_playlist_path) {
       return res.status(404).json({ error: 'HLS playlist not available' });
     }
 
-    const playlistRes = await fetch(manifest.hls_playlist_url);
-    if (!playlistRes.ok) {
-      return res.status(502).json({ error: 'Failed to fetch playlist from storage' });
-    }
-    const content = await playlistRes.text();
-    const baseName = (manifest.name || 'media').replace(/\.[^.]+$/, '');
+    const fileQuery = fileId || file.id;
+    const segmentBase = `/api/public/share/${req.params.token}/hls/stored-segment`;
+    const content = await hlsConvert.buildUploadedPlaylistForProxy(
+      file.user_id,
+      file,
+      (index) => `${segmentBase}/${String(index).padStart(5, '0')}.ts?file=${encodeURIComponent(fileQuery)}`,
+    );
+    const baseName = (file.name || 'media').replace(/\.[^.]+$/, '');
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Content-Disposition', `inline; filename="${encodeURIComponent(baseName)}.m3u8"`);
     res.set('Access-Control-Allow-Origin', '*');
     res.send(Buffer.from(content, 'utf8'));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/share/:token/hls/stored-segment/:index.ts', async (req, res) => {
+  try {
+    const file = resolveShareFile(req, res);
+    if (!file) return;
+    const index = parseInt(req.params.index, 10);
+    if (!Number.isFinite(index) || index < 0) {
+      return res.status(400).json({ error: 'Invalid segment index' });
+    }
+    const buffer = await hlsConvert.fetchUploadedSegment(file.user_id, file.id, index);
+    res.setHeader('Content-Type', 'video/mp2t');
+    res.setHeader('Content-Length', buffer.length);
+    res.set('Access-Control-Allow-Origin', '*');
+    mediaCache.setMediaCacheHeaders(res, { scope: 'public' });
+    res.send(buffer);
+  } catch (err) {
+    const code = err.message === 'HLS segment not found' ? 404 : 500;
+    if (!res.headersSent) res.status(code).json({ error: err.message });
   }
 });
 
@@ -661,22 +684,45 @@ router.get('/playlist/:token/hls', async (req, res) => {
   try {
     const fileId = req.query.file;
     if (!fileId) return res.status(400).json({ error: 'file query required' });
-    const manifest = await storage.getPlaylistManifest(req.params.token, fileId);
-    if (!manifest?.hls_available || !manifest.hls_playlist_url) {
+    const file = playlists.resolvePlaylistFile(req.params.token, fileId);
+    if (!file) return res.status(404).json({ error: 'Not found' });
+    if (!file.has_hls || !file.hls_playlist_repo_id || !file.hls_playlist_path) {
       return res.status(404).json({ error: 'HLS playlist not available' });
     }
-    const playlistRes = await fetch(manifest.hls_playlist_url);
-    if (!playlistRes.ok) {
-      return res.status(502).json({ error: 'Failed to fetch playlist from storage' });
-    }
-    const content = await playlistRes.text();
-    const baseName = (manifest.name || 'media').replace(/\.[^.]+$/, '');
+
+    const segmentBase = `/api/public/playlist/${req.params.token}/hls/stored-segment`;
+    const content = await hlsConvert.buildUploadedPlaylistForProxy(
+      file.user_id,
+      file,
+      (index) => `${segmentBase}/${String(index).padStart(5, '0')}.ts?file=${encodeURIComponent(fileId)}`,
+    );
+    const baseName = (file.name || 'media').replace(/\.[^.]+$/, '');
     res.set('Content-Type', 'application/vnd.apple.mpegurl');
     res.set('Content-Disposition', `inline; filename="${encodeURIComponent(baseName)}.m3u8"`);
     res.set('Access-Control-Allow-Origin', '*');
     res.send(Buffer.from(content, 'utf8'));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/playlist/:token/hls/stored-segment/:index.ts', async (req, res) => {
+  try {
+    const file = resolvePlaylistFile(req, res);
+    if (!file) return;
+    const index = parseInt(req.params.index, 10);
+    if (!Number.isFinite(index) || index < 0) {
+      return res.status(400).json({ error: 'Invalid segment index' });
+    }
+    const buffer = await hlsConvert.fetchUploadedSegment(file.user_id, file.id, index);
+    res.setHeader('Content-Type', 'video/mp2t');
+    res.setHeader('Content-Length', buffer.length);
+    res.set('Access-Control-Allow-Origin', '*');
+    mediaCache.setMediaCacheHeaders(res, { scope: 'public' });
+    res.send(buffer);
+  } catch (err) {
+    const code = err.message === 'HLS segment not found' ? 404 : 500;
+    if (!res.headersSent) res.status(code).json({ error: err.message });
   }
 });
 

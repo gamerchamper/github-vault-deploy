@@ -559,7 +559,7 @@
         <button class="modal-close" data-close="repo-modal">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="modal-desc">Files are split into chunks and distributed across repositories on GitHub, Bitbucket, and other linked providers.</p>
+        <p class="modal-desc">Files are split into chunks and distributed across repositories on GitHub, Bitbucket, Codeberg, and other linked providers.</p>
 
         <div class="linked-accounts-panel org-setup-panel">
           <h3>Linked GitHub Accounts</h3>
@@ -617,6 +617,37 @@
             <div class="link-url-copy">
               <input type="text" readonly id="link-url-bitbucket-backup" class="link-url-input" spellcheck="false">
               <button type="button" class="btn-secondary" data-copy-target="link-url-bitbucket-backup">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="linked-accounts-panel org-setup-panel" id="codeberg-link-panel">
+          <h3>Linked Codeberg Accounts</h3>
+          <p class="org-setup-desc">Link <a href="https://codeberg.org/" target="_blank" rel="noopener">Codeberg</a> accounts for storage or backup. Uses the Forgejo API (<a href="https://codeberg.org/api/swagger" target="_blank" rel="noopener">swagger</a>) with the same <code>.vault/chunks/</code> layout as GitHub repos.</p>
+          <p class="org-setup-desc">Codeberg API limits are not fully published — Forgejo typically exposes <strong>~60 requests/minute</strong> per token via <code>X-RateLimit-*</code> headers. The vault tracks headers and backs off on <strong>429</strong> responses.</p>
+          <p class="org-setup-desc oauth-setup-hint">
+            Requires <code>CODEBERG_CLIENT_ID</code> / <code>CODEBERG_CLIENT_SECRET</code> in server <code>.env</code> (OAuth2 app under Codeberg Settings → Applications), then restart.
+            OAuth callback (register exactly):
+            <code id="codeberg-setup-callback-url">(your app URL)/auth/codeberg/callback</code>
+            (<button type="button" class="btn-setup-copy-inline" data-copy-target="codeberg-setup-callback-url">copy</button>)
+          </p>
+          <p id="codeberg-link-status" class="org-setup-desc link-url-expiry hidden"></p>
+          <p id="codeberg-link-url-expiry" class="org-setup-desc link-url-expiry"></p>
+          <div class="link-url-row link-url-actions">
+            <button type="button" class="btn-secondary btn-sm" id="btn-regenerate-codeberg-links">Regenerate Codeberg links</button>
+          </div>
+          <div class="link-url-row">
+            <label for="link-url-codeberg-storage">Link for storage</label>
+            <div class="link-url-copy">
+              <input type="text" readonly id="link-url-codeberg-storage" class="link-url-input" spellcheck="false">
+              <button type="button" class="btn-primary" data-copy-target="link-url-codeberg-storage">Copy</button>
+            </div>
+          </div>
+          <div class="link-url-row">
+            <label for="link-url-codeberg-backup">Link for backup</label>
+            <div class="link-url-copy">
+              <input type="text" readonly id="link-url-codeberg-backup" class="link-url-input" spellcheck="false">
+              <button type="button" class="btn-secondary" data-copy-target="link-url-codeberg-backup">Copy</button>
             </div>
           </div>
         </div>

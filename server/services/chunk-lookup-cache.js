@@ -195,6 +195,10 @@ function rawUrlFor(owner, repo, branch, path, provider = 'github') {
     const bitbucket = require('./bitbucket');
     return bitbucket.rawUrlForRepo(`${owner}/${repo}`, branch || 'main', path);
   }
+  if (normalized === 'codeberg') {
+    const codeberg = require('./codeberg');
+    return codeberg.rawUrlForRepo(`${owner}/${repo}`, branch || 'main', path);
+  }
   if (normalized === 'pastebin') {
     const pastebin = require('./pastebin');
     return pastebin.rawUrlForRepo(`${owner}/${repo}`, branch || 'main', path);
