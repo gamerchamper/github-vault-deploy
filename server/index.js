@@ -258,9 +258,10 @@ app.listen(PORT, () => {
     try {
       const backupSync = require('./services/backup-sync');
       const tasks = require('./services/tasks');
-      const users = db.prepare(
-        'SELECT DISTINCT user_id FROM linked_accounts WHERE role = ? AND is_active = 1'
-      ).all('backup');
+      const users = db.prepare(`
+        SELECT DISTINCT user_id FROM linked_accounts
+        WHERE role IN ('backup', 'both') AND is_active = 1
+      `).all();
       for (const { user_id: userId } of users) {
         backupSync.dedupeAllBackupTasks(userId);
         const active = db.prepare(`

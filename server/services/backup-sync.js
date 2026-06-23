@@ -2,6 +2,7 @@ const db = require('../db/database');
 const accounts = require('./accounts');
 const tasks = require('./tasks');
 const rateLimit = require('./github-rate-limit');
+const storageProvider = require('./storage-provider');
 const workloadGovernor = require('./workload-governor');
 const chunkLookup = require('./chunk-lookup-cache');
 const { mapConcurrent } = require('./chunk-session');
@@ -21,7 +22,8 @@ function isSyncActive(key) {
   const entry = activeSyncs.get(key);
   if (!entry) return false;
   const tk = entry.tokenKey;
-  if (tk && rateLimit.isPaused(tk)) return true;
+  const rl = entry.rateLimit || rateLimit;
+  if (tk && rl.isPaused(tk)) return true;
   if (Date.now() - entry.startedAt > STALE_SYNC_MS) {
     activeSyncs.delete(key);
     return false;
@@ -35,9 +37,44 @@ function formatWait(seconds) {
   return mins === 1 ? '1 min' : `${mins} min`;
 }
 
-function backupTokenKey(userId, linkedAccountId) {
+function backupRateLimitContext(userId, linkedAccountId) {
   const account = accounts.getLinkedAccount(userId, linkedAccountId);
-  return account?.access_token ? rateLimit.keyForToken(account.access_token) : null;
+  if (!account) return null;
+  const rl = storageProvider.getRateLimit(account.provider || 'github');
+  const tokenKey = account.access_token ? rl.keyForToken(account.access_token) : null;
+  return {
+    account,
+    rl,
+    tokenKey,
+    provider: account.provider || 'github',
+  };
+}
+
+function backupTokenKey(userId, linkedAccountId) {
+  return backupRateLimitContext(userId, linkedAccountId)?.tokenKey || null;
+}
+
+function isChunkBackedUp(userId, chunkId, linkedAccountId) {
+  const row = db.prepare(`
+    SELECT 1 as ok FROM chunk_backups cb
+    JOIN storage_repos br ON cb.repo_id = br.id
+    WHERE cb.chunk_id = ?
+      AND br.linked_account_id = ?
+      AND br.repo_role = 'backup'
+    LIMIT 1
+  `).get(chunkId, linkedAccountId);
+  return !!row;
+}
+
+function buildBackupTaskPayload(linkedAccountId, account) {
+  return {
+    accountId: linkedAccountId,
+    linkedAccountId,
+    backupUsername: account.username,
+    provider: account.provider || 'github',
+    method: 'fork',
+    resumable: true,
+  };
 }
 
 const SOURCE_MISSING_SHA = '__source_missing__';
@@ -167,7 +204,8 @@ function countMissingBackups(userId, linkedAccountId) {
 function parseAccountId(payloadJson) {
   try {
     const payload = payloadJson ? JSON.parse(payloadJson) : {};
-    return Number(payload.accountId);
+    const id = payload.accountId ?? payload.linkedAccountId;
+    return Number(id);
   } catch {
     return null;
   }
@@ -334,8 +372,8 @@ function getSyncStatus(userId) {
     const key = syncKey(userId, account.id);
     const syncing = isSyncActive(key);
     const task = getActiveTask(userId, account.id) || getBackupTask(userId, account.id);
-    const tokenKey = backupTokenKey(userId, account.id);
-    const pause = tokenKey ? rateLimit.getPauseInfo(tokenKey) : null;
+    const ctx = backupRateLimitContext(userId, account.id);
+    const pause = ctx?.tokenKey ? ctx.rl.getPauseInfo(ctx.tokenKey) : null;
     const queue = getQueueStats(userId, account.id);
     const percent = totalChunks ? Math.round((queue.synced / totalChunks) * 100) : 100;
     let phase = task?.phase || (syncing ? 'syncing' : null);
@@ -346,6 +384,7 @@ function getSyncStatus(userId) {
     return {
       account_id: account.id,
       username: account.username,
+      provider: ctx?.provider || 'github',
       missing_chunks: missing,
       total_chunks: totalChunks,
       synced_chunks: queue.synced,
@@ -438,8 +477,8 @@ function maybeResumeSync(userId) {
   for (const { id } of backupAccounts) {
     const missing = countMissingBackups(userId, id);
     if (missing === 0) continue;
-    const tokenKey = backupTokenKey(userId, id);
-    if (tokenKey && rateLimit.isPaused(tokenKey)) continue;
+    const ctx = backupRateLimitContext(userId, id);
+    if (ctx?.tokenKey && ctx.rl.isPaused(ctx.tokenKey)) continue;
     const key = syncKey(userId, id);
     if (isSyncActive(key)) continue;
 
@@ -452,10 +491,11 @@ function maybeResumeSync(userId) {
   }
 }
 
-async function syncOneChunk(userId, chunkRow, linkedAccountId, taskId, { force = false } = {}) {
+async function syncOneChunk(userId, chunkRow, linkedAccountId, taskId, { force = false, backupCtx = null } = {}) {
   if (!chunkLookup.shouldRetrySync(chunkRow.id, linkedAccountId, { force })) {
     return false;
   }
+  const ctx = backupCtx || backupRateLimitContext(userId, linkedAccountId);
   try {
     const chunk = db.prepare(`
       SELECT c.*, r.full_name, r.default_branch
@@ -464,15 +504,30 @@ async function syncOneChunk(userId, chunkRow, linkedAccountId, taskId, { force =
     `).get(chunkRow.id);
     if (!chunk) return false;
 
+    if (ctx?.tokenKey && ctx.rl.isPaused(ctx.tokenKey)) {
+      return false;
+    }
+
     const encrypted = await rateLimit.runWithSubsystem('backup-sync', () =>
       accounts.downloadChunkFromPrimary(userId, chunk)
     );
+
+    if (ctx?.tokenKey && ctx.rl.isPaused(ctx.tokenKey)) {
+      return false;
+    }
+
     await rateLimit.runWithSubsystem('backup-sync', () =>
       accounts.mirrorChunk(userId, chunk.id, encrypted, chunk.repo_path, chunk.repo_id, linkedAccountId)
     );
+
+    if (!isChunkBackedUp(userId, chunk.id, linkedAccountId)) {
+      return false;
+    }
+
     chunkLookup.clearSyncFailure(chunkRow.id, linkedAccountId);
     return true;
   } catch (err) {
+    if (err.isRateLimitPause) return false;
     const msg = err.response?.data?.message || err.message || 'Unknown error';
     const is404 = err.status === 404 || /not found/i.test(msg);
     if (is404) {
@@ -500,11 +555,14 @@ async function runBackupSync(userId, linkedAccountId, { fastResume = false, forc
 
   let taskId = null;
   let rateLimitUnsub = () => {};
-  const entry = { startedAt: Date.now(), tokenKey: null, promise: null };
+  const entry = { startedAt: Date.now(), tokenKey: null, rateLimit: null, promise: null };
 
   entry.promise = workloadGovernor.runBackground(userId, async () => {
     const account = accounts.getLinkedAccount(userId, linkedAccountId);
     if (!account || !accounts.isBackupRole(account.role) || !account.is_active) return;
+
+    const backupCtx = backupRateLimitContext(userId, linkedAccountId);
+    if (!backupCtx) return;
 
     if (hasActiveUpload(userId)) {
       const existingTask = getBackupTask(userId, linkedAccountId);
@@ -525,21 +583,26 @@ async function runBackupSync(userId, linkedAccountId, { fastResume = false, forc
       console.log(`[backup-sync] Skipped ${reconciled} unrecoverable chunk(s) for account ${linkedAccountId}`);
     }
 
-    entry.tokenKey = rateLimit.keyForToken(account.access_token);
+    entry.tokenKey = backupCtx.tokenKey;
+    entry.rateLimit = backupCtx.rl;
     const tokenKey = entry.tokenKey;
-    rateLimitUnsub = rateLimit.setWaitCallback(tokenKey, (info) => {
-      if (!taskId) return;
-      const totalChunks = totalReadyChunks(userId);
-      const missing = countMissingBackups(userId, linkedAccountId);
-      const done = totalChunks - missing;
-      tasks.update(taskId, userId, {
-        phase: 'rate-limit',
-        percent: totalChunks ? Math.round((done / totalChunks) * 100) : 100,
-        chunksDone: done,
-        chunksTotal: totalChunks,
-        currentRepo: `GitHub rate limit — resuming in ${formatWait(Math.ceil(info.waitMs / 1000))}`,
-      });
-    });
+    const accountRl = backupCtx.rl;
+    rateLimitUnsub = tokenKey
+      ? accountRl.setWaitCallback(tokenKey, (info) => {
+        if (!taskId) return;
+        const totalChunks = totalReadyChunks(userId);
+        const missing = countMissingBackups(userId, linkedAccountId);
+        const done = totalChunks - missing;
+        const providerLabel = backupCtx.provider === 'github' ? 'GitHub' : backupCtx.provider;
+        tasks.update(taskId, userId, {
+          phase: 'rate-limit',
+          percent: totalChunks ? Math.round((done / totalChunks) * 100) : 100,
+          chunksDone: done,
+          chunksTotal: totalChunks,
+          currentRepo: `@${account.username} · ${providerLabel} rate limit — resuming in ${formatWait(Math.ceil(info.waitMs / 1000))}`,
+        });
+      })
+      : () => {};
 
     const existingTask = getBackupTask(userId, linkedAccountId);
     taskId = pruneDuplicateBackupTasks(userId, linkedAccountId, existingTask?.id);
@@ -549,14 +612,13 @@ async function runBackupSync(userId, linkedAccountId, { fastResume = false, forc
         status: 'processing',
         error: null,
         resumable: true,
-        accountId: linkedAccountId,
-        method: 'fork',
+        ...buildBackupTaskPayload(linkedAccountId, account),
       });
     } else {
       const task = tasks.create(userId, {
         type: 'backup-sync',
         title: `Backup sync (@${account.username})`,
-        payload: { accountId: linkedAccountId, method: 'fork', resumable: true },
+        payload: buildBackupTaskPayload(linkedAccountId, account),
       });
       taskId = task.id;
     }
@@ -641,13 +703,13 @@ async function runBackupSync(userId, linkedAccountId, { fastResume = false, forc
         const beforeMissing = totalMissing;
         const concurrency = Math.min(
           SYNC_CONCURRENCY,
-          rateLimit.getRecommendedConcurrency(tokenKey, SYNC_CONCURRENCY)
+          accountRl.getRecommendedConcurrency(tokenKey, SYNC_CONCURRENCY)
         );
         let completed = 0;
         let succeeded = 0;
         await mapConcurrent(missing, concurrency, async (chunkRow) => {
           if (hasActiveUpload(userId)) return;
-          const ok = await syncOneChunk(userId, chunkRow, linkedAccountId, taskId, { force });
+          const ok = await syncOneChunk(userId, chunkRow, linkedAccountId, taskId, { force, backupCtx });
           if (ok) succeeded += 1;
           completed += 1;
           reportChunkProgress(taskId, userId, linkedAccountId, account.username, completed, missing.length);

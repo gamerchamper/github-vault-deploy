@@ -43,6 +43,7 @@ function update(taskId, userId, patch) {
     'chunksDone', 'chunksTotal', 'currentRepo', 'file', 'ids', 'done', 'total', 'currentName',
     'fileId', 'parentPath', 'chunkSize', 'fileSize', 'mimeType', 'resumable', 'fileName', 'nextChunk', 'uploadMode', 'convertHls', 'uploadAccountIds',
     'accountId', 'method', 'log', 'lastLog', 'gitBytesStaged', 'gitRepos', 'names', 'pauseReason',
+    'backupUsername', 'provider',
     'segmentsDone', 'segmentsTotal',
     'seamlessPartSize', 'seamlessPartsTotal', 'seamlessPartsDone', 'seamlessPartsReceived', 'hlsTaskId',
     'linkedAccountId', 'source', 'capacityGbAdded', 'errors', 'partial',

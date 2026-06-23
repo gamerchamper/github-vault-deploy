@@ -643,14 +643,18 @@ function isBackupRepoRateLimited(userId, repo) {
 
 async function mirrorChunk(userId, chunkId, encrypted, repoPath, primaryRepoId, linkedAccountId = null) {
   const backupRepos = getBackupReposForPrimary(userId, primaryRepoId, linkedAccountId);
-  if (!backupRepos.length) return;
+  if (!backupRepos.length) return false;
 
   for (const repo of backupRepos) {
-    if (isBackupRepoRateLimited(userId, repo)) continue;
+    if (isBackupRepoRateLimited(userId, repo)) {
+      const err = new Error('Backup account rate limited');
+      err.isRateLimitPause = true;
+      throw err;
+    }
 
     const existing = db.prepare('SELECT id FROM chunk_backups WHERE chunk_id = ? AND repo_id = ?')
       .get(chunkId, repo.id);
-    if (existing) continue;
+    if (existing) return true;
 
     const [owner, repoName] = repo.full_name.split('/');
     const client = createClientForRepo(userId, repo);
@@ -662,7 +666,7 @@ async function mirrorChunk(userId, chunkId, encrypted, repoPath, primaryRepoId, 
     if (remoteSha) {
       db.prepare('INSERT OR IGNORE INTO chunk_backups (chunk_id, repo_id, sha) VALUES (?, ?, ?)')
         .run(chunkId, repo.id, remoteSha);
-      continue;
+      return true;
     }
 
     const sha = await mod.uploadChunk(
@@ -674,7 +678,9 @@ async function mirrorChunk(userId, chunkId, encrypted, repoPath, primaryRepoId, 
     db.prepare(
       'UPDATE storage_repos SET chunk_count = chunk_count + 1, total_bytes = total_bytes + ? WHERE id = ?'
     ).run(encrypted.length, repo.id);
+    return true;
   }
+  return false;
 }
 
 function deferMirrorChunk() {

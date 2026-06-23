@@ -526,7 +526,8 @@ const TaskPanel = {
       App.loadStats();
     }
     if (task.type === 'backup-sync') {
-      App.toast('Backup sync complete', 'success');
+      const who = task.backupUsername ? `@${task.backupUsername}` : (task.title || 'Backup');
+      App.toast(`${who} backup sync complete`, 'success');
       App.pollBackupStatus();
       App.loadAccountViews();
     }
@@ -778,7 +779,9 @@ const TaskPanel = {
       if (task.fileId) rows.push(['File ID', task.fileId]);
     }
     if (task.type === 'backup-sync') {
-      if (task.accountId) rows.push(['Account', task.accountId]);
+      if (task.backupUsername) rows.push(['Backup account', `@${task.backupUsername}`]);
+      if (task.accountId) rows.push(['Account ID', task.accountId]);
+      if (task.provider) rows.push(['Provider', task.provider]);
       if (task.method) rows.push(['Method', task.method]);
       if (task.chunksTotal) rows.push(['Chunks', `${task.chunksDone || 0} / ${task.chunksTotal}`]);
       if (task.currentRepo) rows.push(['Current', task.currentRepo]);
@@ -875,7 +878,10 @@ const TaskPanel = {
       const cancelled = failed && (task.error === 'Cancelled' || task.phase === 'cancelled' || task.error === 'Interrupted');
       const resumable = ((failed || paused) && task.resumable !== false && task.type === 'upload' && !cancelled)
         || stalledUpload;
-      const backupPaused = task.type === 'backup-sync' && (task.status === 'paused' || task.status === 'error');
+      const backupResumable = task.type === 'backup-sync'
+        && (task.status === 'paused' || (task.status === 'error' && task.resumable !== false));
+      const backupProcessing = task.type === 'backup-sync'
+        && (task.status === 'processing' || task.status === 'pending');
       const detail = failed
         ? (task.error || 'Failed')
         : done
@@ -909,6 +915,16 @@ const TaskPanel = {
       ` : processing && task.type === 'upload' ? `
         <div class="task-actions">
           <button class="task-btn task-btn-pause" data-task-id="${task.id}">Pause</button>
+          <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
+        </div>
+      ` : backupResumable ? `
+        <div class="task-actions">
+          <button type="button" class="task-btn task-btn-backup-force" data-account-id="${task.accountId || task.linkedAccountId || ''}">Force sync</button>
+          <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
+        </div>
+      ` : backupProcessing ? `
+        <div class="task-actions">
+          <button type="button" class="task-btn task-btn-backup-force" data-account-id="${task.accountId || task.linkedAccountId || ''}">Force sync</button>
           <button class="task-btn task-btn-cancel" data-task-id="${task.id}">Cancel</button>
         </div>
       ` : processing && (task.type === 'hls-convert' || task.type === 'delete' || task.type === 'verify-repair' || task.type === 'verify-hls' || task.type === 'repo-batch' || isAutoCreating) ? `
