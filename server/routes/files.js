@@ -1094,9 +1094,9 @@ router.post('/history/:id/:versionId/restore', async (req, res) => {
   }
 });
 
-router.post('/share/:id', (req, res) => {
+router.post('/share/:id', async (req, res) => {
   try {
-    res.json(storage.createShareToken(req.user.id, req.params.id, req));
+    res.json(await storage.createShareToken(req.user.id, req.params.id, req));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

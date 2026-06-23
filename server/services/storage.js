@@ -2229,7 +2229,7 @@ function getFileDetails(userId, fileId, req = null, viewParam = null) {
   };
 }
 
-function createShareToken(userId, fileId, req = null) {
+async function createShareToken(userId, fileId, req = null) {
   const file = db.prepare('SELECT * FROM files WHERE id = ? AND user_id = ?').get(fileId, userId);
   if (!file) throw new Error('Item not found');
 
@@ -2239,7 +2239,9 @@ function createShareToken(userId, fileId, req = null) {
     db.prepare('UPDATE files SET share_token = ? WHERE id = ?').run(token, fileId);
   }
 
-  ensureShareKeyMeta(userId, fileId, token);
+  if (!file.is_folder) {
+    await ensureShareKeyMeta(userId, fileId, token);
+  }
 
   return { token, url: appUrl.publicUrl(req, `/share/${token}`), is_folder: !!file.is_folder };
 }

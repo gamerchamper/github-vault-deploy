@@ -315,4 +315,135 @@ router.get('/bitbucket/callback', async (req, res) => {
   }
 });
 
+const pastebinAuth = require('../services/pastebin-auth');
+
+function pastebinLinkPage({ token, role, error = null }) {
+  const safeError = error
+    ? String(error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    : '';
+  const roleLabel = role === 'backup' ? 'backup / redundancy' : 'storage';
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Link Pastebin — GitHub Vault</title>
+<link rel="stylesheet" href="/css/tokens.css">
+<style>
+body{font-family:var(--font);background:var(--bg-primary);color:var(--text-primary);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;margin:0}
+.card{max-width:440px;width:100%;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius-xl);padding:32px;box-shadow:var(--shadow-xl)}
+.brand{font-size:13px;color:var(--accent);margin-bottom:16px;font-weight:600}
+h1{font-size:20px;margin-bottom:8px}
+p{line-height:1.6;color:var(--text-secondary);font-size:14px;margin-bottom:16px}
+label{display:block;font-size:13px;margin-bottom:6px;color:var(--text-secondary)}
+input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:var(--radius-md);border:1px solid var(--glass-border);background:var(--bg-secondary);color:var(--text-primary);margin-bottom:14px}
+button{width:100%;padding:12px;border:none;border-radius:var(--radius-md);background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+.error{background:rgba(255,80,80,.12);border:1px solid rgba(255,80,80,.35);padding:10px 12px;border-radius:var(--radius-md);margin-bottom:14px;font-size:13px;color:#ffb4b4}
+.note{font-size:12px;color:var(--text-muted)}
+</style></head><body>
+<div class="card">
+<div class="brand">📦 GitHub Vault · Pastebin</div>
+<h1>Link Pastebin account</h1>
+<p>Sign in with your Pastebin member credentials to link this account for <strong>${roleLabel}</strong>. Your password is sent once to obtain an API session key and is not stored.</p>
+${safeError ? `<div class="error">${safeError}</div>` : ''}
+<form method="POST" action="/auth/pastebin/link">
+<input type="hidden" name="token" value="${String(token || '').replace(/"/g, '&quot;')}">
+<label for="username">Pastebin username</label>
+<input id="username" name="username" autocomplete="username" required>
+<label for="password">Pastebin password</label>
+<input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit">Link Pastebin account</button>
+</form>
+<p class="note">Requires <code>PASTEBIN_DEV_KEY</code> on the vault server. Chunks are stored as unlisted pastes (max ~512 KB each on free accounts).</p>
+</div></body></html>`;
+}
+
+function beginPastebinLink(req, res, { token = null, role = 'storage' } = {}) {
+  if (!pastebinAuth.isConfigured()) {
+    return res.status(503).send(linkErrorPage('Pastebin API is not configured on this server (PASTEBIN_DEV_KEY)'));
+  }
+  if (token) {
+    try {
+      const row = accounts.peekLinkToken(token);
+      if (storageProvider.normalizeProvider(row.provider) !== 'pastebin') {
+        return res.status(400).send(linkErrorPage('This link is for Pastebin — generate a Pastebin link from Storage Repositories'));
+      }
+      req.session.linkingForUserId = row.user_id;
+      req.session.linkingRole = row.role;
+      req.session.linkingToken = token;
+      req.session.linkingProvider = 'pastebin';
+      return res.send(pastebinLinkPage({ token, role: row.role }));
+    } catch (err) {
+      return res.status(400).send(linkErrorPage(err.message));
+    }
+  }
+  if (!req.isAuthenticated || !req.isAuthenticated()) {
+    return res.status(401).send(linkErrorPage('Not authenticated — copy a one-time Pastebin link from Storage Repositories'));
+  }
+  req.session.linkingForUserId = req.user.id;
+  req.session.linkingRole = role;
+  req.session.linkingProvider = 'pastebin';
+  return res.send(pastebinLinkPage({ token: '', role }));
+}
+
+router.get('/pastebin/link', requireSiteAccessForAuth, (req, res) => {
+  beginPastebinLink(req, res, {
+    token: req.query.token || null,
+    role: req.query.role === 'backup' ? 'backup' : 'storage',
+  });
+});
+
+router.post('/pastebin/link', requireSiteAccessForAuth, express.urlencoded({ extended: false }), async (req, res) => {
+  const wasLinking = !!(req.session?.linkingForUserId || req.session?.linkingToken);
+  try {
+    if (!pastebinAuth.isConfigured()) {
+      throw new Error('Pastebin API is not configured on this server (PASTEBIN_DEV_KEY)');
+    }
+
+    const token = req.body?.token || req.session.linkingToken;
+    let userId = req.session.linkingForUserId;
+    let role = req.session.linkingRole || 'storage';
+
+    if (token) {
+      const row = accounts.peekLinkToken(token);
+      userId = row.user_id;
+      role = row.role;
+    }
+    if (!userId) throw new Error('Vault session expired — generate a fresh link');
+
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    if (!username || !password) {
+      throw new Error('Pastebin username and password are required');
+    }
+
+    const { api_user_key, profile } = await pastebinAuth.login(username, password);
+    if (token) accounts.consumeLinkToken(token);
+    await accounts.linkAccount(userId, profile, api_user_key, role, 'pastebin');
+
+    delete req.session.linkingForUserId;
+    delete req.session.linkingRole;
+    delete req.session.linkingToken;
+    delete req.session.linkingProvider;
+
+    const vaultUser = db.prepare(
+      'SELECT id, github_id, username, avatar_url FROM users WHERE id = ?'
+    ).get(userId);
+    if (!vaultUser) throw new Error('Vault user not found');
+
+    req.session.linkedSuccess = true;
+    req.session.linkedProvider = 'pastebin';
+    req.logIn(vaultUser, (loginErr) => {
+      if (loginErr) return res.redirect('/?error=link_failed');
+      return res.redirect('/?linked=1&provider=pastebin');
+    });
+  } catch (err) {
+    console.error('Pastebin link error:', err);
+    const token = req.body?.token || req.session?.linkingToken || '';
+    const role = req.session?.linkingRole || 'storage';
+    if (wasLinking && token) {
+      return res.status(400).send(pastebinLinkPage({ token, role, error: err.message }));
+    }
+    const reason = encodeURIComponent(err.message || 'Pastebin link failed');
+    if (wasLinking) return res.redirect(`/?error=link_failed&reason=${reason}`);
+    return res.redirect(`/?error=auth_failed&reason=${reason}`);
+  }
+});
+
 module.exports = router;

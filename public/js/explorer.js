@@ -154,7 +154,7 @@ class Explorer {
       favorites: { title: 'No favorites yet', hint: 'Right-click a file and choose Add to favorites' },
       recent: { title: 'No recent files', hint: 'Files you open or preview will appear here' },
       trash: { title: 'Trash is empty', hint: 'Deleted files are kept here until permanently removed' },
-      shared: { title: 'No shared files', hint: 'Share a file to see it in this view' },
+      shared: { title: 'No shared items', hint: 'Share a file or folder to see it in this view' },
       playlists: { title: 'No playlists yet', hint: 'Create a playlist to curate your media' },
       collections: { title: 'No collections yet', hint: 'Group playlists into collections' },
       discover: { title: 'Nothing to discover yet', hint: 'Play playlists to see continue watching here' },
@@ -1452,7 +1452,7 @@ class Explorer {
       historyItem.style.display = showHistory ? '' : 'none';
       historyItem.textContent = isFolder ? 'View folder history' : 'View history';
     }
-    shareItem.style.display = file.is_folder ? 'none' : '';
+    shareItem.style.display = '';
     const actionTargets = this.getActionTargets(file);
     const fileTargets = actionTargets.filter((f) => !f.is_folder);
     const hlsTargets = actionTargets.filter((f) => this.isHlsEligible(f));

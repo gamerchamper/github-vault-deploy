@@ -716,7 +716,10 @@ async function downloadChunkData(userId, chunk, repo, repoPath, branch) {
   const [owner, repoName] = repo.full_name.split('/');
   const client = createClientForRepo(userId, repo);
   const mod = providerModuleForRepo(repo);
-  const data = await mod.downloadChunk(client, owner, repoName, repoPath, branch, { subsystem: 'download' });
+  const data = await mod.downloadChunk(client, owner, repoName, repoPath, branch, {
+    subsystem: 'download',
+    sha: chunk.sha,
+  });
   chunkCache.put(userId, chunk.id, data);
   return data;
 }
@@ -802,9 +805,9 @@ async function getAccountRateLimits(userId) {
       is_primary: !!account.is_primary,
       ...quota,
       thresholds: {
-        concurrency_full: provider === 'bitbucket' ? 8 : 16,
-        concurrency_at_1000: provider === 'bitbucket' ? 6 : 12,
-        concurrency_at_400: provider === 'bitbucket' ? 4 : 8,
+        concurrency_full: provider === 'pastebin' ? 4 : provider === 'bitbucket' ? 8 : 16,
+        concurrency_at_1000: provider === 'pastebin' ? 3 : provider === 'bitbucket' ? 6 : 12,
+        concurrency_at_400: provider === 'pastebin' ? 2 : provider === 'bitbucket' ? 4 : 8,
         concurrency_at_150: 4,
         concurrency_at_50: 2,
         concurrency_exhausted: 1,
@@ -819,6 +822,7 @@ async function ensureCollaboratorsForAccount(userId, accountId) {
   if (!account?.is_active) return;
 
   const accountProvider = storageProvider.normalizeProvider(account.provider);
+  if (accountProvider === 'pastebin') return;
   const mod = storageProvider.getModule(accountProvider);
 
   const primaryRepos = db.prepare(`

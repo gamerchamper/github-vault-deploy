@@ -617,6 +617,36 @@
           </div>
         </div>
 
+        <div class="linked-accounts-panel org-setup-panel" id="pastebin-link-panel">
+          <h3>Linked Pastebin Accounts</h3>
+          <p class="org-setup-desc">Link Pastebin member accounts for storage or backup. Chunks are stored as <strong>unlisted pastes</strong> (base64-encoded). Use smaller chunk sizes — free accounts allow ~512 KB per paste.</p>
+          <p class="org-setup-desc">Pastebin limits (free): <strong>25 unlisted</strong> and <strong>10 private</strong> pastes per account. Estimated API: <strong>3,000 requests/hour</strong>, <strong>10,000 raw fetches/hour</strong>.</p>
+          <p class="org-setup-desc oauth-setup-hint">
+            Requires <code>PASTEBIN_DEV_KEY</code> (developer API key) in server <code>.env</code>, then restart.
+            Link URL: <code id="pastebin-setup-link-url">(your app URL)/auth/pastebin/link</code>
+            (<button type="button" class="btn-setup-copy-inline" data-copy-target="pastebin-setup-link-url">copy</button>)
+          </p>
+          <p id="pastebin-link-status" class="org-setup-desc link-url-expiry hidden"></p>
+          <p id="pastebin-link-url-expiry" class="org-setup-desc link-url-expiry"></p>
+          <div class="link-url-row link-url-actions">
+            <button type="button" class="btn-secondary btn-sm" id="btn-regenerate-pastebin-links">Regenerate Pastebin links</button>
+          </div>
+          <div class="link-url-row">
+            <label for="link-url-pastebin-storage">Link for storage</label>
+            <div class="link-url-copy">
+              <input type="text" readonly id="link-url-pastebin-storage" class="link-url-input" spellcheck="false">
+              <button type="button" class="btn-primary" data-copy-target="link-url-pastebin-storage">Copy</button>
+            </div>
+          </div>
+          <div class="link-url-row">
+            <label for="link-url-pastebin-backup">Link for backup</label>
+            <div class="link-url-copy">
+              <input type="text" readonly id="link-url-pastebin-backup" class="link-url-input" spellcheck="false">
+              <button type="button" class="btn-secondary" data-copy-target="link-url-pastebin-backup">Copy</button>
+            </div>
+          </div>
+        </div>
+
         <div class="org-setup-panel">
           <h3>Vault Organization</h3>
           <p class="org-setup-desc">Create a free org on GitHub, then set it up here. New storage repos will be created under that org instead of your personal account.</p>
@@ -1035,11 +1065,11 @@
   <div id="share-modal" class="modal hidden">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>Share file</h2>
+        <h2>Share</h2>
         <button class="modal-close" data-close="share-modal">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="modal-desc">Anyone with this link can view or download the file.</p>
+        <p class="modal-desc">Anyone with this link can view or download the selected item.</p>
         <label class="form-check share-client-toggle" for="share-client-stream">
           <input type="checkbox" id="share-client-stream" checked>
           <span>Decrypt media in the viewer's browser (no server download)</span>
@@ -1363,6 +1393,6 @@
   <script src="/js/explorer-keyboard.js?v=1.0.0"></script>
   <script src="/js/local-upload.js?v=1.0.2"></script>
   <script src="/js/plex-local-sync.js?v=1.0.3"></script>
-  <script src="/js/app.js?v=1.0.30"></script>
+  <script src="/js/app.js?v=1.0.31"></script>
 </body>
 </html>

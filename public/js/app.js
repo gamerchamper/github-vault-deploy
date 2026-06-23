@@ -1,6 +1,16 @@
 const explorer = new Explorer();
 let toastTimer = null;
 
+const PROVIDER_LABELS = {
+  github: 'GitHub',
+  bitbucket: 'Bitbucket',
+  pastebin: 'Pastebin',
+};
+
+function providerLabelFor(id) {
+  return PROVIDER_LABELS[id] || 'GitHub';
+}
+
 const App = {
   backupPollTimer: null,
   rateLimitPollTimer: null,
@@ -1638,6 +1648,9 @@ const App = {
     document.getElementById('btn-regenerate-bitbucket-links')?.addEventListener('click', () => {
       this.updateBitbucketLinkUrls();
     });
+    document.getElementById('btn-regenerate-pastebin-links')?.addEventListener('click', () => {
+      this.updatePastebinLinkUrls();
+    });
     document.querySelectorAll('[data-copy-target]').forEach((btn) => {
       btn.addEventListener('click', () => this.copyTextFromElement(btn.dataset.copyTarget));
     });
@@ -2859,6 +2872,15 @@ const App = {
         API.files.share(file.id),
         API.files.shareSettings().catch(() => ({ client_stream: true })),
       ]);
+      const isFolder = !!(file.is_folder === true || file.is_folder === 1 || file.is_folder === '1');
+      const titleEl = document.querySelector('#share-modal h2');
+      const descEl = document.querySelector('#share-modal .modal-desc');
+      if (titleEl) titleEl.textContent = isFolder ? 'Share folder' : 'Share file';
+      if (descEl) {
+        descEl.textContent = isFolder
+          ? 'Anyone with this link can browse and download files in this folder.'
+          : 'Anyone with this link can view or download the file.';
+      }
       document.getElementById('share-url').value = result.url;
       const toggle = document.getElementById('share-client-stream');
       if (toggle) toggle.checked = !!settings.client_stream;
@@ -2892,6 +2914,7 @@ const App = {
     const callbacks = providerConfig?.oauth_callbacks || providerConfig || null;
     const githubCallback = callbacks?.github || `${origin}/auth/github/callback`;
     const bitbucketCallback = callbacks?.bitbucket || `${origin}/auth/bitbucket/callback`;
+    const pastebinLink = callbacks?.pastebin || `${origin}/auth/pastebin/link`;
     const setText = (id, value) => {
       const el = document.getElementById(id);
       if (el) el.textContent = value;
@@ -2900,6 +2923,7 @@ const App = {
     setText('setup-callback-url', githubCallback);
     setText('repo-setup-callback-url', githubCallback);
     setText('bitbucket-setup-callback-url', bitbucketCallback);
+    setText('pastebin-setup-link-url', pastebinLink);
   },
 
   async fetchProviderConfig() {
@@ -2992,12 +3016,94 @@ const App = {
     }
   },
 
+  setPastebinLinkPanelState({ configured, message = '' }) {
+    const panel = document.getElementById('pastebin-link-panel');
+    const storageInput = document.getElementById('link-url-pastebin-storage');
+    const backupInput = document.getElementById('link-url-pastebin-backup');
+    const expiryEl = document.getElementById('pastebin-link-url-expiry');
+    const statusEl = document.getElementById('pastebin-link-status');
+    panel?.classList.remove('hidden');
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.classList.toggle('hidden', !message);
+    }
+    if (!configured) {
+      const hint = message || 'Set PASTEBIN_DEV_KEY in the server .env, then restart the vault.';
+      if (storageInput) {
+        storageInput.value = '';
+        storageInput.placeholder = hint;
+      }
+      if (backupInput) {
+        backupInput.value = '';
+        backupInput.placeholder = hint;
+      }
+      if (expiryEl) expiryEl.textContent = '';
+    }
+  },
+
+  async updatePastebinLinkUrls(providerConfig = null) {
+    const storageInput = document.getElementById('link-url-pastebin-storage');
+    const backupInput = document.getElementById('link-url-pastebin-backup');
+    const expiryEl = document.getElementById('pastebin-link-url-expiry');
+    if (!storageInput || !backupInput) return;
+
+    storageInput.value = 'Generating one-time link…';
+    backupInput.value = 'Generating one-time link…';
+    storageInput.placeholder = '';
+    backupInput.placeholder = '';
+
+    try {
+      const config = providerConfig || await this.fetchProviderConfig();
+      if (config) this.updateSetupUrls(config);
+
+      const providers = Object.fromEntries((config?.providers || []).map((p) => [p.id, p]));
+      const pastebinConfigured = !!providers.pastebin?.configured;
+
+      if (!pastebinConfigured) {
+        this.setPastebinLinkPanelState({
+          configured: false,
+          message: 'Pastebin API is not configured — add PASTEBIN_DEV_KEY to .env and restart.',
+        });
+        return;
+      }
+
+      const [pbStorage, pbBackup] = await Promise.all([
+        API.accounts.createLinkToken('storage', 'pastebin'),
+        API.accounts.createLinkToken('backup', 'pastebin'),
+      ]);
+
+      storageInput.value = pbStorage.url || '';
+      backupInput.value = pbBackup.url || '';
+      if (!pbStorage.url || !pbBackup.url) {
+        throw new Error('Pastebin link response missing URL — check server logs');
+      }
+
+      this.setPastebinLinkPanelState({
+        configured: true,
+        message: 'Copy a link, open it in a private window, and sign in with your Pastebin member account.',
+      });
+      if (expiryEl) {
+        expiryEl.textContent = `Each Pastebin link works once and expires in ${pbStorage.expires_in_minutes} minutes.`;
+      }
+    } catch (err) {
+      storageInput.value = '';
+      backupInput.value = '';
+      storageInput.placeholder = err.message || 'Failed to generate Pastebin link';
+      backupInput.placeholder = err.message || 'Failed to generate Pastebin link';
+      this.setPastebinLinkPanelState({
+        configured: true,
+        message: `Could not generate Pastebin links: ${err.message}`,
+      });
+      this.toast(err.message, 'error');
+    }
+  },
+
   async updateLinkUrls() {
     const storageInput = document.getElementById('link-url-storage');
     const backupInput = document.getElementById('link-url-backup');
     const expiryEl = document.getElementById('link-url-expiry');
     if (!storageInput || !backupInput) {
-      await this.updateBitbucketLinkUrls();
+      await Promise.all([this.updateBitbucketLinkUrls(), this.updatePastebinLinkUrls()]);
       return;
     }
 
@@ -3026,6 +3132,7 @@ const App = {
     }
 
     await this.updateBitbucketLinkUrls(providerConfig);
+    await this.updatePastebinLinkUrls(providerConfig);
   },
 
   async copyText(text) {
@@ -3087,7 +3194,7 @@ const App = {
         const card = document.createElement('div');
         card.className = 'linked-account-card';
 
-        const providerLabel = account.provider === 'bitbucket' ? 'Bitbucket' : 'GitHub';
+        const providerLabel = providerLabelFor(account.provider);
         const roleLabel = account.role === 'backup' ? 'Backup / redundancy' : 'Additional storage';
         const statusLabel = account.is_active ? 'Active' : 'Inactive';
 
@@ -3327,8 +3434,8 @@ const App = {
     const accountBadge = repo.account_username
       ? `<span class="repo-account-badge">@${repo.account_username}</span>`
       : '';
-    const providerBadge = repo.provider === 'bitbucket'
-      ? '<span class="repo-badge provider">Bitbucket</span>'
+    const providerBadge = repo.provider && repo.provider !== 'github'
+      ? `<span class="repo-badge provider">${providerLabelFor(repo.provider)}</span>`
       : '';
 
     info.innerHTML = `

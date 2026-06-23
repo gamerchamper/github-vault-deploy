@@ -89,6 +89,11 @@ Metadata (file names, paths, chunk locations, SHAs) is stored locally in SQLite.
 | `BITBUCKET_CLIENT_SECRET` | (unset) | Bitbucket OAuth client secret |
 | `BITBUCKET_RATE_LIMIT_HOUR` | 1000 | Rolling API request limit per token (Bitbucket Cloud standard) |
 | `BITBUCKET_RAW_RATE_LIMIT_HOUR` | 5000 | Rolling raw file download limit per token |
+| `PASTEBIN_DEV_KEY` | (unset) | Pastebin developer API key for linking member accounts |
+| `PASTEBIN_MAX_PASTE_KB` | 512 | Max paste size in KB (free accounts ~512 KB; PRO up to ~10 MB) |
+| `PASTEBIN_PASTE_PRIVATE` | 1 | Paste visibility: 0=public, 1=unlisted, 2=private |
+| `PASTEBIN_RATE_LIMIT_HOUR` | 3000 | Estimated rolling API requests per hour per account |
+| `PASTEBIN_RAW_RATE_LIMIT_HOUR` | 10000 | Estimated rolling raw paste fetches per hour |
 
 ## Docker
 
