@@ -1,3 +1,18 @@
+(function patchThumbCache() {
+  if (typeof ThumbCache === 'undefined') return;
+  if (typeof ThumbCache.isFailed !== 'function') {
+    ThumbCache.failed = ThumbCache.failed || new Set();
+    ThumbCache.isFailed = (id, version) => ThumbCache.failed.has(`${id}:${version || 0}`);
+  }
+  if (typeof ThumbCache.markFailed !== 'function') {
+    ThumbCache.markFailed = (id, version) => {
+      ThumbCache.failed = ThumbCache.failed || new Set();
+      ThumbCache.failed.add(`${id}:${version || 0}`);
+      ThumbCache.pending?.delete?.(`${id}:${version || 0}`);
+    };
+  }
+})();
+
 const explorer = new Explorer();
 let toastTimer = null;
 

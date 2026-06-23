@@ -497,7 +497,7 @@ class Explorer {
     }
     const isPending = !!file.pending;
     const isTrash = !!file._trash;
-    const canShowThumb = !isPending && file.has_thumbnail && !ThumbCache.isFailed(file.id, file.thumbVersion);
+    const canShowThumb = !isPending && file.has_thumbnail && !ThumbCache.isFailed?.(file.id, file.thumbVersion);
     const thumbSrc = canShowThumb
       ? ThumbCache.resolveUrl(file.id, file.thumbVersion)
       : '';
@@ -627,7 +627,7 @@ class Explorer {
     if (img && file.has_thumbnail) {
       img.onerror = () => {
         file.has_thumbnail = false;
-        ThumbCache.markFailed(file.id, file.thumbVersion);
+        ThumbCache.markFailed?.(file.id, file.thumbVersion);
         fallbackThumbImage(img, file.name, file.is_folder);
       };
       ThumbCache.prefetch(file.id, file.thumbVersion).then((url) => {

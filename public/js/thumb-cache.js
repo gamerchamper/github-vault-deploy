@@ -103,6 +103,8 @@ const ThumbCache = {
   },
 };
 
+window.ThumbCache = ThumbCache;
+
 /** Replace a broken thumbnail img with the standard file icon. */
 function fallbackThumbImage(img, fileName, isFolder = false) {
   if (!img) return;
